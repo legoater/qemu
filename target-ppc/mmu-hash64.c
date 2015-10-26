@@ -666,7 +666,7 @@ static void ppc_hash64_set_dsi(CPUState *cs, CPUPPCState *env, uint64_t dar, uin
     } else {
         vpm = !!(env->spr[SPR_LPCR] & LPCR_VPM0);
     }
-    if (vpm && msr_hv) {
+    if (vpm && !msr_hv) {
         cs->exception_index = POWERPC_EXCP_HDSI;
         env->spr[SPR_HDAR] = dar;
         env->spr[SPR_HDSISR] = dsisr;
