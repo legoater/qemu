@@ -4458,8 +4458,11 @@ static inline void gen_op_mfspr(DisasContext *ctx)
             /* This is a hack to avoid warnings when running Linux:
              * this OS breaks the PowerPC virtualisation model,
              * allowing userland application to read the PVR
+             *
+             * Also avoid spamming if we're obviously running a HV
+             * that does full guest virtualization via PR.
              */
-            if (sprn != SPR_PVR) {
+            if (sprn != SPR_PVR && !ctx->hv) {
                 fprintf(stderr, "Trying to read privileged spr %d (0x%03x) at "
                         TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
                 if (qemu_log_separate()) {
@@ -4476,12 +4479,18 @@ static inline void gen_op_mfspr(DisasContext *ctx)
             /* This is a nop */
             return;
         }
-        /* Not defined */
-        fprintf(stderr, "Trying to read invalid spr %d (0x%03x) at "
-                TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
-        if (qemu_log_separate()) {
-            qemu_log("Trying to read invalid spr %d (0x%03x) at "
-                     TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
+
+        /*
+         * Not defined - don't spam if we're in PR and HV mode,
+         * which would indicate that a HV is running a guest.
+         */
+        if (!ctx->hv || !ctx->pr) {
+           fprintf(stderr, "Trying to read invalid spr %d (0x%03x) at "
+                   TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
+           if (qemu_log_separate()) {
+               qemu_log("Trying to read invalid spr %d (0x%03x) at "
+                        TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
+           }
         }
 
         /* The behaviour depends on MSR:PR and SPR# bit 0x10,
@@ -4622,12 +4631,17 @@ static void gen_mtspr(DisasContext *ctx)
         if (likely(write_cb != SPR_NOACCESS)) {
             (*write_cb)(ctx, sprn, rS(ctx->opcode));
         } else {
-            /* Privilege exception */
-            fprintf(stderr, "Trying to write privileged spr %d (0x%03x) at "
-                    TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
-            if (qemu_log_separate()) {
-                qemu_log("Trying to write privileged spr %d (0x%03x) at "
-                         TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
+            /*
+             * Privilege exception - don't spam if we're in PR and HV mode,
+             * which would indicate that a HV is running a guest.
+             */
+            if (!ctx->hv) {
+               fprintf(stderr, "Trying to write privileged spr %d (0x%03x) at "
+                       TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
+               if (qemu_log_separate()) {
+                   qemu_log("Trying to write privileged spr %d (0x%03x) at "
+                            TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
+               }
             }
             gen_priv_exception(ctx, POWERPC_EXCP_PRIV_REG);
         }
@@ -4639,13 +4653,18 @@ static void gen_mtspr(DisasContext *ctx)
             return;
         }
 
-        /* Not defined */
-        if (qemu_log_separate()) {
-            qemu_log("Trying to write invalid spr %d (0x%03x) at "
-                     TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
+        /*
+         * Not defined - don't spam if we're in PR and HV mode,
+         * which would indicate that a HV is running a guest.
+         */
+        if (!ctx->hv || !ctx->pr) {
+            if (qemu_log_separate()) {
+                qemu_log("Trying to write invalid spr %d (0x%03x) at "
+                         TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
+            }
+            fprintf(stderr, "Trying to write invalid spr %d (0x%03x) at "
+                    TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
         }
-        fprintf(stderr, "Trying to write invalid spr %d (0x%03x) at "
-                TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
 
         /* The behaviour depends on MSR:PR and SPR# bit 0x10,
          * it can generate a priv, a hv emu or a no-op
