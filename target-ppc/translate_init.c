@@ -294,6 +294,12 @@ static void spr_read_purr (DisasContext *ctx, int gprn, int sprn)
     gen_helper_load_purr(cpu_gpr[gprn], cpu_env);
 }
 
+__attribute__ (( unused ))
+static void spr_write_purr (DisasContext *ctx, int gprn, int sprn)
+{
+    // Temporary placeholder
+}
+
 /* HDECR */
 static void spr_read_hdecr (DisasContext *ctx, int gprn, int sprn)
 {
@@ -7975,14 +7981,16 @@ static void gen_spr_book3s_purr(CPUPPCState *env)
 {
 #if !defined(CONFIG_USER_ONLY)
     /* PURR & SPURR: Hack - treat these as aliases for the TB for now */
-    spr_register_kvm(env, SPR_PURR,   "PURR",
-                     &spr_read_purr, SPR_NOACCESS,
-                     &spr_read_purr, SPR_NOACCESS,
-                     KVM_REG_PPC_PURR, 0x00000000);
-    spr_register_kvm(env, SPR_SPURR,   "SPURR",
-                     &spr_read_purr, SPR_NOACCESS,
-                     &spr_read_purr, SPR_NOACCESS,
-                     KVM_REG_PPC_SPURR, 0x00000000);
+    spr_register_kvm_hv(env, SPR_PURR,   "PURR",
+                        SPR_NOACCESS, SPR_NOACCESS,
+                        &spr_read_purr, SPR_NOACCESS,
+                        &spr_read_purr, &spr_write_purr,
+                        KVM_REG_PPC_PURR, 0x00000000);
+    spr_register_kvm_hv(env, SPR_SPURR,   "SPURR",
+                        SPR_NOACCESS, SPR_NOACCESS,
+                        &spr_read_purr, SPR_NOACCESS,
+                        &spr_read_purr, &spr_write_purr,
+                        KVM_REG_PPC_SPURR, 0x00000000);
 #endif
 }
 
