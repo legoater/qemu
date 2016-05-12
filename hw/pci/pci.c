@@ -1304,7 +1304,9 @@ qemu_irq pci_allocate_irq(PCIDevice *pci_dev)
 void pci_set_irq(PCIDevice *pci_dev, int level)
 {
     int intx = pci_intx(pci_dev);
-    pci_irq_handler(pci_dev, intx, level);
+    if (intx >= 0) {
+        pci_irq_handler(pci_dev, intx, level);
+    }
 }
 
 /* Special hooks used by device assignment */
