@@ -205,6 +205,11 @@ static void xscom_write(void *opaque, hwaddr addr, uint64_t val,
     case 0x2020009:     /* ADU stuff */
     case 0x202000f:     /* ADU stuff */
         break;
+    case 0x2013028:     /* CAPP stuff */
+    case 0x201302a:     /* CAPP stuff */
+    case 0x2013801:     /* CAPP stuff */
+    case 0x2013802:     /* CAPP stuff */
+        break;
     default:
         if (!xscom_dispatch_write(s, pcba, val)) {
             xscom_complete(HMER_XSCOM_FAIL | HMER_XSCOM_DONE);
