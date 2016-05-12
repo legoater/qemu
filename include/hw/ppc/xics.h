@@ -32,20 +32,20 @@
 #define TYPE_XICS_COMMON "xics-common"
 #define XICS_COMMON(obj) OBJECT_CHECK(XICSState, (obj), TYPE_XICS_COMMON)
 
-#define TYPE_XICS "xics"
-#define XICS(obj) OBJECT_CHECK(XICSState, (obj), TYPE_XICS)
+#define TYPE_XICS_SPAPR "xics-spapr"
+#define XICS(obj) OBJECT_CHECK(XICSState, (obj), TYPE_XICS_SPAPR)
 
-#define TYPE_KVM_XICS "xics-kvm"
-#define KVM_XICS(obj) OBJECT_CHECK(KVMXICSState, (obj), TYPE_KVM_XICS)
+#define TYPE_XICS_SPAPR_KVM "xics-spapr-kvm"
+#define KVM_XICS(obj) OBJECT_CHECK(KVMXICSState, (obj), TYPE_XICS_SPAPR_KVM)
 
 #define XICS_COMMON_CLASS(klass) \
      OBJECT_CLASS_CHECK(XICSStateClass, (klass), TYPE_XICS_COMMON)
-#define XICS_CLASS(klass) \
-     OBJECT_CLASS_CHECK(XICSStateClass, (klass), TYPE_XICS)
+#define XICS_SPAPR_CLASS(klass) \
+     OBJECT_CLASS_CHECK(XICSStateClass, (klass), TYPE_XICS_SPAPR)
 #define XICS_COMMON_GET_CLASS(obj) \
      OBJECT_GET_CLASS(XICSStateClass, (obj), TYPE_XICS_COMMON)
-#define XICS_GET_CLASS(obj) \
-     OBJECT_GET_CLASS(XICSStateClass, (obj), TYPE_XICS)
+#define XICS_SPAPR_GET_CLASS(obj) \
+     OBJECT_GET_CLASS(XICSStateClass, (obj), TYPE_XICS_SPAPR)
 
 #define XICS_IPI        0x2
 #define XICS_BUID       0x1
@@ -157,14 +157,14 @@ struct ICSIRQState {
     uint8_t flags;
 };
 
-#define XICS_IRQS               1024
+#define XICS_IRQS_SPAPR               1024
 
 qemu_irq xics_get_qirq(XICSState *icp, int irq);
 void xics_set_irq_type(XICSState *icp, int irq, bool lsi);
-int xics_alloc(XICSState *icp, int src, int irq_hint, bool lsi, Error **errp);
-int xics_alloc_block(XICSState *icp, int src, int num, bool lsi, bool align,
+int xics_spapr_alloc(XICSState *icp, int src, int irq_hint, bool lsi, Error **errp);
+int xics_spapr_alloc_block(XICSState *icp, int src, int num, bool lsi, bool align,
                      Error **errp);
-void xics_free(XICSState *icp, int irq, int num);
+void xics_spapr_free(XICSState *icp, int irq, int num);
 
 void xics_cpu_setup(XICSState *icp, PowerPCCPU *cpu);
 

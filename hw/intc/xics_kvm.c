@@ -494,8 +494,8 @@ static void xics_kvm_class_init(ObjectClass *oc, void *data)
     xsc->set_nr_servers = xics_kvm_set_nr_servers;
 }
 
-static const TypeInfo xics_kvm_info = {
-    .name          = TYPE_KVM_XICS,
+static const TypeInfo xics_spapr_kvm_info = {
+    .name          = TYPE_XICS_SPAPR_KVM,
     .parent        = TYPE_XICS_COMMON,
     .instance_size = sizeof(KVMXICSState),
     .class_init    = xics_kvm_class_init,
@@ -504,7 +504,7 @@ static const TypeInfo xics_kvm_info = {
 
 static void xics_kvm_register_types(void)
 {
-    type_register_static(&xics_kvm_info);
+    type_register_static(&xics_spapr_kvm_info);
     type_register_static(&ics_kvm_info);
     type_register_static(&icp_kvm_info);
 }
