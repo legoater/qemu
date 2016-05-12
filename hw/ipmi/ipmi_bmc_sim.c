@@ -45,6 +45,7 @@
 #define IPMI_CMD_GET_SENSOR_READING       0x2d
 #define IPMI_CMD_SET_SENSOR_TYPE          0x2e
 #define IPMI_CMD_GET_SENSOR_TYPE          0x2f
+#define IPMI_CMD_SET_SENSOR_READING       0x30
 
 /* #define IPMI_NETFN_APP             0x06 In ipmi.h */
 
@@ -1744,6 +1745,137 @@ static void get_sensor_type(IPMIBmcSim *ibs,
     rsp_buffer_push(rsp, sens->evt_reading_type_code);
 }
 
+static void set_sensor_reading(IPMIBmcSim *ibs,
+                               uint8_t *cmd, unsigned int cmd_len,
+                               RspBuffer *rsp)
+{
+    IPMISensor *sens;
+    uint8_t evd1;
+    uint8_t evd2;
+    uint8_t evd3;
+
+    if ((cmd[2] > MAX_SENSORS) ||
+            !IPMI_SENSOR_GET_PRESENT(ibs->sensors + cmd[2])) {
+        rsp_buffer_set_error(rsp, IPMI_CC_REQ_ENTRY_NOT_PRESENT);
+        return;
+    }
+
+    sens = ibs->sensors + cmd[2];
+
+    /* Sensor Reading operation */
+    switch ((cmd[3]) & 0x3) {
+    case 0: /* Do not change */
+        break;
+    case 1: /* write given value to sensor reading byte */
+        sens->reading = cmd[4];
+        break;
+    case 2:
+    case 3:
+        rsp_buffer_set_error(rsp, IPMI_CC_INVALID_DATA_FIELD);
+        return;
+    }
+
+    /* Deassertion bits operation */
+    switch ((cmd[3] >> 2) & 0x3) {
+    case 0: /* Do not change */
+        break;
+    case 1: /* write given value */
+        if (cmd_len > 7) {
+            sens->deassert_states = cmd[7];
+        }
+        if (cmd_len > 8) {
+            sens->deassert_states = cmd[8] << 8;
+        }
+
+    case 2: /* mask on */
+        if (cmd_len > 7) {
+            sens->deassert_states |= cmd[7];
+        }
+        if (cmd_len > 8) {
+            sens->deassert_states |= cmd[8] << 8;
+        }
+        break;
+    case 3: /* mask off */
+        if (cmd_len > 7) {
+            sens->deassert_states &= cmd[7];
+        }
+        if (cmd_len > 8) {
+            sens->deassert_states &= (cmd[8] << 8);
+        }
+        break;
+    }
+
+    /* Assertion bits operation */
+    switch ((cmd[3] >> 4) & 0x3) {
+    case 0: /* Do not change */
+        break;
+    case 1: /* write given value */
+        if (cmd_len > 5) {
+            sens->assert_states = cmd[5];
+        }
+        if (cmd_len > 6) {
+            sens->assert_states = cmd[6] << 8;
+        }
+
+    case 2: /* mask on */
+        if (cmd_len > 5) {
+            sens->assert_states |= cmd[5];
+        }
+        if (cmd_len > 6) {
+            sens->assert_states |= cmd[6] << 8;
+        }
+        break;
+    case 3: /* mask off */
+        if (cmd_len > 5) {
+            sens->assert_states &= cmd[5];
+        }
+        if (cmd_len > 6) {
+            sens->assert_states &= (cmd[6] << 8);
+        }
+        break;
+    }
+
+    evd1 = evd2 = evd3 = 0x0;
+    if (cmd_len > 9) {
+        evd1 = cmd[9];
+    }
+    if (cmd_len > 10) {
+        evd2 = cmd[10];
+    }
+    if (cmd_len > 11) {
+        evd3 = cmd[11];
+    }
+
+    /* Event Data Bytes operation */
+    switch ((cmd[3] >> 6) & 0x3) {
+    case 0: /* Do not use the event data in message */
+        evd1 = evd2 = evd3 = 0x0;
+        break;
+    case 1: /* Write given values to event data bytes excluding bits
+             * [3:0] Event Data 1. */
+        evd1 &= 0xf0;
+        break;
+    case 2: /* Write given values to event data bytes including bits
+             * [3:0] Event Data 1. */
+        break;
+    case 3:
+        rsp_buffer_set_error(rsp, IPMI_CC_INVALID_DATA_FIELD);
+        return;
+    }
+
+    if (IPMI_SENSOR_IS_DISCRETE(sens)) {
+        unsigned int bit = evd1 & 0xf;
+        uint16_t mask = (1 << bit);
+
+        if (sens->assert_states & mask & sens->assert_enable) {
+            gen_event(ibs, cmd[2], 0, evd1, evd2, evd3);
+        }
+
+        if (sens->deassert_states & mask & sens->deassert_enable) {
+            gen_event(ibs, cmd[2], 1, evd1, evd2, evd3);
+        }
+    }
+}
 
 static const IPMICmdHandler chassis_cmds[] = {
     [IPMI_CMD_GET_CHASSIS_CAPABILITIES] = { chassis_capabilities },
@@ -1764,6 +1896,7 @@ static const IPMICmdHandler sensor_event_cmds[] = {
     [IPMI_CMD_GET_SENSOR_READING] = { get_sensor_reading, 3 },
     [IPMI_CMD_SET_SENSOR_TYPE] = { set_sensor_type, 5 },
     [IPMI_CMD_GET_SENSOR_TYPE] = { get_sensor_type, 3 },
+    [IPMI_CMD_SET_SENSOR_READING] = { set_sensor_reading, 5 },
 };
 static const IPMINetfn sensor_event_netfn = {
     .cmd_nums = ARRAY_SIZE(sensor_event_cmds),
