@@ -645,16 +645,30 @@ static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no,
     }
 }
 
+static int walk_isa_device(DeviceState *dev, void *fdt)
+{
+    return 0;
+}
+
 static void ppc_powernv_reset(void)
 {
     sPowerNVMachineState *pnv = POWERNV_MACHINE(qdev_get_machine());
     void *fdt;
+    Object *obj;
 
     qemu_devices_reset();
 
     fdt = g_malloc(FDT_MAX_SIZE);
 
     _FDT((fdt_open_into(pnv->fdt_skel, fdt, FDT_MAX_SIZE)));
+
+    obj = object_resolve_path_type("", TYPE_ISA_BUS, NULL);
+    if (!obj) {
+        fprintf(stderr, "no isa bus ?!\n");
+        return;
+    }
+
+    qbus_walk_children(BUS(obj), walk_isa_device, NULL, NULL, NULL, fdt);
 
     cpu_physical_memory_write(pnv->fdt_addr, fdt, fdt_totalsize(fdt));
 
