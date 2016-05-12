@@ -96,6 +96,8 @@ struct sPowerNVMachineState {
     /*< private >*/
     MachineState parent_obj;
     PnvSystem sys;
+    hwaddr fdt_addr;
+    void *fdt_skel;
 };
 
 static XICSState *try_create_xics(const char *type, int nr_servers,
@@ -643,6 +645,22 @@ static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no,
     }
 }
 
+static void ppc_powernv_reset(void)
+{
+    sPowerNVMachineState *pnv = POWERNV_MACHINE(qdev_get_machine());
+    void *fdt;
+
+    qemu_devices_reset();
+
+    fdt = g_malloc(FDT_MAX_SIZE);
+
+    _FDT((fdt_open_into(pnv->fdt_skel, fdt, FDT_MAX_SIZE)));
+
+    cpu_physical_memory_write(pnv->fdt_addr, fdt, fdt_totalsize(fdt));
+
+    g_free(fdt);
+}
+
 static void ppc_powernv_init(MachineState *machine)
 {
     ram_addr_t ram_size = machine->ram_size;
@@ -787,7 +805,8 @@ static void ppc_powernv_init(MachineState *machine)
     }
     fdt = powernv_create_fdt(sys, machine->kernel_cmdline,
                              initrd_base, initrd_size);
-    cpu_physical_memory_write(FDT_ADDR, fdt, fdt_totalsize(fdt));
+    pnv_machine->fdt_skel = fdt;
+    pnv_machine->fdt_addr = FDT_ADDR;
 }
 
 static int powernv_kvm_type(const char *vm_type)
@@ -819,6 +838,7 @@ static void powernv_machine_class_init(ObjectClass *oc, void *data)
     NMIClass *nc = NMI_CLASS(oc);
 
     mc->init = ppc_powernv_init;
+    mc->reset = ppc_powernv_reset;
     mc->block_default_type = IF_IDE;
     mc->max_cpus = MAX_CPUS;
     mc->no_parallel = 1;
