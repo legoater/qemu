@@ -413,7 +413,7 @@ static inline bool qbus_is_full(BusState *bus)
  * Return the bus if found, else %NULL.
  */
 static BusState *qbus_find_recursive(BusState *bus, const char *name,
-                                     const char *bus_typename)
+                                     const char *bus_typename, QemuOpts *opts)
 {
     BusChild *kid;
     BusState *pick, *child, *ret;
@@ -427,7 +427,10 @@ static BusState *qbus_find_recursive(BusState *bus, const char *name,
     }
 
     if (match && !qbus_is_full(bus)) {
-        return bus;             /* root matches and isn't full */
+        BusClass *bc = BUS_GET_CLASS(bus);
+        if (!bc->can_add_device || bc->can_add_device(bus, opts)) {
+            return bus;             /* root matches and isn't full */
+        }
     }
 
     pick = match ? bus : NULL;
@@ -435,7 +438,7 @@ static BusState *qbus_find_recursive(BusState *bus, const char *name,
     QTAILQ_FOREACH(kid, &bus->children, sibling) {
         DeviceState *dev = kid->child;
         QLIST_FOREACH(child, &dev->child_bus, sibling) {
-            ret = qbus_find_recursive(child, name, bus_typename);
+            ret = qbus_find_recursive(child, name, bus_typename, opts);
             if (ret && !qbus_is_full(ret)) {
                 return ret;     /* a descendant matches and isn't full */
             }
@@ -465,7 +468,7 @@ static BusState *qbus_find(const char *path, Error **errp)
             assert(!path[0]);
             elem[0] = len = 0;
         }
-        bus = qbus_find_recursive(sysbus_get_default(), elem, NULL);
+        bus = qbus_find_recursive(sysbus_get_default(), elem, NULL, NULL);
         if (!bus) {
             error_setg(errp, "Bus '%s' not found", elem);
             return NULL;
@@ -571,7 +574,7 @@ DeviceState *qdev_device_add(QemuOpts *opts, Error **errp)
             return NULL;
         }
     } else if (dc->bus_type != NULL) {
-        bus = qbus_find_recursive(sysbus_get_default(), NULL, dc->bus_type);
+        bus = qbus_find_recursive(sysbus_get_default(), NULL, dc->bus_type, opts);
         if (!bus || qbus_is_full(bus)) {
             error_setg(errp, "No '%s' bus found for device '%s'",
                        dc->bus_type, driver);

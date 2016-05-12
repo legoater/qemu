@@ -200,6 +200,7 @@ struct BusClass {
      */
     char *(*get_fw_dev_path)(DeviceState *dev);
     void (*reset)(BusState *bus);
+    bool (*can_add_device)(BusState *bus, QemuOpts *opts);
     BusRealize realize;
     BusUnrealize unrealize;
 
