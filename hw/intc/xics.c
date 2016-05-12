@@ -345,7 +345,7 @@ void icp_eoi(XICSState *xics, int server, uint32_t xirr)
     }
 }
 
-static void icp_irq(ICSState *ics, int server, int nr, uint8_t priority)
+void icp_irq(ICSState *ics, int server, int nr, uint8_t priority)
 {
     XICSState *xics = ics->xics;
     ICPState *ss = xics->ss + server;

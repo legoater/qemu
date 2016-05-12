@@ -26,6 +26,7 @@ typedef struct PnvLpcController PnvLpcController;
 typedef struct PnvPsiController PnvPsiController;
 typedef struct XICSState XICSState;
 typedef struct PnvOCCState PnvOCCState;
+typedef struct PCIBus PCIBus;
 
 /* Should we turn that into a QOjb of some sort ? */
 typedef struct PnvChip {
@@ -35,6 +36,8 @@ typedef struct PnvChip {
     ISABus           *lpc_bus;
     PnvPsiController *psi;
     PnvOCCState      *occ;
+#define PNV_MAX_CHIP_PHB	4
+    PCIBus           *phb[PNV_MAX_CHIP_PHB];
 } PnvChip;
 
 typedef struct PnvSystem {

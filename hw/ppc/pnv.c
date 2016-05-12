@@ -45,9 +45,15 @@
 #include "hw/ppc/xics.h"
 #include "hw/ppc/pnv_xscom.h"
 
+#include "hw/pci/pci.h"
+#include "hw/pci/pci_bus.h"
+#include "hw/pci/pci_bridge.h"
+#include "hw/pci/msi.h"
 #include "hw/isa/isa.h"
 #include "hw/char/serial.h"
 #include "hw/timer/mc146818rtc.h"
+#include "hw/pci-host/pnv_phb3.h"
+
 #include "exec/address-spaces.h"
 #include "qemu/config-file.h"
 #include "qapi/error.h"
@@ -511,9 +517,11 @@ static void pnv_lpc_irq_handler_cpld(void *opaque, int n, int level)
 }
 
 static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no,
-                            bool has_lpc, bool has_lpc_irq)
+                            bool has_lpc, bool has_lpc_irq,
+                            unsigned int num_phbs)
 {
     PnvChip *chip = &sys->chips[chip_no];
+    unsigned int i;
 
     if (chip_no >= PNV_MAX_CHIPS) {
             return;
@@ -549,6 +557,11 @@ static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no,
 
     /* Create the simplified OCC model */
     pnv_occ_create(chip);
+
+    /* Create a PCI, for now do one chip with 2 PHBs */
+    for (i = 0; i < num_phbs; i++) {
+        pnv_phb3_create(chip, sys->xics, i);
+    }
 }
 
 static void ppc_powernv_init(MachineState *machine)
@@ -571,6 +584,9 @@ static void ppc_powernv_init(MachineState *machine)
     char *filename;
     void *fdt;
     int i;
+
+    /* MSIs are supported on this platform */
+    msi_nonbroken = true;
 
     /* Set up Interrupt Controller before we create the VCPUs */
     xics = xics_system_init(smp_cpus * kvmppc_smt_threads() / smp_threads,
@@ -611,9 +627,9 @@ static void ppc_powernv_init(MachineState *machine)
      */
     sys->num_chips = 1;
 
-    /* Create only one chip for now with an LPC bus
+    /* Create only one chip for now with an LPC bus and one PHB
      */
-    pnv_create_chip(sys, 0, true, false);
+    pnv_create_chip(sys, 0, true, false, 1);
 
     /* Grab chip 0's ISA bus */
     isa_bus = sys->chips[0].lpc_bus;
