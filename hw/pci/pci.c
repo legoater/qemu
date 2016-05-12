@@ -110,6 +110,27 @@ static uint16_t pcibus_numa_node(PCIBus *bus)
     return NUMA_NODE_UNASSIGNED;
 }
 
+static bool pci_can_add_device(BusState *bus, QemuOpts *opts)
+{
+    unsigned int devfn, max;
+    PCIBus *pbus = PCI_BUS(bus);
+
+    /* If address is specified, say yes and let it fail if that doesn't work */
+    if (qemu_opt_get(opts, "addr") != NULL) {
+        return true;
+    }
+    max = ARRAY_SIZE(pbus->devices);
+    if (pbus->devfn_max && pbus->devfn_max < max) {
+       max = pbus->devfn_max;
+    }
+    for (devfn = pbus->devfn_min ; devfn < max; devfn += PCI_FUNC_MAX) {
+        if (!pbus->devices[devfn]) {
+            break;
+        }
+    }
+    return devfn < max;
+}
+
 static void pci_bus_class_init(ObjectClass *klass, void *data)
 {
     BusClass *k = BUS_CLASS(klass);
@@ -121,6 +142,7 @@ static void pci_bus_class_init(ObjectClass *klass, void *data)
     k->realize = pci_bus_realize;
     k->unrealize = pci_bus_unrealize;
     k->reset = pcibus_reset;
+    k->can_add_device = pci_can_add_device;
 
     pbc->is_root = pcibus_is_root;
     pbc->bus_num = pcibus_num;
