@@ -3640,6 +3640,16 @@ static void gen_rvwinkle(DisasContext *ctx)
     gen_stop_exception(ctx);
 #endif /* defined(CONFIG_USER_ONLY) */
 }
+
+static void gen_logmpp(DisasContext *ctx)
+{
+#if defined(CONFIG_USER_ONLY)
+    GEN_PRIV;
+#else
+    CHK_HV;
+    /* This doesn't do anything in emulation */
+#endif /* defined(CONFIG_USER_ONLY) */
+}
 #endif /* #if defined(TARGET_PPC64) */
 
 /***                         Floating-point load                           ***/
@@ -9924,6 +9934,14 @@ GEN_HANDLER_E(nap, 0x13, 0x12, 0x0d, 0x03FFF801, PPC_NONE, PPC2_PM_ISA206),
 GEN_HANDLER_E(sleep, 0x13, 0x12, 0x0e, 0x03FFF801, PPC_NONE, PPC2_PM_ISA206),
 GEN_HANDLER_E(rvwinkle, 0x13, 0x12, 0x0f, 0x03FFF801, PPC_NONE, PPC2_PM_ISA206),
 GEN_HANDLER(hrfid, 0x13, 0x12, 0x08, 0x03FF8001, PPC_64H),
+
+/* This should be P8 Book4, not ISA207S, but I don't want to add a bit for that
+ * one dummy instruction. Note also that there's a discrepancy between the
+ * P8 Book4 which documents it as using RA while KVM implementation uses RB,
+ * so for now mark both fields as valid
+ */
+//GEN_HANDLER_E(logmpp, 0x1f, 0x12, 0x1f, 0x03E0F800, PPC_NONE, PPC2_ISA207S),
+GEN_HANDLER_E(logmpp, 0x1f, 0x12, 0x1f, 0x03E00000, PPC_NONE, PPC2_ISA207S),
 #endif
 GEN_HANDLER(sc, 0x11, 0xFF, 0xFF, 0x03FFF01D, PPC_FLOW),
 GEN_HANDLER(tw, 0x1F, 0x04, 0x00, 0x00000001, PPC_FLOW),
