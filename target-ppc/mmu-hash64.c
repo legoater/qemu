@@ -218,6 +218,20 @@ static int ppc_load_slb_vsid(PowerPCCPU *cpu, target_ulong rb,
     return 0;
 }
 
+static int ppc_find_slb_esid(CPUPPCState *env, target_ulong rb,
+                             target_ulong *rt)
+{
+    PowerPCCPU *cpu = ppc_env_get_cpu(env);
+    ppc_slb_t *slb = slb_lookup(cpu, rb);
+
+    if (!slb) {
+        return -1;
+    }
+
+    *rt = slb->vsid;
+    return 0;
+}
+
 void helper_store_slb(CPUPPCState *env, target_ulong rb, target_ulong rs)
 {
     PowerPCCPU *cpu = ppc_env_get_cpu(env);
@@ -246,6 +260,17 @@ target_ulong helper_load_slb_vsid(CPUPPCState *env, target_ulong rb)
     target_ulong rt = 0;
 
     if (ppc_load_slb_vsid(cpu, rb, &rt) < 0) {
+        helper_raise_exception_err(env, POWERPC_EXCP_PROGRAM,
+                                   POWERPC_EXCP_INVAL);
+    }
+    return rt;
+}
+
+target_ulong helper_find_slb_esid(CPUPPCState *env, target_ulong rb)
+{
+    target_ulong rt = 0;
+
+    if (ppc_find_slb_esid(env, rb, &rt) < 0) {
         helper_raise_exception_err(env, POWERPC_EXCP_PROGRAM,
                                    POWERPC_EXCP_INVAL);
     }
