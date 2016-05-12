@@ -7532,16 +7532,6 @@ static void gen_spr_970_hior(CPUPPCState *env)
                  0x00000000);
 }
 
-static void gen_spr_970_lpar(CPUPPCState *env)
-{
-    /* Logical partitionning */
-    /* PPC970: HID4 is effectively the LPCR */
-    spr_register(env, SPR_970_HID4, "HID4",
-                 SPR_NOACCESS, SPR_NOACCESS,
-                 &spr_read_generic, &spr_write_generic,
-                 0x00000000);
-}
-
 static void gen_spr_book3s_common(CPUPPCState *env)
 {
     spr_register(env, SPR_CTRL, "SPR_CTRL",
@@ -7794,15 +7784,6 @@ static void gen_spr_power5p_ear(CPUPPCState *env)
                  0x00000000);
 }
 
-static void gen_spr_power5p_lpar(CPUPPCState *env)
-{
-    /* Logical partitionning */
-    spr_register_kvm(env, SPR_LPCR, "LPCR",
-                     SPR_NOACCESS, SPR_NOACCESS,
-                     &spr_read_generic, &spr_write_generic,
-                     KVM_REG_PPC_LPCR, LPCR_LPES0 | LPCR_LPES1);
-}
-
 #if !defined(CONFIG_USER_ONLY)
 static void spr_write_hmer(DisasContext *ctx, int sprn, int gprn)
 {
@@ -7814,7 +7795,44 @@ static void spr_write_hmer(DisasContext *ctx, int sprn, int gprn)
     spr_store_dump_spr(sprn);
     tcg_temp_free(hmer);
 }
+
+static void spr_write_lpcr(DisasContext *ctx, int sprn, int gprn)
+{
+    gen_helper_store_lpcr(cpu_env, cpu_gpr[gprn]);
+}
+
+static void spr_write_970_hid4(DisasContext *ctx, int sprn, int gprn)
+{
+#if defined (TARGET_PPC64)
+    spr_write_generic(ctx, sprn, gprn);
+    gen_helper_store_lpcr(cpu_env, cpu_gpr[gprn]);
 #endif
+}
+
+#endif /* !defined(CONFIG_USER_ONLY) */
+
+static void gen_spr_970_lpar(CPUPPCState *env)
+{
+#if !defined(CONFIG_USER_ONLY)
+    /* Logical partitionning */
+    /* PPC970: HID4 is effectively the LPCR */
+    spr_register(env, SPR_970_HID4, "HID4",
+                 SPR_NOACCESS, SPR_NOACCESS,
+                 &spr_read_generic, &spr_write_970_hid4,
+                 0x00000000);
+#endif
+}
+
+static void gen_spr_power5p_lpar(CPUPPCState *env)
+{
+#if !defined(CONFIG_USER_ONLY)
+    /* Logical partitionning */
+    spr_register_kvm(env, SPR_LPCR, "LPCR",
+                     SPR_NOACCESS, SPR_NOACCESS,
+                     &spr_read_generic, &spr_write_lpcr,
+                     KVM_REG_PPC_LPCR, LPCR_LPES0 | LPCR_LPES1);
+#endif
+}
 
 static void gen_spr_book3s_ids(CPUPPCState *env)
 {
@@ -8123,6 +8141,17 @@ static void gen_spr_power8_pspb(CPUPPCState *env)
                      KVM_REG_PPC_PSPB, 0);
 }
 
+static void gen_spr_power8_rpr(CPUPPCState *env)
+{
+#if !defined(CONFIG_USER_ONLY)
+    spr_register_hv(env, SPR_RPR, "RPR",
+                    SPR_NOACCESS, SPR_NOACCESS,
+                    SPR_NOACCESS, SPR_NOACCESS,
+                    &spr_read_generic, &spr_write_generic,
+                    0x00000103070F1F3F);
+#endif
+}
+
 static void gen_spr_power8_ic(CPUPPCState *env)
 {
 #if !defined(CONFIG_USER_ONLY)
@@ -8150,17 +8179,6 @@ static void gen_spr_power8_book4(CPUPPCState *env)
                      SPR_NOACCESS, SPR_NOACCESS,
                      &spr_read_generic, &spr_write_generic,
                      KVM_REG_PPC_WORT, 0);
-#endif
-}
-
-static void gen_spr_power8_rpr(CPUPPCState *env)
-{
-#if !defined(CONFIG_USER_ONLY)
-    spr_register_hv(env, SPR_RPR, "RPR",
-                    SPR_NOACCESS, SPR_NOACCESS,
-                    SPR_NOACCESS, SPR_NOACCESS,
-                    &spr_read_generic, &spr_write_generic,
-                    0x00000103070F1F3F);
 #endif
 }
 
