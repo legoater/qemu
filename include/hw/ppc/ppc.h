@@ -1,6 +1,8 @@
 #ifndef HW_PPC_H
 #define HW_PPC_H 1
 
+void ppc_hmp_info_pic(Monitor *mon, const QDict *qdict);
+
 void ppc_set_irq(PowerPCCPU *cpu, int n_IRQ, int level);
 
 /* PowerPC hardware exceptions management helpers */
