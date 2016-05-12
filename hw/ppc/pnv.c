@@ -42,11 +42,12 @@
 #include "hw/ppc/ppc.h"
 #include "hw/ppc/pnv.h"
 #include "hw/loader.h"
+#include "hw/ppc/xics.h"
 #include "hw/ppc/pnv_xscom.h"
 
 #include "exec/address-spaces.h"
 #include "qemu/config-file.h"
-#include "qemu/error-report.h"
+#include "qapi/error.h"
 #include "trace.h"
 #include "hw/nmi.h"
 
@@ -81,6 +82,59 @@ struct sPowerNVMachineState {
     MachineState parent_obj;
     PnvSystem sys;
 };
+
+static XICSState *try_create_xics(const char *type, int nr_servers,
+                                  int nr_irqs, Error **errp)
+{
+    Error *err = NULL;
+    DeviceState *dev;
+
+    dev = qdev_create(NULL, type);
+    qdev_prop_set_uint32(dev, "nr_servers", nr_servers);
+    object_property_set_bool(OBJECT(dev), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        object_unparent(OBJECT(dev));
+        return NULL;
+    }
+
+    return XICS_COMMON(dev);
+}
+
+static XICSState *xics_system_init(int nr_servers, int nr_irqs)
+{
+    XICSState *xics = NULL;
+
+#if 0 /* Some fixing needed to handle native ICS in KVM mode */
+    if (kvm_enabled()) {
+        QemuOpts *machine_opts = qemu_get_machine_opts();
+        bool irqchip_allowed = qemu_opt_get_bool(machine_opts,
+                                                "kernel_irqchip", true);
+        bool irqchip_required = qemu_opt_get_bool(machine_opts,
+                                                  "kernel_irqchip", false);
+        if (irqchip_allowed) {
+                icp = try_create_xics(TYPE_KVM_XICS, nr_servers, nr_irqs,
+                                      &error_abort);
+        }
+
+        if (irqchip_required && !icp) {
+            perror("Failed to create in-kernel XICS\n");
+            abort();
+        }
+    }
+#endif
+
+    if (!xics) {
+        xics = try_create_xics(TYPE_XICS_NATIVE, nr_servers, nr_irqs,
+                               &error_abort);
+    }
+
+    if (!xics) {
+        perror("Failed to create XICS\n");
+        abort();
+    }
+    return xics;
+}
 
 static size_t create_page_sizes_prop(CPUPPCState *env, uint32_t *prop,
                                      size_t maxsize)
@@ -370,6 +424,13 @@ static void *powernv_create_fdt(PnvSystem *sys, const char *kernel_cmdline, uint
 
     _FDT((fdt_end_node(fdt)));
 
+    /* ICPs */
+    CPU_FOREACH(cs) {
+        PowerPCCPU *cpu = POWERPC_CPU(cs);
+        uint32_t base_server = ppc_get_vcpu_dt_id(cpu);
+        xics_create_native_icp_node(sys->xics, fdt, base_server, smt);
+    }
+
     /* Memory */
     _FDT((powernv_populate_memory(fdt)));
 
@@ -455,10 +516,16 @@ static void ppc_powernv_init(MachineState *machine)
     MemoryRegion *ram = g_new(MemoryRegion, 1);
     sPowerNVMachineState *pnv_machine = POWERNV_MACHINE(machine);
     PnvSystem *sys = &pnv_machine->sys;
+    XICSState *xics;
     long fw_size;
     char *filename;
     void *fdt;
     int i;
+
+    /* Set up Interrupt Controller before we create the VCPUs */
+    xics = xics_system_init(smp_cpus * kvmppc_smt_threads() / smp_threads,
+                            XICS_IRQS_POWERNV);
+    sys->xics = xics;
 
     /* init CPUs */
     if (cpu_model == NULL) {
@@ -478,6 +545,8 @@ static void ppc_powernv_init(MachineState *machine)
 
         /* MSR[IP] doesn't exist nowadays */
         env->msr_mask &= ~(1 << 6);
+
+        xics_cpu_setup(xics, cpu);
 
         qemu_register_reset(powernv_cpu_reset, cpu);
     }

@@ -21,6 +21,7 @@
 
 #include "hw/hw.h"
 typedef struct XScomBus XScomBus;
+typedef struct XICSState XICSState;
 
 /* Should we turn that into a QOjb of some sort ? */
 typedef struct PnvChip {
@@ -29,6 +30,7 @@ typedef struct PnvChip {
 } PnvChip;
 
 typedef struct PnvSystem {
+    XICSState *xics;
     uint32_t  num_chips;
 #define PNV_MAX_CHIPS		1
     PnvChip   chips[PNV_MAX_CHIPS];

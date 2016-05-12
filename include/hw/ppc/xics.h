@@ -183,6 +183,8 @@ struct ICSIRQState {
 };
 
 #define XICS_IRQS_SPAPR               1024
+#define XICS_IRQS_POWERNV             (1 << 19)
+
 
 qemu_irq xics_get_qirq(XICSState *icp, int irq);
 
