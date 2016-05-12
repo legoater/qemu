@@ -53,6 +53,9 @@
 #include "hw/char/serial.h"
 #include "hw/timer/mc146818rtc.h"
 #include "hw/pci-host/pnv_phb3.h"
+#include "hw/usb.h"
+#include "hw/ide/pci.h"
+#include "hw/ide/ahci.h"
 
 #include "exec/address-spaces.h"
 #include "qemu/config-file.h"
@@ -86,6 +89,9 @@ typedef struct sPowerNVMachineState sPowerNVMachineState;
 /**
  * sPowerNVMachineState:
  */
+
+#define MAX_SATA_PORTS     6
+
 struct sPowerNVMachineState {
     /*< private >*/
     MachineState parent_obj;
@@ -496,6 +502,71 @@ static const VMStateDescription vmstate_powernv = {
     .minimum_version_id = 1,
 };
 
+/* Returns whether we want to use VGA or not */
+static int pnv_vga_init(PCIBus *pci_bus)
+{
+    switch (vga_interface_type) {
+    case VGA_NONE:
+        return false;
+    case VGA_DEVICE:
+        return true;
+    case VGA_STD:
+    case VGA_VIRTIO:
+        return pci_vga_init(pci_bus) != NULL;
+    default:
+        fprintf(stderr, "This vga model is not supported,"
+                "currently it only supports -vga std\n");
+        exit(0);
+    }
+}
+
+static void pnv_nic_init(PCIBus *pci_bus)
+{
+    int i;
+
+    for (i = 0; i < nb_nics; i++) {
+        NICInfo *nd = &nd_table[i];
+        DeviceState *dev;
+        PCIDevice *pdev;
+        Error *err = NULL;
+
+        pdev = pci_create(pci_bus, -1, "e1000");
+        dev = &pdev->qdev;
+        qdev_set_nic_properties(dev, nd);
+        object_property_set_bool(OBJECT(dev), true, "realized", &err);
+        if (err) {
+            error_report_err(err);
+            object_unparent(OBJECT(dev));
+            exit(1);
+        }
+    }
+}
+
+static void pnv_storage_init(PCIBus *pci_bus)
+{
+    DriveInfo *hd[MAX_SATA_PORTS];
+    PCIDevice *ahci;
+
+    /* Add an AHCI device. We use an ICH9 since that's all we have
+     * at hand for PCI AHCI but it shouldn't really matter
+     */
+    ahci = pci_create_simple(pci_bus, -1, "ich9-ahci");
+    g_assert(MAX_SATA_PORTS == ICH_AHCI(ahci)->ahci.ports);
+    ide_drive_get(hd, ICH_AHCI(ahci)->ahci.ports);
+    ahci_ide_create_devs(ahci, hd);
+}
+
+static PCIBus *pnv_create_pci_legacy_bridge(PCIBus *parent, uint8_t chassis_nr)
+{
+    PCIDevice *dev;
+
+    dev = pci_create_multifunction(parent, 0, false, "pci-bridge");
+    qdev_prop_set_uint8(&dev->qdev, "chassis_nr", chassis_nr);
+    dev->qdev.id = "pci";
+    qdev_init_nofail(&dev->qdev);
+    return pci_bridge_get_sec_bus(PCI_BRIDGE(dev));
+}
+
 static void pnv_lpc_irq_handler_cpld(void *opaque, int n, int level)
 {
 #define MAX_ISA_IRQ 16
@@ -579,7 +650,9 @@ static void ppc_powernv_init(MachineState *machine)
     sPowerNVMachineState *pnv_machine = POWERNV_MACHINE(machine);
     PnvSystem *sys = &pnv_machine->sys;
     XICSState *xics;
+    PCIBus *pbus;
     ISABus *isa_bus;
+    bool has_gfx = false;
     long fw_size;
     char *filename;
     void *fdt;
@@ -639,6 +712,30 @@ static void ppc_powernv_init(MachineState *machine)
 
     /* Create an RTC ISA device too */
     rtc_init(isa_bus, 2000, NULL);
+
+    /* Add a PCI switch */
+    pbus = pnv_create_pci_legacy_bridge(sys->chips[0].phb[0], 128);
+
+    /* Graphics */
+    if (pnv_vga_init(pbus)) {
+        has_gfx = true;
+        machine->usb |= defaults_enabled() && !machine->usb_disabled;
+    }
+    if (machine->usb) {
+        pci_create_simple(pbus, -1, "nec-usb-xhci");
+        if (has_gfx) {
+            USBBus *usb_bus = usb_bus_find(-1);
+
+            usb_create_simple(usb_bus, "usb-kbd");
+            usb_create_simple(usb_bus, "usb-mouse");
+        }
+    }
+
+    /* Add NIC */
+    pnv_nic_init(pbus);
+
+    /* Add storage */
+    pnv_storage_init(pbus);
 
     if (bios_name == NULL) {
         bios_name = FW_FILE_NAME;
@@ -714,7 +811,7 @@ static void powernv_machine_class_init(ObjectClass *oc, void *data)
     NMIClass *nc = NMI_CLASS(oc);
 
     mc->init = ppc_powernv_init;
-    mc->block_default_type = IF_SCSI;
+    mc->block_default_type = IF_IDE;
     mc->max_cpus = MAX_CPUS;
     mc->no_parallel = 1;
     mc->default_boot_order = NULL;
