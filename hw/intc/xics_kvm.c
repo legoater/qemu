@@ -313,7 +313,7 @@ static void ics_kvm_class_init(ObjectClass *klass, void *data)
 
 static const TypeInfo ics_kvm_info = {
     .name = TYPE_KVM_ICS,
-    .parent = TYPE_ICS,
+    .parent = TYPE_ICS_SIMPLE,
     .instance_size = sizeof(ICSState),
     .class_init = ics_kvm_class_init,
 };

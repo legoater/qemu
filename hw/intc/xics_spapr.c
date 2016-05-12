@@ -113,7 +113,7 @@ static void rtas_set_xive(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                           uint32_t nret, target_ulong rets)
 {
     ICSState *ics = QLIST_FIRST(&spapr->xics->ics);
-    uint32_t nr, server, priority;
+    uint32_t nr, src_no, server, priority;
 
     if ((nargs != 3) || (nret != 1) || !ics) {
         rtas_st(rets, 0, RTAS_OUT_PARAM_ERROR);
@@ -130,7 +130,8 @@ static void rtas_set_xive(PowerPCCPU *cpu, sPAPRMachineState *spapr,
         return;
     }
 
-    ics_write_xive(ics, nr, server, priority, priority);
+    src_no = nr - ics->offset;
+    ics_simple_write_xive(ics, src_no, server, priority, priority);
 
     rtas_st(rets, 0, RTAS_OUT_SUCCESS);
 }
@@ -141,7 +142,7 @@ static void rtas_get_xive(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                           uint32_t nret, target_ulong rets)
 {
     ICSState *ics = QLIST_FIRST(&spapr->xics->ics);
-    uint32_t nr;
+    uint32_t nr, src_no;
 
     if ((nargs != 1) || (nret != 3) || !ics) {
         rtas_st(rets, 0, RTAS_OUT_PARAM_ERROR);
@@ -156,8 +157,9 @@ static void rtas_get_xive(PowerPCCPU *cpu, sPAPRMachineState *spapr,
     }
 
     rtas_st(rets, 0, RTAS_OUT_SUCCESS);
-    rtas_st(rets, 1, ics->irqs[nr - ics->offset].server);
-    rtas_st(rets, 2, ics->irqs[nr - ics->offset].priority);
+    src_no = nr - ics->offset;
+    rtas_st(rets, 1, ics->irqs[src_no].server);
+    rtas_st(rets, 2, ics->irqs[src_no].priority);
 }
 
 static void rtas_int_off(PowerPCCPU *cpu, sPAPRMachineState *spapr,
@@ -166,7 +168,7 @@ static void rtas_int_off(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                          uint32_t nret, target_ulong rets)
 {
     ICSState *ics = QLIST_FIRST(&spapr->xics->ics);
-    uint32_t nr;
+    uint32_t nr, src_no;
 
     if ((nargs != 1) || (nret != 1) || !ics) {
         rtas_st(rets, 0, RTAS_OUT_PARAM_ERROR);
@@ -180,8 +182,9 @@ static void rtas_int_off(PowerPCCPU *cpu, sPAPRMachineState *spapr,
         return;
     }
 
-    ics_write_xive(ics, nr, ics->irqs[nr - ics->offset].server, 0xff,
-                   ics->irqs[nr - ics->offset].priority);
+    src_no = nr - ics->offset;
+    ics_simple_write_xive(ics, src_no, ics->irqs[src_no].server, 0xff,
+                          ics->irqs[src_no].priority);
 
     rtas_st(rets, 0, RTAS_OUT_SUCCESS);
 }
@@ -192,7 +195,7 @@ static void rtas_int_on(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                         uint32_t nret, target_ulong rets)
 {
     ICSState *ics = QLIST_FIRST(&spapr->xics->ics);
-    uint32_t nr;
+    uint32_t nr, src_no;
 
     if ((nargs != 1) || (nret != 1) || !ics) {
         rtas_st(rets, 0, RTAS_OUT_PARAM_ERROR);
@@ -206,9 +209,10 @@ static void rtas_int_on(PowerPCCPU *cpu, sPAPRMachineState *spapr,
         return;
     }
 
-    ics_write_xive(ics, nr, ics->irqs[nr - ics->offset].server,
-                   ics->irqs[nr - ics->offset].saved_priority,
-                   ics->irqs[nr - ics->offset].saved_priority);
+    src_no = nr - ics->offset;
+    ics_simple_write_xive(ics, src_no, ics->irqs[src_no].server,
+                          ics->irqs[src_no].saved_priority,
+                          ics->irqs[src_no].saved_priority);
 
     rtas_st(rets, 0, RTAS_OUT_SUCCESS);
 }
@@ -262,7 +266,7 @@ static void xics_spapr_initfn(Object *obj)
 
     QLIST_INIT(&xics->ics);
 
-    ics = ICS(object_new(TYPE_ICS));
+    ics = ICS(object_new(TYPE_ICS_SIMPLE));
     object_property_add_child(obj, "ics", OBJECT(ics), NULL);
     xics_add_ics(xics, ics);
 }
@@ -344,7 +348,7 @@ int xics_spapr_alloc(XICSState *xics, int irq_hint, bool lsi, Error **errp)
         irq += ics->offset;
     }
 
-    ics_set_irq_type(ics, irq - ics->offset, lsi);
+    ics_simple_set_irq_type(ics, irq - ics->offset, lsi);
     trace_xics_alloc(0, irq);
 
     return irq;
@@ -385,7 +389,7 @@ int xics_spapr_alloc_block(XICSState *xics, int num, bool lsi, bool align,
 
     if (first >= 0) {
         for (i = first; i < first + num; ++i) {
-            ics_set_irq_type(ics, i, lsi);
+            ics_simple_set_irq_type(ics, i, lsi);
         }
     }
     first += ics->offset;
