@@ -32,7 +32,6 @@
 #include "hw/hw.h"
 #include "trace.h"
 #include "qemu/timer.h"
-#include "hw/ppc/spapr.h"
 #include "hw/ppc/xics.h"
 #include "qemu/error-report.h"
 #include "qapi/visitor.h"
@@ -697,17 +696,6 @@ void ics_set_irq_type(ICSState *ics, int srcno, bool lsi)
 /*
  * XICS
  */
-
-void xics_set_nr_irqs(XICSState *xics, uint32_t nr_irqs, Error **errp)
-{
-    ICSState *ics = QLIST_FIRST(&xics->ics);
-
-    /* This needs to be deprecated ... */
-    xics->nr_irqs = nr_irqs;
-    if (ics) {
-        ics->nr_irqs = nr_irqs;
-    }
-}
 
 void xics_set_nr_servers(XICSState *xics, uint32_t nr_servers, Error **errp)
 {

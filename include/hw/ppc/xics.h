@@ -190,7 +190,6 @@ void ics_write_xive(ICSState *ics, int nr, int server,
 
 void ics_set_irq_type(ICSState *ics, int srcno, bool lsi);
 
-void xics_set_nr_irqs(XICSState *icp, uint32_t nr_irqs, Error **errp);
 void xics_set_nr_servers(XICSState *icp, uint32_t nr_servers, Error **errp);
 ICSState *xics_find_source(XICSState *icp, int irq);
 

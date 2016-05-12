@@ -472,6 +472,17 @@ fail:
     kvmppc_define_rtas_kernel_token(0, "ibm,int-off");
 }
 
+static void xics_kvm_set_nr_irqs(XICSState *xics, uint32_t nr_irqs, Error **errp)
+{
+    ICSState *ics = QLIST_FIRST(&xics->ics);
+
+    /* This needs to be deprecated ... */
+    xics->nr_irqs = nr_irqs;
+    if (ics) {
+        ics->nr_irqs = nr_irqs;
+    }
+}
+
 static void xics_kvm_initfn(Object *obj)
 {
     XICSState *xics = XICS_COMMON(obj);
@@ -492,7 +503,7 @@ static void xics_kvm_class_init(ObjectClass *oc, void *data)
 
     dc->realize = xics_kvm_realize;
     xsc->cpu_setup = xics_kvm_cpu_setup;
-    xsc->set_nr_irqs = xics_set_nr_irqs;
+    xsc->set_nr_irqs = xics_kvm_set_nr_irqs;
     xsc->set_nr_servers = xics_kvm_set_nr_servers;
 }
 

@@ -268,13 +268,24 @@ static void xics_spapr_initfn(Object *obj)
     QLIST_INSERT_HEAD(&xics->ics, ics, list);
 }
 
+static void xics_spapr_set_nr_irqs(XICSState *xics, uint32_t nr_irqs, Error **errp)
+{
+    ICSState *ics = QLIST_FIRST(&xics->ics);
+
+    /* This needs to be deprecated ... */
+    xics->nr_irqs = nr_irqs;
+    if (ics) {
+        ics->nr_irqs = nr_irqs;
+    }
+}
+
 static void xics_spapr_class_init(ObjectClass *oc, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
     XICSStateClass *xsc = XICS_SPAPR_CLASS(oc);
 
     dc->realize = xics_spapr_realize;
-    xsc->set_nr_irqs = xics_set_nr_irqs;
+    xsc->set_nr_irqs = xics_spapr_set_nr_irqs;
     xsc->set_nr_servers = xics_set_nr_servers;
 }
 
