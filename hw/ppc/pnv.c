@@ -34,6 +34,7 @@
 #include "sysemu/cpus.h"
 #include "sysemu/kvm.h"
 #include "sysemu/numa.h"
+#include "sysemu/device_tree.h"
 #include "kvm_ppc.h"
 #include "mmu-hash64.h"
 #include "qom/cpu.h"
@@ -64,6 +65,7 @@
 #include "hw/nmi.h"
 
 #include "hw/compat.h"
+#include "hw/ipmi/ipmi.h"
 
 #include <libfdt.h>
 
@@ -701,6 +703,55 @@ static int powernv_populate_serial(ISADevice *d, void *fdt, int lpc_off)
     return ret;
 }
 
+static int powernv_populate_ipmi_sensor(Object *objbmc, void *fdt)
+{
+    int node;
+    int ret;
+    int i;
+    const struct ipmi_sdr_compact *sdr;
+
+    node = qemu_fdt_add_subnode(fdt, "/bmc");
+    if (node <= 0) {
+        return -1;
+    }
+
+    ret = fdt_setprop_string(fdt, node, "name", "bmc");
+    ret |= fdt_setprop_cell(fdt, node, "#address-cells", 0x1);
+    ret |= fdt_setprop_cell(fdt, node, "#size-cells", 0x0);
+
+    node = fdt_add_subnode(fdt, node, "sensors");
+    if (node <= 0) {
+        return -1;
+    }
+    ret |= fdt_setprop_cell(fdt, node, "#address-cells", 0x1);
+    ret |= fdt_setprop_cell(fdt, node, "#size-cells", 0x0);
+
+    for (i = 0; !ipmi_bmc_sdr_find(IPMI_BMC(objbmc), i, &sdr, NULL); i++) {
+        int snode;
+        char sensor_name[32];
+
+        sprintf(sensor_name, "sensor@%x", sdr->sensor_owner_number);
+        snode = fdt_add_subnode(fdt, node, sensor_name);
+        if (snode <= 0) {
+            return -1;
+        }
+
+        ret |= fdt_setprop_cell(fdt, snode, "reg", sdr->sensor_owner_number);
+        ret |= fdt_setprop_string(fdt, snode, "name", "sensor");
+        ret |= fdt_setprop_string(fdt, snode, "compatible", "ibm,ipmi-sensor");
+        ret |= fdt_setprop_cell(fdt, snode, "ipmi-sensor-reading-type",
+                                sdr->reading_type);
+        ret |= fdt_setprop_cell(fdt, snode, "ipmi-entity-id",
+                                sdr->entity_id);
+        ret |= fdt_setprop_cell(fdt, snode, "ipmi-entity-instance",
+                                sdr->entity_instance);
+        ret |= fdt_setprop_cell(fdt, snode, "ipmi-sensor-type",
+                                sdr->sensor_type);
+    }
+
+    return ret;
+}
+
 static int powernv_populate_ipmi_bt(ISADevice *d, void *fdt, int lpc_off)
 {
     const char compatible[] = "bt\0ipmi-bt";
@@ -715,6 +766,7 @@ static int powernv_populate_ipmi_bt(ISADevice *d, void *fdt, int lpc_off)
     int node;
     int ret;
     Error *err = NULL;
+    Object *obj;
 
     io_base = object_property_get_int(OBJECT(d), "ioport", &err);
     if (err) {
@@ -741,6 +793,17 @@ static int powernv_populate_ipmi_bt(ISADevice *d, void *fdt, int lpc_off)
     ret |= fdt_setprop_cell(fdt, node, "interrupts", irq);
     ret |= fdt_setprop_cell(fdt, node, "interrupt-parent",
                             fdt_get_phandle(fdt, lpc_off));
+
+    /* a ipmi bt device necessarily comes with a bmc :
+     *   -device ipmi-bmc-sim,id=bmc0
+     */
+    obj = object_resolve_path_type("", "ipmi-bmc-sim", NULL);
+    if (obj) {
+        ret = powernv_populate_ipmi_sensor(obj, fdt);
+    } else {
+        fprintf(stderr, "bmc simulator is not running !?");
+    }
+
     return ret;
 }
 #if 0
