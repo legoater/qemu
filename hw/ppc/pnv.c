@@ -492,9 +492,22 @@ static const VMStateDescription vmstate_powernv = {
 
 static void pnv_lpc_irq_handler_cpld(void *opaque, int n, int level)
 {
-    /* We don't yet emulate the PSI bridge which provides the external
-     * interrupt, so just drop interrupts on the floor
-     */
+#define MAX_ISA_IRQ 16
+    static uint32_t irqstate;
+    uint32_t old_state = irqstate;
+    PnvPsiController *psi = opaque;
+
+    if (n >= MAX_ISA_IRQ) {
+        return;
+    }
+    if (level) {
+        irqstate |= 1u << n;
+    } else {
+        irqstate &= ~(1u << n);
+    }
+    if (irqstate != old_state) {
+        pnv_psi_irq_set(psi, PSIHB_IRQ_EXTERNAL, irqstate != 0);
+    }
 }
 
 static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no,
@@ -512,6 +525,9 @@ static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no,
     /* Set up XSCOM bus */
     xscom_create(chip);
 
+    /* Create PSI */
+    pnv_psi_create(chip, sys->xics);
+
     /* Create LPC controller */
     if (has_lpc) {
         pnv_lpc_create(chip, has_lpc_irq);
@@ -523,13 +539,11 @@ static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no,
          * have a CPLD that will collect the SerIRQ and shoot them as a
          * single level interrupt to the P8 chip. So let's setup a hook
          * for doing just that.
-         *
-         * Note: The actual interrupt input isn't emulated yet, this will
-         * come with the PSI bridge model.
          */
         if (!has_lpc_irq) {
             isa_bus_irqs(chip->lpc_bus,
-                         qemu_allocate_irqs(pnv_lpc_irq_handler_cpld, NULL, 16));
+                         qemu_allocate_irqs(pnv_lpc_irq_handler_cpld,
+                                            chip->psi, 16));
         }
     }
 }

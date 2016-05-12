@@ -23,6 +23,7 @@
 typedef struct XScomBus XScomBus;
 typedef struct ISABus ISABus;
 typedef struct PnvLpcController PnvLpcController;
+typedef struct PnvPsiController PnvPsiController;
 typedef struct XICSState XICSState;
 
 /* Should we turn that into a QOjb of some sort ? */
@@ -31,6 +32,7 @@ typedef struct PnvChip {
     XScomBus         *xscom;
     PnvLpcController *lpc;
     ISABus           *lpc_bus;
+    PnvPsiController *psi;
 } PnvChip;
 
 typedef struct PnvSystem {
@@ -41,5 +43,19 @@ typedef struct PnvSystem {
 } PnvSystem;
 
 extern void pnv_lpc_create(PnvChip *chip, bool has_serirq);
+extern void pnv_psi_create(PnvChip *chip, XICSState *xics);
+
+typedef enum PnvPsiIrq {
+    PSIHB_IRQ_PSI, /* internal use only */
+    PSIHB_IRQ_FSP, /* internal use only */
+    PSIHB_IRQ_OCC,
+    PSIHB_IRQ_FSI,
+    PSIHB_IRQ_LPC_I2C,
+    PSIHB_IRQ_LOCAL_ERR,
+    PSIHB_IRQ_EXTERNAL,
+} PnvPsiIrq;
+
+extern void pnv_psi_irq_set(PnvPsiController *psi, PnvPsiIrq irq, bool state);
+
 #endif /* _HW_PNV_LPC_H */
 
