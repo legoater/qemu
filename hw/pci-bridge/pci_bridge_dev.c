@@ -57,6 +57,8 @@ static int pci_bridge_dev_initfn(PCIDevice *dev)
     pci_bridge_initfn(dev, TYPE_PCI_BUS);
 
     if (bridge_dev->flags & (1 << PCI_BRIDGE_DEV_F_SHPC_REQ)) {
+        /* SHCP gets upset if we try to use slot 0 */
+        br->sec_bus.devfn_min = PCI_FUNC_MAX;
         dev->config[PCI_INTERRUPT_PIN] = 0x1;
         memory_region_init(&bridge_dev->bar, OBJECT(dev), "shpc-bar",
                            shpc_bar_size(dev));
