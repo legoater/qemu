@@ -276,6 +276,11 @@ static void powernv_create_cpu_node(void *fdt, CPUState *cs, int smt_threads)
     uint32_t page_sizes_prop[64];
     size_t page_sizes_prop_size;
     char *nodename;
+    const uint8_t pa_features[] = { 24, 0,
+                                    0xf6, 0x3f, 0xc7, 0xc0, 0x80, 0xf0,
+                                    0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                    0x00, 0x00, 0x00, 0x00, 0x80, 0x00,
+                                    0x80, 0x00, 0x80, 0x00, 0x80, 0x00 };
 
     if ((index % smt_threads) != 0) {
         return;
@@ -349,6 +354,9 @@ static void powernv_create_cpu_node(void *fdt, CPUState *cs, int smt_threads)
         _FDT((fdt_property(fdt, "ibm,segment-page-sizes",
                            page_sizes_prop, page_sizes_prop_size)));
     }
+
+    _FDT((fdt_property(fdt, "ibm,pa-features",
+                       pa_features, sizeof(pa_features))));
 
     /* XXX Just a hack for now */
     _FDT((fdt_property_cell(fdt, "ibm,chip-id", 0)));

@@ -10278,6 +10278,7 @@ static void ppc_cpu_initfn(Object *obj)
             },
         };
         env->sps = (env->mmu_model & POWERPC_MMU_64K) ? defsps_64k : defsps_4k;
+	env->ci_large_pages = env->mmu_model >= POWERPC_MMU_2_06;
     }
 #endif /* defined(TARGET_PPC64) */
 
