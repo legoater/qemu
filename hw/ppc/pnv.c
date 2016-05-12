@@ -100,6 +100,7 @@ struct sPowerNVMachineState {
     PnvSystem sys;
     hwaddr fdt_addr;
     void *fdt_skel;
+    Notifier powerdown_notifier;
 };
 
 static XICSState *try_create_xics(const char *type, int nr_servers,
@@ -851,6 +852,55 @@ static int walk_isa_device(DeviceState *dev, void *fdt)
     return 0;
 }
 
+/*
+ * OEM SEL Event data packet sent by BMC in response of a Read Event
+ * Message Buffer command
+ */
+struct oem_sel {
+    /* SEL header */
+    uint8_t id[2];
+    uint8_t type;
+    uint8_t timestamp[4];
+    uint8_t manuf_id[3];
+    /* OEM SEL data (6 bytes) follows */
+    uint8_t netfun;
+    uint8_t cmd;
+    uint8_t data[4];
+};
+
+#define SOFT_OFF               0x00
+#define SOFT_REBOOT            0x01
+
+static void pnv_gen_oem_sel(uint8_t reboot)
+{
+    Object *obj;
+    uint8_t evt[16];
+    struct oem_sel sel = {
+        .id     = { 0x55 , 0x55 },
+        .type           = 0xC0, /* OEM */
+        .manuf_id       = { 0x0, 0x0, 0x0 },
+        .timestamp      = { 0x0, 0x0, 0x0, 0x0 },
+        .netfun         = 0x3a, /* IBM */
+        .cmd            = 0x04, /* AMI OEM SEL Power Notification */
+        .data           = { reboot, 0xFF, 0xFF, 0xFF },
+    };
+
+    obj = object_resolve_path_type("", "ipmi-bmc-sim", NULL);
+    if (!obj) {
+        fprintf(stderr, "bmc simulator is not running\n");
+        return;
+    }
+
+    memcpy(evt, &sel, 16);
+    ipmi_bmc_gen_event(IPMI_BMC(obj), evt, 0 /* do not log the event */);
+}
+
+static void pnv_powerdown_notify(Notifier *n, void *opaque)
+{
+    pnv_gen_oem_sel(SOFT_OFF);
+}
+
+
 static void ppc_powernv_reset(void)
 {
     sPowerNVMachineState *pnv = POWERNV_MACHINE(qdev_get_machine());
@@ -1022,6 +1072,9 @@ static void ppc_powernv_init(MachineState *machine)
                              initrd_base, initrd_size);
     pnv_machine->fdt_skel = fdt;
     pnv_machine->fdt_addr = FDT_ADDR;
+
+    pnv_machine->powerdown_notifier.notify = pnv_powerdown_notify;
+    qemu_register_powerdown_notifier(&pnv_machine->powerdown_notifier);
 }
 
 static int powernv_kvm_type(const char *vm_type)
