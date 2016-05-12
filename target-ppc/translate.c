@@ -323,7 +323,19 @@ static inline void gen_debug_exception(DisasContext *ctx)
 
 static inline void gen_inval_exception(DisasContext *ctx, uint32_t error)
 {
-    gen_exception_err(ctx, POWERPC_EXCP_PROGRAM, POWERPC_EXCP_INVAL | error);
+    /* Will be converted to program check if needed */
+    gen_exception_err(ctx, POWERPC_EXCP_HV_EMU, POWERPC_EXCP_INVAL | error);
+}
+
+static inline void gen_priv_exception(DisasContext *ctx, uint32_t error)
+{
+    gen_exception_err(ctx, POWERPC_EXCP_PROGRAM, POWERPC_EXCP_PRIV | error);
+}
+
+static inline void gen_hvpriv_exception(DisasContext *ctx, uint32_t error)
+{
+    /* Will be converted to program check if needed */
+    gen_exception_err(ctx, POWERPC_EXCP_HV_EMU, POWERPC_EXCP_PRIV | error);
 }
 
 /* Stop translation */
@@ -363,6 +375,20 @@ typedef struct opcode_t {
     opc_handler_t handler;
     const char *oname;
 } opcode_t;
+
+/* Helpers for priv. check */
+#define GEN_PRIV do { gen_priv_exception(ctx, POWERPC_EXCP_PRIV_OPC); return; } while(0)
+
+#if defined(CONFIG_USER_ONLY)
+#define CHK_HV GEN_PRIV
+#define CHK_SV GEN_PRIV
+#else
+#define CHK_HV do { if (unlikely(ctx->pr || !ctx->hv)) GEN_PRIV; } while(0)
+#define CHK_SV do { if (unlikely(ctx->pr))  GEN_PRIV; }  while(0)
+#endif
+
+#define CHK_NONE
+
 
 /*****************************************************************************/
 /***                           Instruction decoding                        ***/
@@ -2965,7 +2991,7 @@ static void gen_lq(DisasContext *ctx)
     bool le_is_supported = (ctx->insns_flags2 & PPC2_LSQ_ISA207) != 0;
 
     if (!legal_in_user_mode && ctx->pr) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+        gen_priv_exception(ctx, POWERPC_EXCP_PRIV_OPC);
         return;
     }
 
@@ -3088,7 +3114,7 @@ static void gen_std(DisasContext *ctx)
         bool le_is_supported = (ctx->insns_flags2 & PPC2_LSQ_ISA207) != 0;
 
         if (!legal_in_user_mode && ctx->pr) {
-            gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+            gen_priv_exception(ctx, POWERPC_EXCP_PRIV_OPC);
             return;
         }
 
@@ -4099,7 +4125,7 @@ static void gen_mcrf(DisasContext *ctx)
 static void gen_rfi(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     /* This instruction doesn't exist anymore on 64-bit server
      * processors compliant with arch 2.x
@@ -4109,10 +4135,7 @@ static void gen_rfi(DisasContext *ctx)
         return;
     }
     /* Restore CPU state */
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     gen_update_cfar(ctx, ctx->nip);
     gen_helper_rfi(cpu_env);
     gen_sync_exception(ctx);
@@ -4123,13 +4146,10 @@ static void gen_rfi(DisasContext *ctx)
 static void gen_rfid(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     /* Restore CPU state */
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     gen_update_cfar(ctx, ctx->nip);
     gen_helper_rfid(cpu_env);
     gen_sync_exception(ctx);
@@ -4139,13 +4159,10 @@ static void gen_rfid(DisasContext *ctx)
 static void gen_hrfid(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     /* Restore CPU state */
-    if (unlikely(!ctx->hv)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_HV;
     gen_helper_hrfid(cpu_env);
     gen_sync_exception(ctx);
 #endif
@@ -4308,15 +4325,8 @@ static void gen_mfcr(DisasContext *ctx)
 /* mfmsr */
 static void gen_mfmsr(DisasContext *ctx)
 {
-#if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-#else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+    CHK_SV;
     tcg_gen_mov_tl(cpu_gpr[rD(ctx->opcode)], cpu_msr);
-#endif
 }
 
 static void spr_noaccess(DisasContext *ctx, int gprn, int sprn)
@@ -4362,9 +4372,15 @@ static inline void gen_op_mfspr(DisasContext *ctx)
                              TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
                 }
             }
-            gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+            gen_priv_exception(ctx, POWERPC_EXCP_PRIV_REG);
         }
     } else {
+        /* ISA 2.07 defines these as no-ops */
+        if ((ctx->insns_flags2 & PPC2_ISA207S) &&
+            (sprn >= 808 && sprn <= 811)) {
+            /* This is a nop */
+            return;
+        }
         /* Not defined */
         fprintf(stderr, "Trying to read invalid spr %d (0x%03x) at "
                 TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
@@ -4372,7 +4388,19 @@ static inline void gen_op_mfspr(DisasContext *ctx)
             qemu_log("Trying to read invalid spr %d (0x%03x) at "
                      TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
         }
-        gen_inval_exception(ctx, POWERPC_EXCP_INVAL_SPR);
+
+        /* The behaviour depends on MSR:PR and SPR# bit 0x10,
+         * it can generate a priv, a hv emu or a no-op
+         */
+        if (sprn & 0x10) {
+            if (ctx->pr) {
+                gen_priv_exception(ctx, POWERPC_EXCP_INVAL_SPR);
+            }
+        } else {
+            if (ctx->pr || sprn == 0 || sprn == 4 || sprn == 5 || sprn == 6) {
+                gen_hvpriv_exception(ctx, POWERPC_EXCP_INVAL_SPR);
+            }
+        }
     }
 }
 
@@ -4419,13 +4447,9 @@ static void gen_mtcrf(DisasContext *ctx)
 #if defined(TARGET_PPC64)
 static void gen_mtmsrd(DisasContext *ctx)
 {
-#if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-#else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+    CHK_SV;
+
+#if !defined(CONFIG_USER_ONLY)
     if (ctx->opcode & 0x00010000) {
         /* Special form that does not need any synchronisation */
         TCGv t0 = tcg_temp_new();
@@ -4444,20 +4468,16 @@ static void gen_mtmsrd(DisasContext *ctx)
         /* Note that mtmsr is not always defined as context-synchronizing */
         gen_stop_exception(ctx);
     }
-#endif
+#endif /* !defined(CONFIG_USER_ONLY) */
 }
-#endif
+#endif /* defined(TARGET_PPC64) */
 
 static void gen_mtmsr(DisasContext *ctx)
 {
-#if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-#else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
-    if (ctx->opcode & 0x00010000) {
+    CHK_SV;
+
+#if !defined(CONFIG_USER_ONLY)
+   if (ctx->opcode & 0x00010000) {
         /* Special form that does not need any synchronisation */
         TCGv t0 = tcg_temp_new();
         tcg_gen_andi_tl(t0, cpu_gpr[rS(ctx->opcode)], (1 << MSR_RI) | (1 << MSR_EE));
@@ -4514,9 +4534,16 @@ static void gen_mtspr(DisasContext *ctx)
                 qemu_log("Trying to write privileged spr %d (0x%03x) at "
                          TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
             }
-            gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+            gen_priv_exception(ctx, POWERPC_EXCP_PRIV_REG);
         }
     } else {
+        /* ISA 2.07 defines these as no-ops */
+        if ((ctx->insns_flags2 & PPC2_ISA207S) &&
+            (sprn >= 808 && sprn <= 811)) {
+            /* This is a nop */
+            return;
+        }
+
         /* Not defined */
         if (qemu_log_separate()) {
             qemu_log("Trying to write invalid spr %d (0x%03x) at "
@@ -4524,7 +4551,19 @@ static void gen_mtspr(DisasContext *ctx)
         }
         fprintf(stderr, "Trying to write invalid spr %d (0x%03x) at "
                 TARGET_FMT_lx "\n", sprn, sprn, ctx->nip - 4);
-        gen_inval_exception(ctx, POWERPC_EXCP_INVAL_SPR);
+
+        /* The behaviour depends on MSR:PR and SPR# bit 0x10,
+         * it can generate a priv, a hv emu or a no-op
+         */
+        if (sprn & 0x10) {
+            if (ctx->pr) {
+                gen_priv_exception(ctx, POWERPC_EXCP_INVAL_SPR);
+            }
+        } else {
+            if (ctx->pr || sprn == 0) {
+                gen_hvpriv_exception(ctx, POWERPC_EXCP_INVAL_SPR);
+            }
+        }
     }
 }
 
@@ -4546,13 +4585,11 @@ static void gen_dcbf(DisasContext *ctx)
 static void gen_dcbi(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     TCGv EA, val;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+
+    CHK_SV;
     EA = tcg_temp_new();
     gen_set_access_type(ctx, ACCESS_CACHE);
     gen_addr_reg_index(ctx, EA);
@@ -4562,7 +4599,7 @@ static void gen_dcbi(DisasContext *ctx)
     gen_qemu_st8(ctx, val, EA);
     tcg_temp_free(val);
     tcg_temp_free(EA);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* dcdst */
@@ -4683,72 +4720,64 @@ static void gen_dcba(DisasContext *ctx)
 static void gen_mfsr(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_const_tl(SR(ctx->opcode));
     gen_helper_load_sr(cpu_gpr[rD(ctx->opcode)], cpu_env, t0);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* mfsrin */
 static void gen_mfsrin(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_temp_new();
     tcg_gen_shri_tl(t0, cpu_gpr[rB(ctx->opcode)], 28);
     tcg_gen_andi_tl(t0, t0, 0xF);
     gen_helper_load_sr(cpu_gpr[rD(ctx->opcode)], cpu_env, t0);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* mtsr */
 static void gen_mtsr(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_const_tl(SR(ctx->opcode));
     gen_helper_store_sr(cpu_env, t0, cpu_gpr[rS(ctx->opcode)]);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* mtsrin */
 static void gen_mtsrin(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+    CHK_SV;
+
     t0 = tcg_temp_new();
     tcg_gen_shri_tl(t0, cpu_gpr[rB(ctx->opcode)], 28);
     tcg_gen_andi_tl(t0, t0, 0xF);
     gen_helper_store_sr(cpu_env, t0, cpu_gpr[rD(ctx->opcode)]);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 #if defined(TARGET_PPC64)
@@ -4758,115 +4787,101 @@ static void gen_mtsrin(DisasContext *ctx)
 static void gen_mfsr_64b(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_const_tl(SR(ctx->opcode));
     gen_helper_load_sr(cpu_gpr[rD(ctx->opcode)], cpu_env, t0);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* mfsrin */
 static void gen_mfsrin_64b(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_temp_new();
     tcg_gen_shri_tl(t0, cpu_gpr[rB(ctx->opcode)], 28);
     tcg_gen_andi_tl(t0, t0, 0xF);
     gen_helper_load_sr(cpu_gpr[rD(ctx->opcode)], cpu_env, t0);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* mtsr */
 static void gen_mtsr_64b(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_const_tl(SR(ctx->opcode));
     gen_helper_store_sr(cpu_env, t0, cpu_gpr[rS(ctx->opcode)]);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* mtsrin */
 static void gen_mtsrin_64b(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_temp_new();
     tcg_gen_shri_tl(t0, cpu_gpr[rB(ctx->opcode)], 28);
     tcg_gen_andi_tl(t0, t0, 0xF);
     gen_helper_store_sr(cpu_env, t0, cpu_gpr[rS(ctx->opcode)]);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* slbmte */
 static void gen_slbmte(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+    CHK_SV;
+
     gen_helper_store_slb(cpu_env, cpu_gpr[rB(ctx->opcode)],
                          cpu_gpr[rS(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 static void gen_slbmfee(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+    CHK_SV;
+
     gen_helper_load_slb_esid(cpu_gpr[rS(ctx->opcode)], cpu_env,
                              cpu_gpr[rB(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 static void gen_slbmfev(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+    CHK_SV;
+
     gen_helper_load_slb_vsid(cpu_gpr[rS(ctx->opcode)], cpu_env,
                              cpu_gpr[rB(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 #endif /* defined(TARGET_PPC64) */
 
@@ -4877,40 +4892,34 @@ static void gen_slbmfev(DisasContext *ctx)
 static void gen_tlbia(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr || !ctx->hv)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_HV;
+
     gen_helper_tlbia(cpu_env);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* tlbiel */
 static void gen_tlbiel(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr || !ctx->hv)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
+
     gen_helper_tlbie(cpu_env, cpu_gpr[rB(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* tlbie */
 static void gen_tlbie(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr || !ctx->hv)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_HV;
+
     if (NARROW_MODE(ctx)) {
         TCGv t0 = tcg_temp_new();
         tcg_gen_ext32u_tl(t0, cpu_gpr[rB(ctx->opcode)]);
@@ -4919,56 +4928,52 @@ static void gen_tlbie(DisasContext *ctx)
     } else {
         gen_helper_tlbie(cpu_env, cpu_gpr[rB(ctx->opcode)]);
     }
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* tlbsync */
 static void gen_tlbsync(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_HV;
+
     /* tlbsync is a nop for server, ptesync handles delayed tlb flush,
      * embedded however needs to deal with tlbsync. We don't try to be
      * fancy and swallow the overhead of checking for both.
      */
     gen_check_tlb_flush(ctx);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 #if defined(TARGET_PPC64)
+
 /* slbia */
 static void gen_slbia(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
+
     gen_helper_slbia(cpu_env);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* slbie */
 static void gen_slbie(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
+
     gen_helper_slbie(cpu_env, cpu_gpr[rB(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
-#endif
+
+#endif /* defined(TARGET_PPC64) */
 
 /***                              External control                         ***/
 /* Optional: */
@@ -5667,14 +5672,11 @@ static void gen_esa(DisasContext *ctx)
 static void gen_mfrom(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     gen_helper_602_mfrom(cpu_gpr[rD(ctx->opcode)], cpu_gpr[rA(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* 602 - 603 - G2 TLB management */
@@ -5683,28 +5685,22 @@ static void gen_mfrom(DisasContext *ctx)
 static void gen_tlbld_6xx(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     gen_helper_6xx_tlbd(cpu_env, cpu_gpr[rB(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* tlbli */
 static void gen_tlbli_6xx(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     gen_helper_6xx_tlbi(cpu_env, cpu_gpr[rB(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* 74xx TLB management */
@@ -5713,28 +5709,22 @@ static void gen_tlbli_6xx(DisasContext *ctx)
 static void gen_tlbld_74xx(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     gen_helper_74xx_tlbd(cpu_env, cpu_gpr[rB(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* tlbli */
 static void gen_tlbli_74xx(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     gen_helper_74xx_tlbi(cpu_env, cpu_gpr[rB(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* POWER instructions not in PowerPC 601 */
@@ -5748,15 +5738,12 @@ static void gen_clf(DisasContext *ctx)
 /* cli */
 static void gen_cli(DisasContext *ctx)
 {
-    /* Cache line invalidate: privileged and treated as no-op */
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
-#endif
+    /* Cache line invalidate: privileged and treated as no-op */
+    CHK_SV;
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* dclst */
@@ -5768,15 +5755,13 @@ static void gen_dclst(DisasContext *ctx)
 static void gen_mfsri(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     int ra = rA(ctx->opcode);
     int rd = rD(ctx->opcode);
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_temp_new();
     gen_addr_reg_index(ctx, t0);
     tcg_gen_shri_tl(t0, t0, 28);
@@ -5785,38 +5770,34 @@ static void gen_mfsri(DisasContext *ctx)
     tcg_temp_free(t0);
     if (ra != 0 && ra != rd)
         tcg_gen_mov_tl(cpu_gpr[ra], cpu_gpr[rd]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 static void gen_rac(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_temp_new();
     gen_addr_reg_index(ctx, t0);
     gen_helper_rac(cpu_gpr[rD(ctx->opcode)], cpu_env, t0);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 static void gen_rfsvc(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
+
     gen_helper_rfsvc(cpu_env);
     gen_sync_exception(ctx);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* svc is not implemented for now */
@@ -5969,18 +5950,16 @@ static void gen_mfapidi(DisasContext *ctx)
 static void gen_tlbiva(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_temp_new();
     gen_addr_reg_index(ctx, t0);
     gen_helper_tlbiva(cpu_env, cpu_gpr[rB(ctx->opcode)]);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* All 405 MAC instructions are translated here */
@@ -6202,38 +6181,34 @@ GEN_MAC_HANDLER(mullhwu, 0x08, 0x0C);
 static void gen_mfdcr(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
     TCGv dcrn;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+
+    CHK_SV;
     /* NIP cannot be restored if the memory exception comes from an helper */
     gen_update_nip(ctx, ctx->nip - 4);
     dcrn = tcg_const_tl(SPR(ctx->opcode));
     gen_helper_load_dcr(cpu_gpr[rD(ctx->opcode)], cpu_env, dcrn);
     tcg_temp_free(dcrn);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* mtdcr */
 static void gen_mtdcr(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
     TCGv dcrn;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+
+    CHK_SV;
     /* NIP cannot be restored if the memory exception comes from an helper */
     gen_update_nip(ctx, ctx->nip - 4);
     dcrn = tcg_const_tl(SPR(ctx->opcode));
     gen_helper_store_dcr(cpu_env, dcrn, cpu_gpr[rS(ctx->opcode)]);
     tcg_temp_free(dcrn);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* mfdcrx */
@@ -6241,18 +6216,15 @@ static void gen_mtdcr(DisasContext *ctx)
 static void gen_mfdcrx(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+    CHK_SV;
     /* NIP cannot be restored if the memory exception comes from an helper */
     gen_update_nip(ctx, ctx->nip - 4);
     gen_helper_load_dcr(cpu_gpr[rD(ctx->opcode)], cpu_env,
                         cpu_gpr[rA(ctx->opcode)]);
     /* Note: Rc update flag set leads to undefined state of Rc0 */
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* mtdcrx */
@@ -6260,18 +6232,15 @@ static void gen_mfdcrx(DisasContext *ctx)
 static void gen_mtdcrx(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
-        return;
-    }
+    CHK_SV;
     /* NIP cannot be restored if the memory exception comes from an helper */
     gen_update_nip(ctx, ctx->nip - 4);
     gen_helper_store_dcr(cpu_env, cpu_gpr[rA(ctx->opcode)],
                          cpu_gpr[rS(ctx->opcode)]);
     /* Note: Rc update flag set leads to undefined state of Rc0 */
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* mfdcrux (PPC 460) : user-mode access to DCR */
@@ -6297,28 +6266,19 @@ static void gen_mtdcrux(DisasContext *ctx)
 /* dccci */
 static void gen_dccci(DisasContext *ctx)
 {
-#if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-#else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     /* interpreted as no-op */
-#endif
 }
 
 /* dcread */
 static void gen_dcread(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     TCGv EA, val;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+
+    CHK_SV;
     gen_set_access_type(ctx, ACCESS_CACHE);
     EA = tcg_temp_new();
     gen_addr_reg_index(ctx, EA);
@@ -6327,7 +6287,7 @@ static void gen_dcread(DisasContext *ctx)
     tcg_temp_free(val);
     tcg_gen_mov_tl(cpu_gpr[rD(ctx->opcode)], EA);
     tcg_temp_free(EA);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* icbt */
@@ -6342,60 +6302,40 @@ static void gen_icbt_40x(DisasContext *ctx)
 /* iccci */
 static void gen_iccci(DisasContext *ctx)
 {
-#if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-#else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     /* interpreted as no-op */
-#endif
 }
 
 /* icread */
 static void gen_icread(DisasContext *ctx)
 {
-#if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-#else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     /* interpreted as no-op */
-#endif
 }
 
 /* rfci (supervisor only) */
 static void gen_rfci_40x(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     /* Restore CPU state */
     gen_helper_40x_rfci(cpu_env);
     gen_sync_exception(ctx);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 static void gen_rfci(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     /* Restore CPU state */
     gen_helper_rfci(cpu_env);
     gen_sync_exception(ctx);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* BookE specific */
@@ -6404,32 +6344,26 @@ static void gen_rfci(DisasContext *ctx)
 static void gen_rfdi(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     /* Restore CPU state */
     gen_helper_rfdi(cpu_env);
     gen_sync_exception(ctx);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* XXX: not implemented on 440 ? */
 static void gen_rfmci(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     /* Restore CPU state */
     gen_helper_rfmci(cpu_env);
     gen_sync_exception(ctx);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* TLB management - PowerPC 405 implementation */
@@ -6438,12 +6372,9 @@ static void gen_rfmci(DisasContext *ctx)
 static void gen_tlbre_40x(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     switch (rB(ctx->opcode)) {
     case 0:
         gen_helper_4xx_tlbre_hi(cpu_gpr[rD(ctx->opcode)], cpu_env,
@@ -6457,20 +6388,18 @@ static void gen_tlbre_40x(DisasContext *ctx)
         gen_inval_exception(ctx, POWERPC_EXCP_INVAL_INVAL);
         break;
     }
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* tlbsx - tlbsx. */
 static void gen_tlbsx_40x(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_temp_new();
     gen_addr_reg_index(ctx, t0);
     gen_helper_4xx_tlbsx(cpu_gpr[rD(ctx->opcode)], cpu_env, t0);
@@ -6482,19 +6411,17 @@ static void gen_tlbsx_40x(DisasContext *ctx)
         tcg_gen_ori_i32(cpu_crf[0], cpu_crf[0], 0x02);
         gen_set_label(l1);
     }
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* tlbwe */
 static void gen_tlbwe_40x(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
+
     switch (rB(ctx->opcode)) {
     case 0:
         gen_helper_4xx_tlbwe_hi(cpu_env, cpu_gpr[rA(ctx->opcode)],
@@ -6508,7 +6435,7 @@ static void gen_tlbwe_40x(DisasContext *ctx)
         gen_inval_exception(ctx, POWERPC_EXCP_INVAL_INVAL);
         break;
     }
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* TLB management - PowerPC 440 implementation */
@@ -6517,12 +6444,10 @@ static void gen_tlbwe_40x(DisasContext *ctx)
 static void gen_tlbre_440(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
+
     switch (rB(ctx->opcode)) {
     case 0:
     case 1:
@@ -6538,20 +6463,18 @@ static void gen_tlbre_440(DisasContext *ctx)
         gen_inval_exception(ctx, POWERPC_EXCP_INVAL_INVAL);
         break;
     }
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* tlbsx - tlbsx. */
 static void gen_tlbsx_440(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_temp_new();
     gen_addr_reg_index(ctx, t0);
     gen_helper_440_tlbsx(cpu_gpr[rD(ctx->opcode)], cpu_env, t0);
@@ -6563,19 +6486,16 @@ static void gen_tlbsx_440(DisasContext *ctx)
         tcg_gen_ori_i32(cpu_crf[0], cpu_crf[0], 0x02);
         gen_set_label(l1);
     }
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* tlbwe */
 static void gen_tlbwe_440(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     switch (rB(ctx->opcode)) {
     case 0:
     case 1:
@@ -6591,7 +6511,7 @@ static void gen_tlbwe_440(DisasContext *ctx)
         gen_inval_exception(ctx, POWERPC_EXCP_INVAL_INVAL);
         break;
     }
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* TLB management - PowerPC BookE 2.06 implementation */
@@ -6599,30 +6519,23 @@ static void gen_tlbwe_440(DisasContext *ctx)
 /* tlbre */
 static void gen_tlbre_booke206(DisasContext *ctx)
 {
-#if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+ #if defined(CONFIG_USER_ONLY)
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
-
+   CHK_SV;
     gen_helper_booke206_tlbre(cpu_env);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* tlbsx - tlbsx. */
 static void gen_tlbsx_booke206(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
 
+    CHK_SV;
     if (rA(ctx->opcode)) {
         t0 = tcg_temp_new();
         tcg_gen_mov_tl(t0, cpu_gpr[rD(ctx->opcode)]);
@@ -6633,54 +6546,44 @@ static void gen_tlbsx_booke206(DisasContext *ctx)
     tcg_gen_add_tl(t0, t0, cpu_gpr[rB(ctx->opcode)]);
     gen_helper_booke206_tlbsx(cpu_env, t0);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* tlbwe */
 static void gen_tlbwe_booke206(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     gen_update_nip(ctx, ctx->nip - 4);
     gen_helper_booke206_tlbwe(cpu_env);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 static void gen_tlbivax_booke206(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
 
+    CHK_SV;
     t0 = tcg_temp_new();
     gen_addr_reg_index(ctx, t0);
-
     gen_helper_booke206_tlbivax(cpu_env, t0);
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 static void gen_tlbilx_booke206(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
 
+    CHK_SV;
     t0 = tcg_temp_new();
     gen_addr_reg_index(ctx, t0);
 
@@ -6700,7 +6603,7 @@ static void gen_tlbilx_booke206(DisasContext *ctx)
     }
 
     tcg_temp_free(t0);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 
@@ -6708,13 +6611,11 @@ static void gen_tlbilx_booke206(DisasContext *ctx)
 static void gen_wrtee(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
     TCGv t0;
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+
+    CHK_SV;
     t0 = tcg_temp_new();
     tcg_gen_andi_tl(t0, cpu_gpr[rD(ctx->opcode)], (1 << MSR_EE));
     tcg_gen_andi_tl(cpu_msr, cpu_msr, ~(1 << MSR_EE));
@@ -6724,19 +6625,16 @@ static void gen_wrtee(DisasContext *ctx)
      * if we just set msr_ee to 1
      */
     gen_stop_exception(ctx);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* wrteei */
 static void gen_wrteei(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
+    CHK_SV;
     if (ctx->opcode & 0x00008000) {
         tcg_gen_ori_tl(cpu_msr, cpu_msr, (1 << MSR_EE));
         /* Stop translation to have a chance to raise an exception */
@@ -6744,7 +6642,7 @@ static void gen_wrteei(DisasContext *ctx)
     } else {
         tcg_gen_andi_tl(cpu_msr, cpu_msr, ~(1 << MSR_EE));
     }
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /* PowerPC 440 specific instructions */
@@ -6784,29 +6682,21 @@ static void gen_icbt_440(DisasContext *ctx)
 static void gen_msgclr(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
-
+    CHK_SV;
     gen_helper_msgclr(cpu_env, cpu_gpr[rB(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 static void gen_msgsnd(DisasContext *ctx)
 {
 #if defined(CONFIG_USER_ONLY)
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+    GEN_PRIV;
 #else
-    if (unlikely(ctx->pr)) {
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
-        return;
-    }
-
+    CHK_SV;
     gen_helper_msgsnd(cpu_gpr[rB(ctx->opcode)]);
-#endif
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 /***                      Altivec vector extension                         ***/
@@ -9808,7 +9698,7 @@ static void gen_tcheck(DisasContext *ctx)
 #define GEN_TM_PRIV_NOOP(name)                                 \
 static inline void gen_##name(DisasContext *ctx)               \
 {                                                              \
-    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);           \
+    gen_priv_exception(ctx, POWERPC_EXCP_PRIV_OPC);           \
 }
 
 #else
@@ -9816,10 +9706,7 @@ static inline void gen_##name(DisasContext *ctx)               \
 #define GEN_TM_PRIV_NOOP(name)                                 \
 static inline void gen_##name(DisasContext *ctx)               \
 {                                                              \
-    if (unlikely(ctx->pr)) {                                   \
-        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);       \
-        return;                                                \
-    }                                                          \
+    CHK_SV;                                                    \
     if (unlikely(!ctx->tm_enabled)) {                          \
         gen_exception_err(ctx, POWERPC_EXCP_FU, FSCR_IC_TM);   \
         return;                                                \
