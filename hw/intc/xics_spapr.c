@@ -44,7 +44,7 @@ static target_ulong h_cppr(PowerPCCPU *cpu, sPAPRMachineState *spapr,
     CPUState *cs = CPU(cpu);
     target_ulong cppr = args[0];
 
-    icp_set_cppr(spapr->icp, cs->cpu_index, cppr);
+    icp_set_cppr(spapr->xics, cs->cpu_index, cppr);
     return H_SUCCESS;
 }
 
@@ -54,11 +54,11 @@ static target_ulong h_ipi(PowerPCCPU *cpu, sPAPRMachineState *spapr,
     target_ulong server = get_cpu_index_by_dt_id(args[0]);
     target_ulong mfrr = args[1];
 
-    if (server >= spapr->icp->nr_servers) {
+    if (server >= spapr->xics->nr_servers) {
         return H_PARAMETER;
     }
 
-    icp_set_mfrr(spapr->icp, server, mfrr);
+    icp_set_mfrr(spapr->xics, server, mfrr);
     return H_SUCCESS;
 }
 
@@ -66,7 +66,7 @@ static target_ulong h_xirr(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                            target_ulong opcode, target_ulong *args)
 {
     CPUState *cs = CPU(cpu);
-    uint32_t xirr = icp_accept(spapr->icp->ss + cs->cpu_index);
+    uint32_t xirr = icp_accept(spapr->xics->ss + cs->cpu_index);
 
     args[0] = xirr;
     return H_SUCCESS;
@@ -76,7 +76,7 @@ static target_ulong h_xirr_x(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                              target_ulong opcode, target_ulong *args)
 {
     CPUState *cs = CPU(cpu);
-    ICPState *ss = &spapr->icp->ss[cs->cpu_index];
+    ICPState *ss = &spapr->xics->ss[cs->cpu_index];
     uint32_t xirr = icp_accept(ss);
 
     args[0] = xirr;
@@ -90,7 +90,7 @@ static target_ulong h_eoi(PowerPCCPU *cpu, sPAPRMachineState *spapr,
     CPUState *cs = CPU(cpu);
     target_ulong xirr = args[0];
 
-    icp_eoi(spapr->icp, cs->cpu_index, xirr);
+    icp_eoi(spapr->xics, cs->cpu_index, xirr);
     return H_SUCCESS;
 }
 
@@ -99,7 +99,7 @@ static target_ulong h_ipoll(PowerPCCPU *cpu, sPAPRMachineState *spapr,
 {
     CPUState *cs = CPU(cpu);
     uint32_t mfrr;
-    uint32_t xirr = icp_ipoll(spapr->icp->ss + cs->cpu_index, &mfrr);
+    uint32_t xirr = icp_ipoll(spapr->xics->ss + cs->cpu_index, &mfrr);
 
     args[0] = xirr;
     args[1] = mfrr;
@@ -112,7 +112,7 @@ static void rtas_set_xive(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                           uint32_t nargs, target_ulong args,
                           uint32_t nret, target_ulong rets)
 {
-    ICSState *ics = spapr->icp->ics;
+    ICSState *ics = spapr->xics->ics;
     uint32_t nr, server, priority;
 
     if ((nargs != 3) || (nret != 1)) {
@@ -124,7 +124,7 @@ static void rtas_set_xive(PowerPCCPU *cpu, sPAPRMachineState *spapr,
     server = get_cpu_index_by_dt_id(rtas_ld(args, 1));
     priority = rtas_ld(args, 2);
 
-    if (!ics_valid_irq(ics, nr) || (server >= ics->icp->nr_servers)
+    if (!ics_valid_irq(ics, nr) || (server >= ics->xics->nr_servers)
         || (priority > 0xff)) {
         rtas_st(rets, 0, RTAS_OUT_PARAM_ERROR);
         return;
@@ -140,7 +140,7 @@ static void rtas_get_xive(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                           uint32_t nargs, target_ulong args,
                           uint32_t nret, target_ulong rets)
 {
-    ICSState *ics = spapr->icp->ics;
+    ICSState *ics = spapr->xics->ics;
     uint32_t nr;
 
     if ((nargs != 1) || (nret != 3)) {
@@ -165,7 +165,7 @@ static void rtas_int_off(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                          uint32_t nargs, target_ulong args,
                          uint32_t nret, target_ulong rets)
 {
-    ICSState *ics = spapr->icp->ics;
+    ICSState *ics = spapr->xics->ics;
     uint32_t nr;
 
     if ((nargs != 1) || (nret != 1)) {
@@ -191,7 +191,7 @@ static void rtas_int_on(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                         uint32_t nargs, target_ulong args,
                         uint32_t nret, target_ulong rets)
 {
-    ICSState *ics = spapr->icp->ics;
+    ICSState *ics = spapr->xics->ics;
     uint32_t nr;
 
     if ((nargs != 1) || (nret != 1)) {
@@ -215,11 +215,11 @@ static void rtas_int_on(PowerPCCPU *cpu, sPAPRMachineState *spapr,
 
 static void xics_spapr_realize(DeviceState *dev, Error **errp)
 {
-    XICSState *icp = XICS(dev);
+    XICSState *xics = XICS(dev);
     Error *error = NULL;
     int i;
 
-    if (!icp->nr_servers) {
+    if (!xics->nr_servers) {
         error_setg(errp, "Number of servers needs to be greater 0");
         return;
     }
@@ -237,14 +237,14 @@ static void xics_spapr_realize(DeviceState *dev, Error **errp)
     spapr_register_hypercall(H_EOI, h_eoi);
     spapr_register_hypercall(H_IPOLL, h_ipoll);
 
-    object_property_set_bool(OBJECT(icp->ics), true, "realized", &error);
+    object_property_set_bool(OBJECT(xics->ics), true, "realized", &error);
     if (error) {
         error_propagate(errp, error);
         return;
     }
 
-    for (i = 0; i < icp->nr_servers; i++) {
-        object_property_set_bool(OBJECT(&icp->ss[i]), true, "realized", &error);
+    for (i = 0; i < xics->nr_servers; i++) {
+        object_property_set_bool(OBJECT(&xics->ss[i]), true, "realized", &error);
         if (error) {
             error_propagate(errp, error);
             return;
@@ -258,7 +258,7 @@ static void xics_spapr_initfn(Object *obj)
 
     xics->ics = ICS(object_new(TYPE_ICS));
     object_property_add_child(obj, "ics", OBJECT(xics->ics), NULL);
-    xics->ics->icp = xics;
+    xics->ics->xics = xics;
 }
 
 static void xics_spapr_class_init(ObjectClass *oc, void *data)
@@ -304,13 +304,13 @@ static int ics_find_free_block(ICSState *ics, int num, int alignnum)
     return -1;
 }
 
-int xics_spapr_alloc(XICSState *icp, int src, int irq_hint, bool lsi, Error **errp)
+int xics_spapr_alloc(XICSState *xics, int src, int irq_hint, bool lsi, Error **errp)
 {
-    ICSState *ics = &icp->ics[src];
+    ICSState *ics = &xics->ics[src];
     int irq;
 
     if (irq_hint) {
-        assert(src == xics_find_source(icp, irq_hint));
+        assert(src == xics_find_source(xics, irq_hint));
         if (!ICS_IRQ_FREE(ics, irq_hint - ics->offset)) {
             error_setg(errp, "can't allocate IRQ %d: already in use", irq_hint);
             return -1;
@@ -335,11 +335,11 @@ int xics_spapr_alloc(XICSState *icp, int src, int irq_hint, bool lsi, Error **er
  * Allocate block of consecutive IRQs, and return the number of the first IRQ in the block.
  * If align==true, aligns the first IRQ number to num.
  */
-int xics_spapr_alloc_block(XICSState *icp, int src, int num, bool lsi, bool align,
+int xics_spapr_alloc_block(XICSState *xics, int src, int num, bool lsi, bool align,
                      Error **errp)
 {
     int i, first = -1;
-    ICSState *ics = &icp->ics[src];
+    ICSState *ics = &xics->ics[src];
 
     assert(src == 0);
     /*
@@ -379,23 +379,23 @@ static void ics_free(ICSState *ics, int srcno, int num)
 
     for (i = srcno; i < srcno + num; ++i) {
         if (ICS_IRQ_FREE(ics, i)) {
-            trace_xics_ics_free_warn(ics - ics->icp->ics, i + ics->offset);
+            trace_xics_ics_free_warn(ics - ics->xics->ics, i + ics->offset);
         }
         memset(&ics->irqs[i], 0, sizeof(ICSIRQState));
     }
 }
 
-void xics_spapr_free(XICSState *icp, int irq, int num)
+void xics_spapr_free(XICSState *xics, int irq, int num)
 {
-    int src = xics_find_source(icp, irq);
+    int src = xics_find_source(xics, irq);
 
     if (src >= 0) {
-        ICSState *ics = &icp->ics[src];
+        ICSState *ics = &xics->ics[src];
 
         /* FIXME: implement multiple sources */
         assert(src == 0);
 
-        trace_xics_ics_free(ics - icp->ics, irq, num);
+        trace_xics_ics_free(ics - xics->ics, irq, num);
         ics_free(ics, irq - ics->offset, num);
     }
 }
