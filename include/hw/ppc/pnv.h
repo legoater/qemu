@@ -20,10 +20,12 @@
  */
 
 #include "hw/hw.h"
+typedef struct XScomBus XScomBus;
 
 /* Should we turn that into a QOjb of some sort ? */
 typedef struct PnvChip {
     uint32_t         chip_id;
+    XScomBus         *xscom;
 } PnvChip;
 
 typedef struct PnvSystem {

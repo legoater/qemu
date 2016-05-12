@@ -42,6 +42,7 @@
 #include "hw/ppc/ppc.h"
 #include "hw/ppc/pnv.h"
 #include "hw/loader.h"
+#include "hw/ppc/pnv_xscom.h"
 
 #include "exec/address-spaces.h"
 #include "qemu/config-file.h"
@@ -311,6 +312,7 @@ static void *powernv_create_fdt(PnvSystem *sys, const char *kernel_cmdline, uint
     uint32_t end_prop = cpu_to_be32(initrd_base + initrd_size);
     char *buf;
     const char plat_compat[] = "qemu,powernv\0ibm,powernv";
+    unsigned int i;
 
     fdt = g_malloc0(FDT_MAX_SIZE);
     _FDT((fdt_create(fdt, FDT_MAX_SIZE)));
@@ -371,6 +373,12 @@ static void *powernv_create_fdt(PnvSystem *sys, const char *kernel_cmdline, uint
     /* Memory */
     _FDT((powernv_populate_memory(fdt)));
 
+    /* For each chip */
+    for (i = 0; i < sys->num_chips; i++) {
+        /* Populate XSCOM */
+        _FDT((xscom_populate_fdt(sys->chips[i].xscom, fdt)));
+    }
+
     /* /hypervisor node */
     if (kvm_enabled()) {
         uint8_t hypercall[16];
@@ -428,6 +436,9 @@ static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no)
 
     /* XXX Improve chip numbering to better match HW */
     chip->chip_id = chip_no;
+
+    /* Set up XSCOM bus */
+    xscom_create(chip);
 }
 
 static void ppc_powernv_init(MachineState *machine)
