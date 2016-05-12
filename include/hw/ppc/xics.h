@@ -141,6 +141,12 @@ struct ICSState {
     XICSState *icp;
 };
 
+static inline bool ics_valid_irq(ICSState *ics, uint32_t nr)
+{
+    return (nr >= ics->offset)
+        && (nr < (ics->offset + ics->nr_irqs));
+}
+
 struct ICSIRQState {
     uint32_t server;
     uint8_t priority;
@@ -167,5 +173,22 @@ int xics_spapr_alloc_block(XICSState *icp, int src, int num, bool lsi, bool alig
 void xics_spapr_free(XICSState *icp, int irq, int num);
 
 void xics_cpu_setup(XICSState *icp, PowerPCCPU *cpu);
+
+/* Internal XICS interfaces */
+int get_cpu_index_by_dt_id(int cpu_dt_id);
+
+void icp_set_cppr(XICSState *icp, int server, uint8_t cppr);
+void icp_set_mfrr(XICSState *icp, int server, uint8_t mfrr);
+uint32_t icp_accept(ICPState *ss);
+void icp_eoi(XICSState *icp, int server, uint32_t xirr);
+
+void ics_write_xive(ICSState *ics, int nr, int server,
+                    uint8_t priority, uint8_t saved_priority);
+
+void ics_set_irq_type(ICSState *ics, int srcno, bool lsi);
+
+void xics_set_nr_irqs(XICSState *icp, uint32_t nr_irqs, Error **errp);
+void xics_set_nr_servers(XICSState *icp, uint32_t nr_servers, Error **errp);
+int xics_find_source(XICSState *icp, int irq);
 
 #endif /* __XICS_H__ */
