@@ -25,6 +25,7 @@ typedef struct ISABus ISABus;
 typedef struct PnvLpcController PnvLpcController;
 typedef struct PnvPsiController PnvPsiController;
 typedef struct XICSState XICSState;
+typedef struct PnvOCCState PnvOCCState;
 
 /* Should we turn that into a QOjb of some sort ? */
 typedef struct PnvChip {
@@ -33,6 +34,7 @@ typedef struct PnvChip {
     PnvLpcController *lpc;
     ISABus           *lpc_bus;
     PnvPsiController *psi;
+    PnvOCCState      *occ;
 } PnvChip;
 
 typedef struct PnvSystem {
@@ -44,6 +46,7 @@ typedef struct PnvSystem {
 
 extern void pnv_lpc_create(PnvChip *chip, bool has_serirq);
 extern void pnv_psi_create(PnvChip *chip, XICSState *xics);
+extern void pnv_occ_create(PnvChip *chip);
 
 typedef enum PnvPsiIrq {
     PSIHB_IRQ_PSI, /* internal use only */

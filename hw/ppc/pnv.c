@@ -546,6 +546,9 @@ static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no,
                                             chip->psi, 16));
         }
     }
+
+    /* Create the simplified OCC model */
+    pnv_occ_create(chip);
 }
 
 static void ppc_powernv_init(MachineState *machine)
