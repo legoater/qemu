@@ -701,6 +701,68 @@ static int powernv_populate_serial(ISADevice *d, void *fdt, int lpc_off)
     return ret;
 }
 
+static int powernv_populate_ipmi_bt(ISADevice *d, void *fdt, int lpc_off)
+{
+    const char compatible[] = "bt\0ipmi-bt";
+    uint32_t io_base = 0x0;
+    uint32_t io_regs[] = {
+        cpu_to_be32(1),
+        cpu_to_be32(io_base),
+        cpu_to_be32(3)
+    };
+    uint32_t irq;
+    char *name;
+    int node;
+    int ret;
+    Error *err = NULL;
+
+    io_base = object_property_get_int(OBJECT(d), "ioport", &err);
+    if (err) {
+        return -1;
+    }
+    io_regs[1] = cpu_to_be32(io_base);
+
+    irq = object_property_get_int(OBJECT(d), "irq", &err);
+    if (err) {
+        return -1;
+    }
+
+    name = g_strdup_printf("%s@i%x", qdev_fw_name(DEVICE(d)), io_base);
+    node = fdt_add_subnode(fdt, lpc_off, name);
+    g_free(name);
+    if (node <= 0) {
+        return node;
+    }
+    ret = fdt_setprop(fdt, node, "reg", io_regs, sizeof(io_regs));
+    ret |= fdt_setprop(fdt, node, "compatible", compatible, sizeof(compatible));
+
+    /* Mark it as reserved to avoid Linux trying to claim it */
+    ret |= fdt_setprop_string(fdt, node, "status", "reserved");
+    ret |= fdt_setprop_cell(fdt, node, "interrupts", irq);
+    ret |= fdt_setprop_cell(fdt, node, "interrupt-parent",
+                            fdt_get_phandle(fdt, lpc_off));
+    return ret;
+}
+#if 0
+static DeviceState *ipmi_bt_create(BusState *bus, const char *bmcname,
+                                   Error **errp)
+{
+    Error *err = NULL;
+    DeviceState *dev;
+
+    dev = qdev_create(bus, "isa-ipmi-bt");
+    qdev_prop_set_int32(dev, "irq", 10);
+    qdev_prop_set_string(dev, "bmc", bmcname);
+    object_property_set_bool(OBJECT(dev), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        object_unparent(OBJECT(dev));
+        return NULL;
+    }
+
+    return dev;
+}
+#endif
 static int walk_isa_device(DeviceState *dev, void *fdt)
 {
     ISADevice *d = ISA_DEVICE(dev);
@@ -716,6 +778,8 @@ static int walk_isa_device(DeviceState *dev, void *fdt)
         powernv_populate_rtc(d, fdt, lpc_off);
     } else if (object_dynamic_cast(obj, TYPE_ISA_SERIAL)) {
         powernv_populate_serial(d, fdt, lpc_off);
+    } else if (object_dynamic_cast(obj, "isa-ipmi-bt")) {
+        powernv_populate_ipmi_bt(d, fdt, lpc_off);
     } else {
         fprintf(stderr, "unknown isa device %s@i%x\n", qdev_fw_name(dev),
                 d->ioport_id);
