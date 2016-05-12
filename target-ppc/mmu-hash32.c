@@ -36,8 +36,8 @@
 
 struct mmu_ctx_hash32 {
     hwaddr raddr;      /* Real address              */
-    int prot;                      /* Protection bits           */
-    int key;                       /* Access key                */
+    int prot;          /* Protection bits           */
+    int key;           /* Access key                */
 };
 
 static int ppc_hash32_pp_prot(int key, int pp, int nx)
