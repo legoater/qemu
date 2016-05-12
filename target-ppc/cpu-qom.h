@@ -68,6 +68,7 @@ typedef struct PowerPCCPUClass {
     uint32_t flags;
     int bfd_mach;
     uint32_t l1_dcache_size, l1_icache_size;
+    uint32_t threads_per_core;
 #if defined(TARGET_PPC64)
     const struct ppc_segment_page_sizes *sps;
 #endif
