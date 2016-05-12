@@ -45,6 +45,9 @@
 #include "hw/ppc/xics.h"
 #include "hw/ppc/pnv_xscom.h"
 
+#include "hw/isa/isa.h"
+#include "hw/char/serial.h"
+#include "hw/timer/mc146818rtc.h"
 #include "exec/address-spaces.h"
 #include "qemu/config-file.h"
 #include "qapi/error.h"
@@ -487,7 +490,15 @@ static const VMStateDescription vmstate_powernv = {
     .minimum_version_id = 1,
 };
 
-static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no)
+static void pnv_lpc_irq_handler_cpld(void *opaque, int n, int level)
+{
+    /* We don't yet emulate the PSI bridge which provides the external
+     * interrupt, so just drop interrupts on the floor
+     */
+}
+
+static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no,
+                            bool has_lpc, bool has_lpc_irq)
 {
     PnvChip *chip = &sys->chips[chip_no];
 
@@ -500,6 +511,27 @@ static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no)
 
     /* Set up XSCOM bus */
     xscom_create(chip);
+
+    /* Create LPC controller */
+    if (has_lpc) {
+        pnv_lpc_create(chip, has_lpc_irq);
+
+        /* If we don't use the built-in LPC interrupt deserializer, we need
+         * to provide a set of qirqs for the ISA bus or things will go bad.
+         *
+         * Most machines using pre-Naples chips (without said deserializer)
+         * have a CPLD that will collect the SerIRQ and shoot them as a
+         * single level interrupt to the P8 chip. So let's setup a hook
+         * for doing just that.
+         *
+         * Note: The actual interrupt input isn't emulated yet, this will
+         * come with the PSI bridge model.
+         */
+        if (!has_lpc_irq) {
+            isa_bus_irqs(chip->lpc_bus,
+                         qemu_allocate_irqs(pnv_lpc_irq_handler_cpld, NULL, 16));
+        }
+    }
 }
 
 static void ppc_powernv_init(MachineState *machine)
@@ -517,6 +549,7 @@ static void ppc_powernv_init(MachineState *machine)
     sPowerNVMachineState *pnv_machine = POWERNV_MACHINE(machine);
     PnvSystem *sys = &pnv_machine->sys;
     XICSState *xics;
+    ISABus *isa_bus;
     long fw_size;
     char *filename;
     void *fdt;
@@ -561,10 +594,18 @@ static void ppc_powernv_init(MachineState *machine)
      */
     sys->num_chips = 1;
 
-    /* Create only one PHB for now until I figure out what's wrong
-     * when I create more (resource assignment failures in Linux)
+    /* Create only one chip for now with an LPC bus
      */
-    pnv_create_chip(sys, 0);
+    pnv_create_chip(sys, 0, true, false);
+
+    /* Grab chip 0's ISA bus */
+    isa_bus = sys->chips[0].lpc_bus;
+
+     /* Create serial port */
+    serial_hds_isa_init(isa_bus, MAX_SERIAL_PORTS);
+
+    /* Create an RTC ISA device too */
+    rtc_init(isa_bus, 2000, NULL);
 
     if (bios_name == NULL) {
         bios_name = FW_FILE_NAME;

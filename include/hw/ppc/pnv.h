@@ -21,12 +21,16 @@
 
 #include "hw/hw.h"
 typedef struct XScomBus XScomBus;
+typedef struct ISABus ISABus;
+typedef struct PnvLpcController PnvLpcController;
 typedef struct XICSState XICSState;
 
 /* Should we turn that into a QOjb of some sort ? */
 typedef struct PnvChip {
     uint32_t         chip_id;
     XScomBus         *xscom;
+    PnvLpcController *lpc;
+    ISABus           *lpc_bus;
 } PnvChip;
 
 typedef struct PnvSystem {
@@ -36,4 +40,6 @@ typedef struct PnvSystem {
     PnvChip   chips[PNV_MAX_CHIPS];
 } PnvSystem;
 
+extern void pnv_lpc_create(PnvChip *chip, bool has_serirq);
 #endif /* _HW_PNV_LPC_H */
+
