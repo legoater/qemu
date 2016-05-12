@@ -645,8 +645,47 @@ static void pnv_create_chip(PnvSystem *sys, unsigned int chip_no,
     }
 }
 
+static int powernv_populate_rtc(ISADevice *d, void *fdt, int lpc_off)
+{
+    uint32_t io_base = d->ioport_id;
+    uint32_t io_regs[] = {
+        cpu_to_be32(1),
+        cpu_to_be32(io_base),
+        cpu_to_be32(2)
+    };
+    char *name;
+    int node;
+    int ret;
+
+    name = g_strdup_printf("%s@i%x", qdev_fw_name(DEVICE(d)), io_base);
+    node = fdt_add_subnode(fdt, lpc_off, name);
+    g_free(name);
+    if (node <= 0) {
+        return node;
+    }
+    ret = fdt_setprop(fdt, node, "reg", io_regs, sizeof(io_regs));
+    ret |= fdt_setprop_string(fdt, node, "compatible", "pnpPNP,b00");
+    return ret;
+}
+
 static int walk_isa_device(DeviceState *dev, void *fdt)
 {
+    ISADevice *d = ISA_DEVICE(dev);
+    Object *obj = OBJECT(dev);
+    int lpc_off;
+
+    lpc_off = fdt_node_offset_by_compatible(fdt, -1, "ibm,power8-lpc");
+    if (lpc_off < 0) {
+        return lpc_off;
+    }
+
+    if (object_dynamic_cast(obj, TYPE_MC146818_RTC)) {
+        powernv_populate_rtc(d, fdt, lpc_off);
+    } else {
+        fprintf(stderr, "unknown isa device %s@i%x\n", qdev_fw_name(dev),
+                d->ioport_id);
+    }
+
     return 0;
 }
 
