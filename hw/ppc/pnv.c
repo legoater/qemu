@@ -668,6 +668,39 @@ static int powernv_populate_rtc(ISADevice *d, void *fdt, int lpc_off)
     return ret;
 }
 
+static int powernv_populate_serial(ISADevice *d, void *fdt, int lpc_off)
+{
+    const char compatible[] = "ns16550\0pnpPNP,501";
+    uint32_t io_base = d->ioport_id;
+    uint32_t io_regs[] = {
+        cpu_to_be32(1),
+        cpu_to_be32(io_base),
+        cpu_to_be32(8)
+    };
+    char *name;
+    int node;
+    int ret;
+
+    name = g_strdup_printf("%s@i%x", qdev_fw_name(DEVICE(d)), io_base);
+    node = fdt_add_subnode(fdt, lpc_off, name);
+    g_free(name);
+    if (node <= 0) {
+        return node;
+    }
+    ret = fdt_setprop(fdt, node, "reg", io_regs, sizeof(io_regs));
+    ret |= fdt_setprop(fdt, node, "compatible", compatible, sizeof(compatible));
+
+    ret |= fdt_setprop_cell(fdt, node, "clock-frequency", 1843200);
+    ret |= fdt_setprop_cell(fdt, node, "current-speed", 115200);
+    ret |= fdt_setprop_cell(fdt, node, "interrupts", d->isairq[0]);
+    ret |= fdt_setprop_cell(fdt, node, "interrupt-parent",
+                            fdt_get_phandle(fdt, lpc_off));
+
+    /* This is needed by Linux */
+    ret |= fdt_setprop_string(fdt, node, "device_type", "serial");
+    return ret;
+}
+
 static int walk_isa_device(DeviceState *dev, void *fdt)
 {
     ISADevice *d = ISA_DEVICE(dev);
@@ -681,6 +714,8 @@ static int walk_isa_device(DeviceState *dev, void *fdt)
 
     if (object_dynamic_cast(obj, TYPE_MC146818_RTC)) {
         powernv_populate_rtc(d, fdt, lpc_off);
+    } else if (object_dynamic_cast(obj, TYPE_ISA_SERIAL)) {
+        powernv_populate_serial(d, fdt, lpc_off);
     } else {
         fprintf(stderr, "unknown isa device %s@i%x\n", qdev_fw_name(dev),
                 d->ioport_id);
