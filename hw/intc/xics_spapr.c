@@ -112,10 +112,10 @@ static void rtas_set_xive(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                           uint32_t nargs, target_ulong args,
                           uint32_t nret, target_ulong rets)
 {
-    ICSState *ics = spapr->xics->ics;
+    ICSState *ics = QLIST_FIRST(&spapr->xics->ics);
     uint32_t nr, server, priority;
 
-    if ((nargs != 3) || (nret != 1)) {
+    if ((nargs != 3) || (nret != 1) || !ics) {
         rtas_st(rets, 0, RTAS_OUT_PARAM_ERROR);
         return;
     }
@@ -140,10 +140,10 @@ static void rtas_get_xive(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                           uint32_t nargs, target_ulong args,
                           uint32_t nret, target_ulong rets)
 {
-    ICSState *ics = spapr->xics->ics;
+    ICSState *ics = QLIST_FIRST(&spapr->xics->ics);
     uint32_t nr;
 
-    if ((nargs != 1) || (nret != 3)) {
+    if ((nargs != 1) || (nret != 3) || !ics) {
         rtas_st(rets, 0, RTAS_OUT_PARAM_ERROR);
         return;
     }
@@ -165,10 +165,10 @@ static void rtas_int_off(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                          uint32_t nargs, target_ulong args,
                          uint32_t nret, target_ulong rets)
 {
-    ICSState *ics = spapr->xics->ics;
+    ICSState *ics = QLIST_FIRST(&spapr->xics->ics);
     uint32_t nr;
 
-    if ((nargs != 1) || (nret != 1)) {
+    if ((nargs != 1) || (nret != 1) || !ics) {
         rtas_st(rets, 0, RTAS_OUT_PARAM_ERROR);
         return;
     }
@@ -191,10 +191,10 @@ static void rtas_int_on(PowerPCCPU *cpu, sPAPRMachineState *spapr,
                         uint32_t nargs, target_ulong args,
                         uint32_t nret, target_ulong rets)
 {
-    ICSState *ics = spapr->xics->ics;
+    ICSState *ics = QLIST_FIRST(&spapr->xics->ics);
     uint32_t nr;
 
-    if ((nargs != 1) || (nret != 1)) {
+    if ((nargs != 1) || (nret != 1) || !ics) {
         rtas_st(rets, 0, RTAS_OUT_PARAM_ERROR);
         return;
     }
@@ -216,6 +216,7 @@ static void rtas_int_on(PowerPCCPU *cpu, sPAPRMachineState *spapr,
 static void xics_spapr_realize(DeviceState *dev, Error **errp)
 {
     XICSState *xics = XICS(dev);
+    ICSState *ics;
     Error *error = NULL;
     int i;
 
@@ -237,10 +238,12 @@ static void xics_spapr_realize(DeviceState *dev, Error **errp)
     spapr_register_hypercall(H_EOI, h_eoi);
     spapr_register_hypercall(H_IPOLL, h_ipoll);
 
-    object_property_set_bool(OBJECT(xics->ics), true, "realized", &error);
-    if (error) {
-        error_propagate(errp, error);
-        return;
+    QLIST_FOREACH(ics, &xics->ics, list) {
+        object_property_set_bool(OBJECT(ics), true, "realized", &error);
+        if (error) {
+            error_propagate(errp, error);
+            return;
+        }
     }
 
     for (i = 0; i < xics->nr_servers; i++) {
@@ -255,10 +258,14 @@ static void xics_spapr_realize(DeviceState *dev, Error **errp)
 static void xics_spapr_initfn(Object *obj)
 {
     XICSState *xics = XICS(obj);
+    ICSState *ics;
 
-    xics->ics = ICS(object_new(TYPE_ICS));
-    object_property_add_child(obj, "ics", OBJECT(xics->ics), NULL);
-    xics->ics->xics = xics;
+    QLIST_INIT(&xics->ics);
+
+    ics = ICS(object_new(TYPE_ICS));
+    object_property_add_child(obj, "ics", OBJECT(ics), NULL);
+    ics->xics = xics;
+    QLIST_INSERT_HEAD(&xics->ics, ics, list);
 }
 
 static void xics_spapr_class_init(ObjectClass *oc, void *data)
@@ -304,13 +311,15 @@ static int ics_find_free_block(ICSState *ics, int num, int alignnum)
     return -1;
 }
 
-int xics_spapr_alloc(XICSState *xics, int src, int irq_hint, bool lsi, Error **errp)
+int xics_spapr_alloc(XICSState *xics, int irq_hint, bool lsi, Error **errp)
 {
-    ICSState *ics = &xics->ics[src];
+    ICSState *ics = QLIST_FIRST(&xics->ics);
     int irq;
 
+    if (!ics) {
+        return -1;
+    }
     if (irq_hint) {
-        assert(src == xics_find_source(xics, irq_hint));
         if (!ICS_IRQ_FREE(ics, irq_hint - ics->offset)) {
             error_setg(errp, "can't allocate IRQ %d: already in use", irq_hint);
             return -1;
@@ -326,7 +335,7 @@ int xics_spapr_alloc(XICSState *xics, int src, int irq_hint, bool lsi, Error **e
     }
 
     ics_set_irq_type(ics, irq - ics->offset, lsi);
-    trace_xics_alloc(src, irq);
+    trace_xics_alloc(0, irq);
 
     return irq;
 }
@@ -335,13 +344,16 @@ int xics_spapr_alloc(XICSState *xics, int src, int irq_hint, bool lsi, Error **e
  * Allocate block of consecutive IRQs, and return the number of the first IRQ in the block.
  * If align==true, aligns the first IRQ number to num.
  */
-int xics_spapr_alloc_block(XICSState *xics, int src, int num, bool lsi, bool align,
+int xics_spapr_alloc_block(XICSState *xics, int num, bool lsi, bool align,
                      Error **errp)
 {
+    ICSState *ics = QLIST_FIRST(&xics->ics);
     int i, first = -1;
-    ICSState *ics = &xics->ics[src];
 
-    assert(src == 0);
+    if (!ics) {
+        return -1;
+    }
+
     /*
      * MSIMesage::data is used for storing VIRQ so
      * it has to be aligned to num to support multiple
@@ -368,7 +380,7 @@ int xics_spapr_alloc_block(XICSState *xics, int src, int num, bool lsi, bool ali
     }
     first += ics->offset;
 
-    trace_xics_alloc_block(src, first, num, lsi, align);
+    trace_xics_alloc_block(0, first, num, lsi, align);
 
     return first;
 }
@@ -379,7 +391,7 @@ static void ics_free(ICSState *ics, int srcno, int num)
 
     for (i = srcno; i < srcno + num; ++i) {
         if (ICS_IRQ_FREE(ics, i)) {
-            trace_xics_ics_free_warn(ics - ics->xics->ics, i + ics->offset);
+            trace_xics_ics_free_warn(0, i + ics->offset);
         }
         memset(&ics->irqs[i], 0, sizeof(ICSIRQState));
     }
@@ -387,15 +399,10 @@ static void ics_free(ICSState *ics, int srcno, int num)
 
 void xics_spapr_free(XICSState *xics, int irq, int num)
 {
-    int src = xics_find_source(xics, irq);
+    ICSState *ics = xics_find_source(xics, irq);
 
-    if (src >= 0) {
-        ICSState *ics = &xics->ics[src];
-
-        /* FIXME: implement multiple sources */
-        assert(src == 0);
-
-        trace_xics_ics_free(ics - xics->ics, irq, num);
+    if (ics) {
+        trace_xics_ics_free(0, irq, num);
         ics_free(ics, irq - ics->offset, num);
     }
 }
