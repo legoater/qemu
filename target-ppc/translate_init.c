@@ -300,6 +300,12 @@ static void spr_write_purr (DisasContext *ctx, int gprn, int sprn)
     // Temporary placeholder
 }
 
+__attribute__ (( unused ))
+static void spr_write_vtb (DisasContext *ctx, int gprn, int sprn)
+{
+    // Temporary placeholder
+}
+
 /* HDECR */
 static void spr_read_hdecr (DisasContext *ctx, int gprn, int sprn)
 {
@@ -8153,10 +8159,11 @@ static void gen_spr_power8_ebb(CPUPPCState *env)
 /* Virtual Time Base */
 static void gen_spr_vtb(CPUPPCState *env)
 {
-    spr_register(env, SPR_VTB, "VTB",
-                 SPR_NOACCESS, SPR_NOACCESS,
-                 &spr_read_tbl, SPR_NOACCESS,
-                 0x00000000);
+    spr_register_hv(env, SPR_VTB, "VTB",
+                   SPR_NOACCESS, SPR_NOACCESS,
+                   &spr_read_tbl, SPR_NOACCESS,
+                   &spr_read_tbl, spr_write_vtb,
+                   0x00000000);
 }
 
 static void gen_spr_power8_fscr(CPUPPCState *env)
