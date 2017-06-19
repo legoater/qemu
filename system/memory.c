@@ -512,7 +512,7 @@ static MemTxResult memory_region_write_with_attrs_accessor(MemoryRegion *mr,
     return mr->ops->write_with_attrs(mr->opaque, addr, tmp, size, attrs);
 }
 
-static MemTxResult access_with_adjusted_size(hwaddr addr,
+static MemTxResult access_with_adjusted_size_aligned(hwaddr addr,
                                       uint64_t *value,
                                       unsigned size,
                                       unsigned access_size_min,
@@ -554,7 +554,6 @@ static MemTxResult access_with_adjusted_size(hwaddr addr,
         reentrancy_guard_applied = true;
     }
 
-    /* FIXME: support unaligned access? */
     access_size = MAX(MIN(size, access_size_max), access_size_min);
     access_mask = MAKE_64BIT_MASK(0, access_size * 8);
     if (devend_big_endian(mr->ops->endianness)) {
@@ -572,6 +571,134 @@ static MemTxResult access_with_adjusted_size(hwaddr addr,
         mr->dev->mem_reentrancy_guard.engaged_in_io = false;
     }
     return r;
+}
+
+/* Assume power-of-two size */
+#define align_down(addr, size) ((addr) & ~((size) - 1))
+#define align_up(addr, size) \
+    ({ typeof(size) __size = size;  \
+        align_down((addr) + (__size) - 1, (__size)); })
+
+static MemTxResult access_with_adjusted_size_unaligned(hwaddr addr,
+                                      uint64_t *value,
+                                      unsigned size,
+                                      unsigned access_size_min,
+                                      unsigned access_size_max,
+                                      bool unaligned,
+                                      MemTxResult (*access)(MemoryRegion *mr,
+                                                            hwaddr addr,
+                                                            uint64_t *value,
+                                                            unsigned size,
+                                                            signed shift,
+                                                            uint64_t mask,
+                                                            MemTxAttrs attrs),
+                                      MemoryRegion *mr,
+                                      MemTxAttrs attrs)
+{
+    uint64_t access_value = 0;
+    MemTxResult r = MEMTX_OK;
+    hwaddr access_addr[2];
+    uint64_t access_mask;
+    unsigned access_size;
+
+    if (unlikely(!access_size_min)) {
+        access_size_min = 1;
+    }
+    if (unlikely(!access_size_max)) {
+        access_size_max = 4;
+    }
+
+    access_size = MAX(MIN(size, access_size_max), access_size_min);
+    access_addr[0] = align_down(addr, access_size);
+    access_addr[1] = align_up(addr + size, access_size);
+
+    if (devend_big_endian(mr->ops->endianness)) {
+        hwaddr cur;
+
+        /* XXX: Big-endian path is untested...  */
+
+        for (cur = access_addr[0]; cur < access_addr[1]; cur += access_size) {
+            uint64_t mask_bounds[2];
+
+            mask_bounds[0] = MAX(addr, cur) - cur;
+            mask_bounds[1] =
+                MIN(addr + size, align_up(cur + 1, access_size)) - cur;
+
+            access_mask = (-1ULL << mask_bounds[0] * 8) &
+                (-1ULL >> (64 - mask_bounds[1] * 8));
+
+            r |= access(mr, cur, &access_value, access_size,
+                  (size - access_size - (MAX(addr, cur) - addr)),
+                  access_mask, attrs);
+
+            /* XXX: Can't do this hack for writes */
+            access_value >>= mask_bounds[0] * 8;
+        }
+    } else {
+        hwaddr cur;
+
+        for (cur = access_addr[0]; cur < access_addr[1]; cur += access_size) {
+            uint64_t mask_bounds[2];
+
+            mask_bounds[0] = MAX(addr, cur) - cur;
+            mask_bounds[1] =
+                MIN(addr + size, align_up(cur + 1, access_size)) - cur;
+
+            access_mask = (-1ULL << mask_bounds[0] * 8) &
+                (-1ULL >> (64 - mask_bounds[1] * 8));
+
+            r |= access(mr, cur, &access_value, access_size,
+                  (MAX(addr, cur) - addr), access_mask, attrs);
+
+            /* XXX: Can't do this hack for writes */
+            access_value >>= mask_bounds[0] * 8;
+        }
+    }
+
+    *value = access_value;
+
+    return r;
+}
+
+static inline MemTxResult access_with_adjusted_size(hwaddr addr,
+                                      uint64_t *value,
+                                      unsigned size,
+                                      unsigned access_size_min,
+                                      unsigned access_size_max,
+                                      bool unaligned,
+                                      MemTxResult (*access)(MemoryRegion *mr,
+                                                            hwaddr addr,
+                                                            uint64_t *value,
+                                                            unsigned size,
+                                                            signed shift,
+                                                            uint64_t mask,
+                                                            MemTxAttrs attrs),
+                                      MemoryRegion *mr,
+                                      MemTxAttrs attrs)
+{
+    unsigned access_size;
+
+    if (!access_size_min) {
+        access_size_min = 1;
+    }
+    if (!access_size_max) {
+        access_size_max = 4;
+    }
+
+    access_size = MAX(MIN(size, access_size_max), access_size_min);
+
+    /* Handle unaligned accesses if the model only supports natural alignment */
+    if (unlikely((addr & (access_size - 1)) && !unaligned)) {
+        return access_with_adjusted_size_unaligned(addr, value, size,
+                access_size_min, access_size_max, unaligned, access, mr, attrs);
+    }
+
+    /*
+     * Otherwise, if the access is aligned or the model specifies it can handle
+     * unaligned accesses, use the 'aligned' handler
+     */
+    return access_with_adjusted_size_aligned(addr, value, size,
+            access_size_min, access_size_max, access, mr, attrs);
 }
 
 static AddressSpace *memory_region_to_address_space(MemoryRegion *mr)
@@ -1452,12 +1579,14 @@ static MemTxResult memory_region_dispatch_read1(MemoryRegion *mr,
         return access_with_adjusted_size(addr, pval, size,
                                          mr->ops->impl.min_access_size,
                                          mr->ops->impl.max_access_size,
+                                         mr->ops->impl.unaligned,
                                          memory_region_read_accessor,
                                          mr, attrs);
     } else {
         return access_with_adjusted_size(addr, pval, size,
                                          mr->ops->impl.min_access_size,
                                          mr->ops->impl.max_access_size,
+                                         mr->ops->impl.unaligned,
                                          memory_region_read_with_attrs_accessor,
                                          mr, attrs);
     }
@@ -1544,14 +1673,14 @@ MemTxResult memory_region_dispatch_write(MemoryRegion *mr,
     }
 
     if (mr->ops->write) {
-        return access_with_adjusted_size(addr, &data, size,
+        return access_with_adjusted_size_aligned(addr, &data, size,
                                          mr->ops->impl.min_access_size,
                                          mr->ops->impl.max_access_size,
                                          memory_region_write_accessor, mr,
                                          attrs);
     } else {
         return
-            access_with_adjusted_size(addr, &data, size,
+            access_with_adjusted_size_aligned(addr, &data, size,
                                       mr->ops->impl.min_access_size,
                                       mr->ops->impl.max_access_size,
                                       memory_region_write_with_attrs_accessor,
