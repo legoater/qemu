@@ -594,6 +594,7 @@ config FSL_IMX6UL
     select WDT_IMX2
     select SDHCI
     select UNIMP
+    select IBM_CFFPS
 
 config MICROBIT
     bool
