@@ -72,6 +72,15 @@ static void rainier_bmc_i2c_init(AspeedMachineState *bmc)
 
     aspeed_create_pca9552(soc, 3, 0x61);
 
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "ibm-cffps",
+                     0x68);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "ibm-cffps",
+                     0x69);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "ibm-cffps",
+                     0x6a);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "ibm-cffps",
+                     0x6b);
+
     /* The rainier expects a TMP275 but a TMP105 is compatible */
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 4), TYPE_TMP105,
                      0x48);
