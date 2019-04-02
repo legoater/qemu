@@ -673,6 +673,7 @@ config MSF2
     select SERIAL_MM
     select SSI
     select UNIMP
+    select IBM_CFFPS
 
 config ARMSSE
     bool
