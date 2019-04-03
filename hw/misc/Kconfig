@@ -44,6 +44,10 @@ config IBM_CFFPS
     bool
     depends on I2C
 
+config IR35221
+    bool
+    depends on I2C
+
 config PL310
     bool
 
