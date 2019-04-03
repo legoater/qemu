@@ -147,10 +147,22 @@ static void rainier_bmc_i2c_init(AspeedMachineState *bmc)
     /* Bus 8: ucd90320@b */
     /* Bus 8: ucd90320@c */
 
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x42);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x43);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x44);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x72);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x73);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x74);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "tmp423", 0x4c);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "tmp423", 0x4d);
     at24c_eeprom_init(aspeed_i2c_get_bus(&soc->i2c, 9), 0x50, 128 * KiB);
 
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x42);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x43);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x44);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x72);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x73);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x74);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "tmp423", 0x4c);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "tmp423", 0x4d);
     at24c_eeprom_init(aspeed_i2c_get_bus(&soc->i2c, 10), 0x50, 128 * KiB);
