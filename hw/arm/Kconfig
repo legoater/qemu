@@ -595,6 +595,7 @@ config FSL_IMX6UL
     select SDHCI
     select UNIMP
     select IBM_CFFPS
+    select IR35221
 
 config MICROBIT
     bool
