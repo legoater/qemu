@@ -674,6 +674,7 @@ config MSF2
     select SSI
     select UNIMP
     select IBM_CFFPS
+    select IR35221
 
 config ARMSSE
     bool
