@@ -44,6 +44,7 @@
 #include "hw/isa/isa.h"
 #include "hw/char/serial.h"
 #include "hw/timer/mc146818rtc.h"
+#include "hw/pci/msi.h"
 
 #include <libfdt.h>
 
@@ -582,9 +583,15 @@ static ISABus *pnv_isa_create(PnvChip *chip, Error **errp)
 
 static void pnv_chip_power8_pic_print_info(PnvChip *chip, Monitor *mon)
 {
+    PnvChipClass *pcc = PNV_CHIP_GET_CLASS(chip);
     Pnv8Chip *chip8 = PNV8_CHIP(chip);
+    int i;
 
     ics_pic_print_info(&chip8->psi.ics, mon);
+    for (i = 0; i < pcc->num_phbs; i++) {
+        ics_pic_print_info(ICS_BASE(&chip8->phbs[i].msis), mon);
+        ics_pic_print_info(&chip8->phbs[i].lsis, mon);
+    }
 }
 
 static void pnv_chip_power9_pic_print_info(PnvChip *chip, Monitor *mon)
@@ -603,6 +610,9 @@ static void pnv_init(MachineState *machine)
     long fw_size;
     int i;
     char *chip_typename;
+
+    /* MSIs are supported on this platform */
+    msi_nonbroken = true;
 
     /* allocate RAM */
     if (machine->ram_size < (1 * GiB)) {
@@ -800,6 +810,8 @@ static void pnv_chip_power9_intc_create(PnvChip *chip, PowerPCCPU *cpu,
 static void pnv_chip_power8_instance_init(Object *obj)
 {
     Pnv8Chip *chip8 = PNV8_CHIP(obj);
+    PnvChipClass *pcc = PNV_CHIP_GET_CLASS(obj);
+    int i;
 
     object_initialize_child(obj, "psi",  &chip8->psi, sizeof(chip8->psi),
                             TYPE_PNV8_PSI, &error_abort, NULL);
@@ -815,6 +827,12 @@ static void pnv_chip_power8_instance_init(Object *obj)
                             TYPE_PNV8_OCC, &error_abort, NULL);
     object_property_add_const_link(OBJECT(&chip8->occ), "psi",
                                    OBJECT(&chip8->psi), &error_abort);
+
+    for (i = 0; i < pcc->num_phbs; i++) {
+        object_initialize_child(obj, "phb[*]", &chip8->phbs[i],
+                                sizeof(chip8->phbs[i]), TYPE_PNV_PHB3,
+                                &error_abort, NULL);
+    }
 }
 
 static void pnv_chip_icp_realize(Pnv8Chip *chip8, Error **errp)
@@ -856,6 +874,7 @@ static void pnv_chip_power8_realize(DeviceState *dev, Error **errp)
     Pnv8Chip *chip8 = PNV8_CHIP(dev);
     Pnv8Psi *psi8 = &chip8->psi;
     Error *local_err = NULL;
+    int i;
 
     pcc->parent_realize(dev, &local_err);
     if (local_err) {
@@ -898,6 +917,33 @@ static void pnv_chip_power8_realize(DeviceState *dev, Error **errp)
         return;
     }
     pnv_xscom_add_subregion(chip, PNV_XSCOM_OCC_BASE, &chip8->occ.xscom_regs);
+
+    /* Create the PHB3 controllers */
+    for (i = 0; i < pcc->num_phbs; i++) {
+        PnvPHB3 *phb = &chip8->phbs[i];
+        PnvPBCQState *pbcq = &phb->pbcq;
+
+        object_property_set_int(OBJECT(phb), i, "index", &error_fatal);
+        object_property_set_int(OBJECT(phb), chip->chip_id, "chip-id",
+                                &error_fatal);
+        object_property_set_bool(OBJECT(phb), true, "realized", &local_err);
+        if (local_err) {
+            error_propagate(errp, local_err);
+            return;
+        }
+        qdev_set_parent_bus(DEVICE(phb), sysbus_get_default());
+
+        /* Populate the XSCOM address space. */
+        pnv_xscom_add_subregion(chip,
+                                PNV_XSCOM_PBCQ_NEST_BASE + 0x400 * phb->phb_id,
+                                &pbcq->xscom_nest_regs);
+        pnv_xscom_add_subregion(chip,
+                                PNV_XSCOM_PBCQ_PCI_BASE + 0x400 * phb->phb_id,
+                                &pbcq->xscom_pci_regs);
+        pnv_xscom_add_subregion(chip,
+                                PNV_XSCOM_PBCQ_SPCI_BASE + 0x040 * phb->phb_id,
+                                &pbcq->xscom_spci_regs);
+    }
 }
 
 static void pnv_chip_power8e_class_init(ObjectClass *klass, void *data)
@@ -908,6 +954,7 @@ static void pnv_chip_power8e_class_init(ObjectClass *klass, void *data)
     k->chip_type = PNV_CHIP_POWER8E;
     k->chip_cfam_id = 0x221ef04980000000ull;  /* P8 Murano DD2.1 */
     k->cores_mask = POWER8E_CORE_MASK;
+    k->num_phbs = 3;
     k->core_pir = pnv_chip_core_pir_p8;
     k->intc_create = pnv_chip_power8_intc_create;
     k->isa_create = pnv_chip_power8_isa_create;
@@ -928,6 +975,7 @@ static void pnv_chip_power8_class_init(ObjectClass *klass, void *data)
     k->chip_type = PNV_CHIP_POWER8;
     k->chip_cfam_id = 0x220ea04980000000ull; /* P8 Venice DD2.0 */
     k->cores_mask = POWER8_CORE_MASK;
+    k->num_phbs = 3;
     k->core_pir = pnv_chip_core_pir_p8;
     k->intc_create = pnv_chip_power8_intc_create;
     k->isa_create = pnv_chip_power8_isa_create;
@@ -948,6 +996,7 @@ static void pnv_chip_power8nvl_class_init(ObjectClass *klass, void *data)
     k->chip_type = PNV_CHIP_POWER8NVL;
     k->chip_cfam_id = 0x120d304980000000ull;  /* P8 Naples DD1.0 */
     k->cores_mask = POWER8_CORE_MASK;
+    k->num_phbs = 4;
     k->core_pir = pnv_chip_core_pir_p8;
     k->intc_create = pnv_chip_power8_intc_create;
     k->isa_create = pnv_chip_power8nvl_isa_create;
@@ -1093,6 +1142,7 @@ static void pnv_chip_power9_class_init(ObjectClass *klass, void *data)
     k->chip_type = PNV_CHIP_POWER9;
     k->chip_cfam_id = 0x220d104900008000ull; /* P9 Nimbus DD2.0 */
     k->cores_mask = POWER9_CORE_MASK;
+    k->num_phbs = 0;
     k->core_pir = pnv_chip_core_pir_p9;
     k->intc_create = pnv_chip_power9_intc_create;
     k->isa_create = pnv_chip_power9_isa_create;
@@ -1245,13 +1295,23 @@ static void pnv_chip_class_init(ObjectClass *klass, void *data)
 static ICSState *pnv_ics_get(XICSFabric *xi, int irq)
 {
     PnvMachineState *pnv = PNV_MACHINE(xi);
-    int i;
+    int i, j;
 
     for (i = 0; i < pnv->num_chips; i++) {
+        PnvChip *chip = pnv->chips[i];
         Pnv8Chip *chip8 = PNV8_CHIP(pnv->chips[i]);
+        PnvChipClass *pcc = PNV_CHIP_GET_CLASS(chip);
 
         if (ics_valid_irq(&chip8->psi.ics, irq)) {
             return &chip8->psi.ics;
+        }
+        for (j = 0; j < pcc->num_phbs; j++) {
+            if (ics_valid_irq(&chip8->phbs[j].lsis, irq)) {
+                return &chip8->phbs[j].lsis;
+            }
+            if (ics_valid_irq(ICS_BASE(&chip8->phbs[j].msis), irq)) {
+                return ICS_BASE(&chip8->phbs[j].msis);
+            }
         }
     }
     return NULL;
@@ -1260,11 +1320,18 @@ static ICSState *pnv_ics_get(XICSFabric *xi, int irq)
 static void pnv_ics_resend(XICSFabric *xi)
 {
     PnvMachineState *pnv = PNV_MACHINE(xi);
-    int i;
+    int i, j;
 
     for (i = 0; i < pnv->num_chips; i++) {
+        PnvChip *chip = pnv->chips[i];
         Pnv8Chip *chip8 = PNV8_CHIP(pnv->chips[i]);
+        PnvChipClass *pcc = PNV_CHIP_GET_CLASS(chip);
+
         ics_resend(&chip8->psi.ics);
+        for (j = 0; j < pcc->num_phbs; j++) {
+            ics_resend(&chip8->phbs[j].lsis);
+            ics_resend(ICS_BASE(&chip8->phbs[j].msis));
+        }
     }
 }
 

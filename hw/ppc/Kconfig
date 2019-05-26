@@ -26,6 +26,8 @@ config POWERNV
     select MC146818RTC
     select XICS
     select XIVE
+    select PCI
+    select PCIE_PORT
 
 config PPC405
     bool
