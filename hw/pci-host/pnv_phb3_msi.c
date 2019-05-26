@@ -223,6 +223,32 @@ static void phb3_msi_resend(ICSState *ics)
     }
 }
 
+static void phb3_msi_print_info(ICSState *ics, Monitor *mon)
+{
+    Phb3MsiState *msi = PHB3_MSI(ics);
+    int i;
+
+    for (i = 0; i < ics->nr_irqs; i++) {
+        uint64_t ive;
+
+        if (!phb3_msi_read_ive(msi->phb, i, &ive)) {
+            return;
+        }
+
+        if (GETFIELD(IODA2_IVT_PRIORITY, ive) == 0xff) {
+            continue;
+        }
+
+        monitor_printf(mon, "  %4x %c%c server=%04x prio=%02x gen=%d\n",
+                       ics->offset + i,
+                       GETFIELD(IODA2_IVT_P, ive) ? 'P' : '-',
+                       GETFIELD(IODA2_IVT_Q, ive) ? 'Q' : '-',
+                       (uint32_t) GETFIELD(IODA2_IVT_SERVER, ive) >> 2,
+                       (uint32_t) GETFIELD(IODA2_IVT_PRIORITY, ive),
+                       (uint32_t) GETFIELD(IODA2_IVT_GEN, ive));
+    }
+}
+
 static void phb3_msi_reset(DeviceState *dev)
 {
     Phb3MsiState *msi = PHB3_MSI(dev);
@@ -298,6 +324,7 @@ static void phb3_msi_class_init(ObjectClass *klass, void *data)
 
     isc->reject = phb3_msi_reject;
     isc->resend = phb3_msi_resend;
+    isc->print_info = phb3_msi_print_info;
 }
 
 static const TypeInfo phb3_msi_info = {

@@ -58,6 +58,7 @@ void icp_pic_print_info(ICPState *icp, Monitor *mon)
 
 void ics_pic_print_info(ICSState *ics, Monitor *mon)
 {
+    ICSStateClass *icsc = ICS_BASE_GET_CLASS(ics);
     uint32_t i;
 
     monitor_printf(mon, "ICS %4x..%4x %p\n",
@@ -69,6 +70,11 @@ void ics_pic_print_info(ICSState *ics, Monitor *mon)
 
     if (kvm_irqchip_in_kernel()) {
         ics_synchronize_state(ics);
+    }
+
+    if (icsc->print_info) {
+        icsc->print_info(ics, mon);
+        return;
     }
 
     for (i = 0; i < ics->nr_irqs; i++) {

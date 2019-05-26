@@ -109,6 +109,7 @@ struct ICSStateClass {
     void (*reject)(ICSState *s, uint32_t irq);
     void (*resend)(ICSState *s);
     void (*eoi)(ICSState *s, uint32_t irq);
+    void (*print_info)(ICSState *ics, Monitor *mon);
 };
 
 struct ICSState {
