@@ -236,5 +236,6 @@ struct PnvPhb4PecState {
 };
 
 extern void pnv_phb4_pec_attach(struct PnvPHB4 *phb, const MemoryRegionOps *xscom_ops, Error **errp);
+void pnv_phb4_pic_print_info(PnvPHB4 *phb, Monitor *mon);
 
 #endif /* PCI_HOST_PNV_PHB4_H */

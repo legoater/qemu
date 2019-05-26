@@ -11,6 +11,7 @@
 #include "qapi/visitor.h"
 #include "qapi/error.h"
 #include "qemu-common.h"
+#include "monitor/monitor.h"
 #include "target/ppc/cpu.h"
 #include "hw/pci-host/pnv_phb4_regs.h"
 #include "hw/pci-host/pnv_phb4.h"
@@ -1384,3 +1385,13 @@ static void pnv_phb4_register_types(void)
 }
 
 type_init(pnv_phb4_register_types)
+
+void pnv_phb4_pic_print_info(PnvPHB4 *phb, Monitor *mon)
+{
+    uint32_t offset = phb->regs[PHB_INT_NOTIFY_INDEX >> 3];
+
+    monitor_printf(mon, "PHB4[%x:%x] Source %08x .. %08x\n",
+                   phb->chip_id, phb->phb_id,
+                   offset, offset + phb->xsrc.nr_irqs - 1);
+    xive_source_pic_print_info(&phb->xsrc, 0, mon);
+}
