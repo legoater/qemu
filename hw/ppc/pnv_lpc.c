@@ -23,6 +23,7 @@
 #include "qapi/error.h"
 #include "qemu/log.h"
 #include "hw/isa/isa.h"
+#include "hw/isa/aspeed_mbox.h"
 
 #include "hw/ppc/pnv.h"
 #include "hw/ppc/pnv_lpc.h"
@@ -856,6 +857,9 @@ ISABus *pnv_lpc_isa_create(PnvLpcController *lpc, bool use_cpld, Error **errp)
 
     memory_region_add_subregion(&lpc->isa_fw, PNOR_SPI_OFFSET,
                                 &lpc2ahb->spi.mmio_flash);
+
+
+    aspeed_mbox_create(isa_bus);
 
     return isa_bus;
 }
