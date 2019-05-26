@@ -58,6 +58,17 @@ typedef struct AspeedSioDeviceClass {
 
 } AspeedSioDeviceClass;
 
+#define TYPE_ASPEED_SIO_LPC2AHB  "aspeed.sio.lpc2ahb"
+#define ASPEED_SIO_LPC2AHB(obj) \
+    OBJECT_CHECK(AspeedSioLpc2Ahb, (obj), TYPE_ASPEED_SIO_LPC2AHB)
+
+typedef struct AspeedSioLpc2Ahb {
+    AspeedSioDevice parent_obj;
+
+    AddressSpace ahb_as;
+    MemoryRegion ahb_mr;
+} AspeedSioLpc2Ahb;
+
 /*
  * SuperIO controller
  */
@@ -77,6 +88,7 @@ typedef struct AspeedSio {
     MemoryRegion io;
 
     AspeedSioDevice *devices[ASPEED_SIO_NR_DEV];
+    AspeedSioLpc2Ahb lpc2ahb;
 } AspeedSio;
 
 /*

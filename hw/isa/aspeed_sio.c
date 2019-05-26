@@ -172,16 +172,36 @@ static void aspeed_sio_reset(DeviceState *dev)
     sio->locked = 2;
 }
 
+static void aspeed_sio_instance_init(Object *obj)
+{
+    AspeedSio *sio = ASPEED_SIO(obj);
+
+    object_initialize(&sio->lpc2ahb, sizeof(sio->lpc2ahb),
+                      TYPE_ASPEED_SIO_LPC2AHB);
+    object_property_add_child(obj, "lpc2ahb", OBJECT(&sio->lpc2ahb), NULL);
+}
+
 static void aspeed_sio_realize(DeviceState *dev, Error **errp)
 {
     ISADevice *isadev = ISA_DEVICE(dev);
     AspeedSio *sio = ASPEED_SIO(isadev);
+    Error *local_err = NULL;
 
     qdev_set_legacy_instance_id(dev, sio->iobase, 3);
 
     memory_region_init_io(&sio->io, OBJECT(sio), &aspeed_sio_io_ops, sio,
                           "aspeed-sio", 2);
     isa_register_ioport(isadev, &sio->io, sio->iobase);
+
+    /* iLPC2AHB device */
+    object_property_add_const_link(OBJECT(&sio->lpc2ahb), "sio",
+                                   OBJECT(sio), &error_fatal);
+    object_property_set_bool(OBJECT(&sio->lpc2ahb), true, "realized",
+                             &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return;
+    }
 }
 
 static const VMStateDescription aspeed_sio_vmstate = {
@@ -214,6 +234,7 @@ static void aspeed_sio_class_init(ObjectClass *klass, void *data)
 static const TypeInfo aspeed_sio_info = {
     .name          = TYPE_ASPEED_SIO,
     .parent        = TYPE_ISA_DEVICE,
+    .instance_init = aspeed_sio_instance_init,
     .instance_size = sizeof(AspeedSio),
     .class_init    = aspeed_sio_class_init,
 };
@@ -273,10 +294,145 @@ static const TypeInfo aspeed_sio_device_info = {
     .class_size    = sizeof(AspeedSioDeviceClass),
 };
 
+/*
+ * SuperIO iLPC2AHB bridge device
+ */
+
+static uint64_t aspeed_sio_lpc2ahb_rw(AspeedSioDevice *s, bool write)
+{
+    AspeedSio *sio = s->sio;
+    AspeedSioLpc2Ahb *lpc2ahb = ASPEED_SIO_LPC2AHB(s);
+    bool success;
+    uint32_t addr;
+    uint32_t data = -1;
+    int sz = 1 << (sio->regs[0xf8] & 0x3);
+
+    addr = (sio->regs[0xf0] << 24 |
+            sio->regs[0xf1] << 16 |
+            sio->regs[0xf2] << 8 |
+            sio->regs[0xf3]);
+
+    if (write) {
+        data = (sio->regs[0xf4] << 24 |
+                sio->regs[0xf5] << 16 |
+                sio->regs[0xf6] << 8  |
+                sio->regs[0xf7]);
+    }
+
+    success = !address_space_rw(&lpc2ahb->ahb_as, addr, MEMTXATTRS_UNSPECIFIED,
+                                (uint8_t *) &data, sz, write);
+    if (!success) {
+        qemu_log_mask(LOG_GUEST_ERROR, "lpc2ahb: %s to address 0x%08x failed\n",
+                      write ? "write" : "read", addr);
+        return -1;
+    }
+
+    if (!write) {
+        sio->regs[0xf4] = (data >> 24) & 0xff;
+        sio->regs[0xf5] = (data >> 16) & 0xff;
+        sio->regs[0xf6] = (data >> 8) & 0xff;
+        sio->regs[0xf7] = (data >> 0) & 0xff;
+    }
+    return 0;
+}
+
+static uint64_t aspeed_sio_lpc2ahb_read(AspeedSioDevice *s, uint8_t reg)
+{
+    AspeedSio *sio = s->sio;
+    uint64_t val = -1;
+
+    switch (reg) {
+    case ASPEED_SIO_REG_ENABLE:
+    case 0xf0 ... 0xf3:  /* address */
+    case 0xf4 ... 0xf7:  /* data */
+    case 0xf8:           /* data size (and more) */
+        val = sio->regs[reg];
+        break;
+
+    case 0xfe: /* trigger read on AHB bus */
+        val = aspeed_sio_lpc2ahb_rw(s, false);
+        break;
+
+    default:
+        qemu_log_mask(LOG_GUEST_ERROR, "lpc2ahb: invalid register 0x%x\n", reg);
+    }
+
+    return val;
+}
+
+static void aspeed_sio_lpc2ahb_write(AspeedSioDevice *s, uint8_t reg,
+                                     uint8_t val)
+{
+    AspeedSio *sio = s->sio;
+
+    switch (reg) {
+    case ASPEED_SIO_REG_ENABLE: /* more enablement */
+        sio->regs[ASPEED_SIO_REG_ENABLE] = val;
+        return;
+    case 0xf0 ... 0xf3:  /* address */
+    case 0xf4 ... 0xf7:  /* data */
+    case 0xf8:           /* data size */
+        sio->regs[reg] = val;
+        return;
+
+    case 0xfe: /* trigger write on AHB bus */
+        if (val == 0xcf) {
+            aspeed_sio_lpc2ahb_rw(s, true);
+        }
+        return;
+
+    default:
+        qemu_log_mask(LOG_GUEST_ERROR, "lpc2ahb: invalid register 0x%x\n", reg);
+    }
+}
+
+/*
+ * Memory Space layout on the AST2400 and AST2500 SoCs
+ *
+ *   00000000 - 0FFF:FFFF   FMC Flash Memory (bootup)
+ *   1E600000 - 1FFF:FFFF   Controller's registers
+ *   20000000 - 2FFF:FFFF   FMC Flash Memory
+ *   30000000 - 3FFF:FFFF   SPI Flash Memory
+ *   40000000 - 5FFF:FFFF   SDRAM (AST2400)
+ *   60000000 - 6FFF:FFFF   AHB BUS to LPC Bus Bridge
+ *   70000000 - 7FFF:FFFF   AHB BUS to LPC+ Bus Bridge
+ *   80000000 - BFFF:FFFF   SDRAM (AST2500)
+ *
+ */
+static void aspeed_sio_lpc2ahb_realize(DeviceState *dev, Error **errp)
+{
+    AspeedSioLpc2Ahb *s = ASPEED_SIO_LPC2AHB(dev);
+
+    /*
+     * Provide a 2GiB address space, enough to access most of the
+     * memory space (only excluding AST2500 SDRAM)
+     */
+    memory_region_init(&s->ahb_mr, OBJECT(dev), "lpc-ahb", 0x80000000ull);
+    address_space_init(&s->ahb_as, &s->ahb_mr, "lpc-ahb");
+}
+
+static void aspeed_sio_lpc2ahb_class_init(ObjectClass *klass, void *data)
+{
+    AspeedSioDeviceClass *sdc = ASPEED_SIO_DEVICE_CLASS(klass);
+
+    sdc->realize = aspeed_sio_lpc2ahb_realize;
+    sdc->read    = aspeed_sio_lpc2ahb_read;
+    sdc->write   = aspeed_sio_lpc2ahb_write;
+    sdc->id      = ASPEED_SIO_DEV_LPC2AHB;
+}
+
+static const TypeInfo aspeed_sio_lpc2ahb_info = {
+    .name          = TYPE_ASPEED_SIO_LPC2AHB,
+    .parent        = TYPE_ASPEED_SIO_DEVICE,
+    .instance_size = sizeof(AspeedSioLpc2Ahb),
+    .class_init    = aspeed_sio_lpc2ahb_class_init,
+};
+
 static void aspeed_sio_register_types(void)
 {
     type_register_static(&aspeed_sio_info);
     type_register_static(&aspeed_sio_device_info);
+    type_register_static(&aspeed_sio_lpc2ahb_info);
 }
 
 type_init(aspeed_sio_register_types)
