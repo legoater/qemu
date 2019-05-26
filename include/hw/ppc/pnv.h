@@ -219,6 +219,7 @@ static inline PnvChip *pnv_get_chip(PnvMachineState *pnv, uint chip_id)
  */
 void pnv_dt_bmc_sensors(IPMIBmc *bmc, void *fdt);
 void pnv_bmc_powerdown(IPMIBmc *bmc);
+int pnv_bmc_hiomap(IPMIBmc *bmc);
 
 /*
  * POWER8 MMIO base addresses

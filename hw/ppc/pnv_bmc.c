@@ -17,12 +17,15 @@
  */
 
 #include "qemu/osdep.h"
+#include "qapi/error.h"
 #include "hw/hw.h"
 #include "sysemu/sysemu.h"
 #include "target/ppc/cpu.h"
 #include "qemu/log.h"
 #include "hw/ipmi/ipmi.h"
 #include "hw/ppc/fdt.h"
+#include "sysemu/block-backend.h"
+#include "qemu/error-report.h"
 
 #include "hw/ppc/pnv.h"
 
@@ -118,4 +121,104 @@ void pnv_dt_bmc_sensors(IPMIBmc *bmc, void *fdt)
         _FDT((fdt_setprop_cell(fdt, off, "ipmi-sensor-type",
                                sdr->sensor_type)));
     }
+}
+#define HIOMAP                       0x5a
+
+#define HIOMAP_C_RESET                  1
+#define HIOMAP_C_GET_INFO               2
+#define HIOMAP_C_GET_FLASH_INFO	        3
+#define HIOMAP_C_CREATE_READ_WINDOW     4
+#define HIOMAP_C_CLOSE_WINDOW           5
+#define HIOMAP_C_CREATE_WRITE_WINDOW    6
+#define HIOMAP_C_MARK_DIRTY             7
+#define HIOMAP_C_FLUSH                  8
+#define HIOMAP_C_ACK                    9
+#define HIOMAP_C_ERASE                  10
+#define HIOMAP_C_DEVICE_NAME            11
+#define HIOMAP_C_LOCK                   12
+
+#define PNOR_SPI_OFFSET         0x0c000000UL
+#define BLOCK_SHIFT             12
+
+static uint16_t bytes_to_blocks(uint32_t bytes)
+{
+	return bytes >> BLOCK_SHIFT;
+}
+
+static void hiomap_cmd(IPMIBmcSim *ibs, uint8_t *cmd, unsigned int cmd_len,
+                       RspBuffer *rsp)
+{
+    DriveInfo *drive0 = drive_get(IF_MTD, 0, 0);
+    BlockBackend *blk;
+    int64_t size;
+
+    if (!drive0) {
+        return;
+    }
+
+    blk = blk_by_legacy_dinfo(drive0);
+    size = blk_getlength(blk);
+    if (size <= 0) {
+        error_report("failed to get flash size\n");
+        return;
+    }
+
+    rsp_buffer_push(rsp, cmd[2]);
+    rsp_buffer_push(rsp, cmd[3]);
+
+    switch (cmd[2]) {
+    case HIOMAP_C_MARK_DIRTY:
+    case HIOMAP_C_FLUSH:
+    case HIOMAP_C_ERASE:
+    case HIOMAP_C_ACK:
+        break;
+
+    case HIOMAP_C_GET_INFO:
+        rsp_buffer_push(rsp, 2);  /* Version 2 */
+        rsp_buffer_push(rsp, BLOCK_SHIFT); /* block size */
+        rsp_buffer_push(rsp, 0);  /* Timeout */
+        rsp_buffer_push(rsp, 0);  /* Timeout */
+        break;
+
+    case HIOMAP_C_GET_FLASH_INFO:
+        rsp_buffer_push(rsp, bytes_to_blocks(size) & 0xFF); /* size */
+        rsp_buffer_push(rsp, bytes_to_blocks(size) >> 8);   /* size */
+        rsp_buffer_push(rsp, 0x01);  /* erase size */
+        rsp_buffer_push(rsp, 0x00);  /* erase size */
+        break;
+
+    case HIOMAP_C_CREATE_READ_WINDOW:
+    case HIOMAP_C_CREATE_WRITE_WINDOW:
+        rsp_buffer_push(rsp, bytes_to_blocks(PNOR_SPI_OFFSET) & 0xFF); /* LPC address */
+        rsp_buffer_push(rsp, bytes_to_blocks(PNOR_SPI_OFFSET) >> 8);   /* LPC address */
+        rsp_buffer_push(rsp, bytes_to_blocks(size) & 0xFF);  /* size */
+        rsp_buffer_push(rsp, bytes_to_blocks(size) >> 8);    /* size */
+        rsp_buffer_push(rsp, 0x00);  /* offset */
+        rsp_buffer_push(rsp, 0x00);  /* offset */
+        break;
+    case HIOMAP_C_CLOSE_WINDOW:
+        /* TODO */
+        break;
+
+    case HIOMAP_C_DEVICE_NAME:
+    case HIOMAP_C_RESET:
+    case HIOMAP_C_LOCK:
+    default:
+        printf("%s: cmd %02X not implemented\n", __func__, cmd[2]);
+        break;
+    }
+}
+
+static const IPMICmdHandler oem_cmds[] = {
+    [HIOMAP] = { hiomap_cmd, 3 },
+};
+
+static const IPMINetfn oem_netfn = {
+    .cmd_nums = ARRAY_SIZE(oem_cmds),
+    .cmd_handlers = oem_cmds
+};
+
+int pnv_bmc_hiomap(IPMIBmc *bmc)
+{
+    return ipmi_register_oem_netfn(bmc, &oem_netfn);
 }
