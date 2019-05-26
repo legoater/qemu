@@ -40,6 +40,7 @@
 
 #include "hw/ppc/xics.h"
 #include "hw/ppc/pnv_xscom.h"
+#include "hw/ppc/pnv_pnor.h"
 
 #include "hw/isa/isa.h"
 #include "hw/char/serial.h"
@@ -622,6 +623,7 @@ static void pnv_init(MachineState *machine)
     long fw_size;
     int i;
     char *chip_typename;
+    DriveInfo *pnor = NULL;
 
     /* MSIs are supported on this platform */
     msi_nonbroken = true;
@@ -636,23 +638,32 @@ static void pnv_init(MachineState *machine)
                                          machine->ram_size);
     memory_region_add_subregion(get_system_memory(), 0, ram);
 
-    /* load skiboot firmware  */
+    /*
+     * Try to load skiboot from pnor if no 'bios' was provided on the
+     * command line. skiboot will load the kernel and initramfs from
+     * the PNOR.
+     */
     if (bios_name == NULL) {
         bios_name = FW_FILE_NAME;
+        pnor = drive_get(IF_MTD, 0, 0);
     }
 
-    fw_filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
-    if (!fw_filename) {
-        error_report("Could not find OPAL firmware '%s'", bios_name);
-        exit(1);
-    }
+    if (pnor) {
+        pnv_pnor_load_skiboot(pnor, FW_LOAD_ADDR, FW_MAX_SIZE, &error_fatal);
+    } else {
+        fw_filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
+        if (!fw_filename) {
+            error_report("Could not find OPAL firmware '%s'", bios_name);
+            exit(1);
+        }
 
-    fw_size = load_image_targphys(fw_filename, FW_LOAD_ADDR, FW_MAX_SIZE);
-    if (fw_size < 0) {
+        fw_size = load_image_targphys(fw_filename, FW_LOAD_ADDR, FW_MAX_SIZE);
+        if (fw_size < 0) {
         error_report("Could not load OPAL firmware '%s'", fw_filename);
         exit(1);
+        }
+        g_free(fw_filename);
     }
-    g_free(fw_filename);
 
     /* load kernel */
     if (machine->kernel_filename) {
