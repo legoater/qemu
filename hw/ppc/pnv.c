@@ -921,7 +921,6 @@ static void pnv_chip_power8_realize(DeviceState *dev, Error **errp)
     /* Create the PHB3 controllers */
     for (i = 0; i < pcc->num_phbs; i++) {
         PnvPHB3 *phb = &chip8->phbs[i];
-        PnvPBCQState *pbcq = &phb->pbcq;
 
         object_property_set_int(OBJECT(phb), i, "index", &error_fatal);
         object_property_set_int(OBJECT(phb), chip->chip_id, "chip-id",
@@ -932,17 +931,6 @@ static void pnv_chip_power8_realize(DeviceState *dev, Error **errp)
             return;
         }
         qdev_set_parent_bus(DEVICE(phb), sysbus_get_default());
-
-        /* Populate the XSCOM address space. */
-        pnv_xscom_add_subregion(chip,
-                                PNV_XSCOM_PBCQ_NEST_BASE + 0x400 * phb->phb_id,
-                                &pbcq->xscom_nest_regs);
-        pnv_xscom_add_subregion(chip,
-                                PNV_XSCOM_PBCQ_PCI_BASE + 0x400 * phb->phb_id,
-                                &pbcq->xscom_pci_regs);
-        pnv_xscom_add_subregion(chip,
-                                PNV_XSCOM_PBCQ_SPCI_BASE + 0x040 * phb->phb_id,
-                                &pbcq->xscom_spci_regs);
     }
 }
 
@@ -1431,6 +1419,7 @@ static void pnv_machine_class_init(ObjectClass *oc, void *data)
     xic->ics_get = pnv_ics_get;
     xic->ics_resend = pnv_ics_resend;
     ispc->print_info = pnv_pic_print_info;
+    machine_class_allow_dynamic_sysbus_dev(mc, TYPE_PNV_PHB3);
 
     pnv_machine_class_props_init(oc);
 }

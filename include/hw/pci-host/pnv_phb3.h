@@ -162,6 +162,8 @@ struct PnvPHB3 {
     PnvPBCQState pbcq;
 
     QLIST_HEAD(, PnvPhb3DMASpace) dma_spaces;
+
+    PnvChip *chip;
 };
 
 uint64_t pnv_phb3_reg_read(void *opaque, hwaddr off, unsigned size);

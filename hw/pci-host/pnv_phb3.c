@@ -980,6 +980,25 @@ static void pnv_phb3_instance_init(Object *obj)
     qdev_prop_set_bit(DEVICE(&phb->root), "multifunction", false);
 }
 
+static void pnv_phb3_parent_fixup(PnvPHB3 *phb, Object *parent, Error **errp)
+{
+    Object *obj = OBJECT(phb);
+    char default_id[16];
+
+    if (obj->parent == parent) {
+        return;
+    }
+
+    snprintf(default_id, sizeof(default_id), "phb[%d]", phb->phb_id);
+
+    object_ref(obj);
+    object_unparent(obj);
+    object_property_add_child(parent,
+                              DEVICE(obj)->id ? DEVICE(obj)->id : default_id,
+                              obj, errp);
+    object_unref(obj);
+}
+
 static void pnv_phb3_realize(DeviceState *dev, Error **errp)
 {
     PnvPHB3 *phb = PNV_PHB3(dev);
@@ -988,13 +1007,25 @@ static void pnv_phb3_realize(DeviceState *dev, Error **errp)
     Error *local_err = NULL;
     int i;
 
-    if (!pnv_get_chip(pnv, phb->chip_id)) {
+    phb->chip = pnv_get_chip(pnv, phb->chip_id);
+    if (!phb->chip) {
         error_setg(errp, "invalid chip id: %d", phb->chip_id);
         return;
     }
 
     if (phb->phb_id >= PNV8_CHIP_PHB3_MAX) {
         error_setg(errp, "invalid PHB index: %d", phb->phb_id);
+        return;
+    }
+
+    /*
+     * PHB3 devices created on the command line are not parented to
+     * the chip. Make sure they are because this is necessary to build
+     * correctly the device tree.
+     */
+    pnv_phb3_parent_fixup(phb, OBJECT(phb->chip), &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
         return;
     }
 
@@ -1109,6 +1140,7 @@ static void pnv_phb3_class_init(ObjectClass *klass, void *data)
     dc->realize = pnv_phb3_realize;
     dc->props = pnv_phb3_properties;
     set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
+    dc->user_creatable = true;
 }
 
 static const TypeInfo pnv_phb3_type_info = {
