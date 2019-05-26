@@ -82,4 +82,7 @@ typedef struct PCIERootPortClass {
     int ssid;
 } PCIERootPortClass;
 
+void pcie_root_port_reset(DeviceState *qdev);
+
+
 #endif /* QEMU_PCIE_PORT_H */

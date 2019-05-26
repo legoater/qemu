@@ -963,7 +963,7 @@ static void pnv_chip_power8_class_init(ObjectClass *klass, void *data)
     k->chip_type = PNV_CHIP_POWER8;
     k->chip_cfam_id = 0x220ea04980000000ull; /* P8 Venice DD2.0 */
     k->cores_mask = POWER8_CORE_MASK;
-    k->num_phbs = 3;
+    k->num_phbs = 4;
     k->core_pir = pnv_chip_core_pir_p8;
     k->intc_create = pnv_chip_power8_intc_create;
     k->isa_create = pnv_chip_power8_isa_create;
@@ -1000,6 +1000,7 @@ static void pnv_chip_power8nvl_class_init(ObjectClass *klass, void *data)
 static void pnv_chip_power9_instance_init(Object *obj)
 {
     Pnv9Chip *chip9 = PNV9_CHIP(obj);
+    int i;
 
     object_initialize_child(obj, "xive", &chip9->xive, sizeof(chip9->xive),
                             TYPE_PNV_XIVE, &error_abort, NULL);
@@ -1020,6 +1021,12 @@ static void pnv_chip_power9_instance_init(Object *obj)
                             TYPE_PNV9_OCC, &error_abort, NULL);
     object_property_add_const_link(OBJECT(&chip9->occ), "psi",
                                    OBJECT(&chip9->psi), &error_abort);
+
+    for (i = 0; i < PNV9_CHIP_MAX_PEC; i++) {
+        object_initialize_child(obj, "pec[*]", &chip9->pecs[i],
+                                sizeof(chip9->pecs[i]), TYPE_PNV_PHB4_PEC,
+                                &error_abort, NULL);
+    }
 }
 
 static void pnv_chip_quad_realize(Pnv9Chip *chip9, Error **errp)
@@ -1059,6 +1066,7 @@ static void pnv_chip_power9_realize(DeviceState *dev, Error **errp)
     PnvChip *chip = PNV_CHIP(dev);
     Pnv9Psi *psi9 = &chip9->psi;
     Error *local_err = NULL;
+    uint32_t i;
 
     pcc->parent_realize(dev, &local_err);
     if (local_err) {
@@ -1120,6 +1128,32 @@ static void pnv_chip_power9_realize(DeviceState *dev, Error **errp)
         return;
     }
     pnv_xscom_add_subregion(chip, PNV9_XSCOM_OCC_BASE, &chip9->occ.xscom_regs);
+
+
+    /* Create the PHB4 PECs */
+    for (i = 0; i < PNV9_CHIP_MAX_PEC; i++) {
+        PnvPhb4PecState *pec = &chip9->pecs[i];
+
+        object_property_set_int(OBJECT(pec), i, "index", &error_fatal);
+        object_property_set_int(OBJECT(pec), chip->chip_id, "chip-id", &error_fatal);
+        object_property_set_bool(OBJECT(pec), true, "realized", &local_err);
+        if (local_err) {
+            error_propagate(errp, local_err);
+            return;
+        }
+    }
+
+    /* Create the PHBs */
+    for (i = 0; i < pcc->num_phbs; i++) {
+        Object *obj = object_new(TYPE_PNV_PHB4);
+        object_property_set_int(obj, chip->chip_id, "chip-id", &error_fatal);
+        object_property_set_int(obj, i, "index", &error_fatal);
+        object_property_set_bool(obj, true, "realized", &local_err);
+        if (local_err) {
+            error_propagate(errp, local_err);
+            return;
+        }
+    }
 }
 
 static void pnv_chip_power9_class_init(ObjectClass *klass, void *data)
@@ -1130,7 +1164,7 @@ static void pnv_chip_power9_class_init(ObjectClass *klass, void *data)
     k->chip_type = PNV_CHIP_POWER9;
     k->chip_cfam_id = 0x220d104900008000ull; /* P9 Nimbus DD2.0 */
     k->cores_mask = POWER9_CORE_MASK;
-    k->num_phbs = 0;
+    k->num_phbs = 6; /* Make it overridable !!! */
     k->core_pir = pnv_chip_core_pir_p9;
     k->intc_create = pnv_chip_power9_intc_create;
     k->isa_create = pnv_chip_power9_isa_create;

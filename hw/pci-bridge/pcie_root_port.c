@@ -38,7 +38,7 @@ static void rp_write_config(PCIDevice *d, uint32_t address,
     pcie_aer_root_write_config(d, address, val, len, root_cmd);
 }
 
-static void rp_reset(DeviceState *qdev)
+void pcie_root_port_reset(DeviceState *qdev)
 {
     PCIDevice *d = PCI_DEVICE(qdev);
 
@@ -167,7 +167,7 @@ static void rp_class_init(ObjectClass *klass, void *data)
     k->realize = rp_realize;
     k->exit = rp_exit;
     set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
-    dc->reset = rp_reset;
+    dc->reset = pcie_root_port_reset;
     dc->props = rp_props;
 }
 
