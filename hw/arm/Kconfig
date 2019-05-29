@@ -330,6 +330,7 @@ config ASPEED_SOC
     bool
     select DS1338
     select FTGMAC100
+    select ISA_BUS
     select I2C
     select PCA9552
     select SERIAL
