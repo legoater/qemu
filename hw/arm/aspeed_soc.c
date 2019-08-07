@@ -284,6 +284,8 @@ static void aspeed_soc_init(Object *obj)
 
     sysbus_init_child_obj(obj, "i2c", OBJECT(&s->i2c), sizeof(s->i2c),
                           TYPE_ASPEED_I2C);
+    qdev_prop_set_uint32(DEVICE(&s->i2c), "silicon-rev",
+                         sc->info->silicon_rev);
 
     sysbus_init_child_obj(obj, "adc", OBJECT(&s->adc), sizeof(s->adc),
                           TYPE_ASPEED_ADC);

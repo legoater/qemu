@@ -54,10 +54,12 @@ typedef struct AspeedI2CState {
     qemu_irq irq;
 
     uint32_t intr_status;
+    uint32_t silicon_rev;
     MemoryRegion page_iomem;
     uint8_t pages[0x800];
 
     AspeedI2CBus busses[ASPEED_I2C_NR_BUSSES];
+    uint8_t *(*i2c_bus_buf_base)(AspeedI2CBus *);
 } AspeedI2CState;
 
 I2CBus *aspeed_i2c_get_bus(DeviceState *dev, int busnr);

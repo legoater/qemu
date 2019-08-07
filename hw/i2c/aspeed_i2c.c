@@ -23,6 +23,7 @@
 #include "qemu/log.h"
 #include "qemu/module.h"
 #include "hw/i2c/aspeed_i2c.h"
+#include "hw/misc/aspeed_scu.h"
 
 /* I2C Global Register */
 
@@ -135,6 +136,14 @@
 #define   I2CD_BYTE_BUF_RX_SHIFT           8
 #define   I2CD_BYTE_BUF_RX_MASK            0xff
 
+#define AST2400_I2C_BUF_BASE		0x800
+#define AST2400_I2C_BUF_SIZE		0x800
+#define AST2500_I2C_BUF_BASE		0x200
+#define AST2500_I2C_BUF_BUS_SIZE	0x010
+#define AST2500_I2C_BUF_SIZE		0x100
+#define AST2600_I2C_BUF_BASE		0xC00
+#define AST2600_I2C_BUF_BUS_SIZE	0x020
+#define AST2600_I2C_BUF_SIZE		0x200
 
 static inline bool aspeed_i2c_bus_is_master(AspeedI2CBus *bus)
 {
@@ -195,12 +204,22 @@ static uint8_t aspeed_i2c_get_state(AspeedI2CBus *bus)
     return (bus->cmd >> I2CD_TX_STATE_SHIFT) & I2CD_TX_STATE_MASK;
 }
 
-static uint8_t *aspeed_i2c_bus_buf_base(AspeedI2CBus *bus)
+static uint8_t *aspeed_ast2400_i2c_bus_buf_base(AspeedI2CBus *bus)
 {
     uint8_t *buf_page =
         &bus->controller->pages[I2CD_BUFF_PAGE_SEL(bus->ctrl)];
 
     return &buf_page[I2CD_BUF_OFFSET(bus->buf_ctrl)];
+}
+
+static uint8_t *aspeed_ast2500_i2c_bus_buf_base(AspeedI2CBus *bus)
+{
+    return &bus->controller->pages[bus->id * AST2500_I2C_BUF_BUS_SIZE];
+}
+
+static uint8_t *aspeed_ast2600_i2c_bus_buf_base(AspeedI2CBus *bus)
+{
+    return &bus->controller->pages[bus->id * AST2600_I2C_BUF_BUS_SIZE];
 }
 
 static int aspeed_i2c_bus_send(AspeedI2CBus *bus)
@@ -210,7 +229,7 @@ static int aspeed_i2c_bus_send(AspeedI2CBus *bus)
 
     if (bus->cmd & I2CD_TX_BUFF_ENABLE) {
         for (i = 0; i < I2CD_BUF_TX_COUNT(bus->buf_ctrl); i++) {
-            uint8_t *buf_base = aspeed_i2c_bus_buf_base(bus);
+            uint8_t *buf_base = bus->controller->i2c_bus_buf_base(bus);
 
             ret = i2c_send(bus->bus, buf_base[i]);
             if (ret) {
@@ -231,7 +250,7 @@ static void aspeed_i2c_bus_recv(AspeedI2CBus *bus)
     int i;
 
     if (bus->cmd & I2CD_RX_BUFF_ENABLE) {
-        uint8_t *buf_base = aspeed_i2c_bus_buf_base(bus);
+        uint8_t *buf_base = bus->controller->i2c_bus_buf_base(bus);
 
         for (i = 0; i < I2CD_BUF_RX_SIZE(bus->buf_ctrl); i++) {
             buf_base[i] = i2c_recv(bus->bus);
@@ -276,7 +295,7 @@ static void aspeed_i2c_bus_handle_cmd(AspeedI2CBus *bus, uint64_t value)
         aspeed_i2c_set_state(bus, state);
 
         if (bus->cmd & I2CD_TX_BUFF_ENABLE) {
-            uint8_t *buf_base = aspeed_i2c_bus_buf_base(bus);
+            uint8_t *buf_base = bus->controller->i2c_bus_buf_base(bus);
 
             data = buf_base[0];
          } else {
@@ -548,6 +567,8 @@ static void aspeed_i2c_reset(DeviceState *dev)
 static void aspeed_i2c_realize(DeviceState *dev, Error **errp)
 {
     int i;
+    uint64_t buf_size;
+    hwaddr buf_base;
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
     AspeedI2CState *s = ASPEED_I2C(dev);
 
@@ -569,10 +590,29 @@ static void aspeed_i2c_realize(DeviceState *dev, Error **errp)
                                     &s->busses[i].mr);
     }
 
+    if (ASPEED_IS_AST2400(s->silicon_rev)) {
+        buf_size = AST2400_I2C_BUF_SIZE;
+        buf_base = AST2400_I2C_BUF_BASE;
+        s->i2c_bus_buf_base = aspeed_ast2400_i2c_bus_buf_base;
+    } else if (ASPEED_IS_AST2500(s->silicon_rev)) {
+        buf_size = AST2500_I2C_BUF_SIZE;
+        buf_base = AST2500_I2C_BUF_BASE;
+        s->i2c_bus_buf_base = aspeed_ast2500_i2c_bus_buf_base;
+    } else {
+        buf_size = AST2600_I2C_BUF_SIZE;
+        buf_base = AST2600_I2C_BUF_BASE;
+        s->i2c_bus_buf_base = aspeed_ast2600_i2c_bus_buf_base;
+    }
+
     memory_region_init_io(&s->page_iomem, OBJECT(s), &aspeed_i2c_page_ops, s,
-                          "aspeed.i2c-pool", 0x800);
-    memory_region_add_subregion(&s->iomem, 0x800, &s->page_iomem);
+                          "aspeed.i2c-pool", buf_size);
+    memory_region_add_subregion(&s->iomem, buf_base, &s->page_iomem);
 }
+
+static Property aspeed_i2c_properties[] = {
+    DEFINE_PROP_UINT32("silicon-rev", AspeedI2CState, silicon_rev, 0),
+    DEFINE_PROP_END_OF_LIST(),
+};
 
 static void aspeed_i2c_class_init(ObjectClass *klass, void *data)
 {
@@ -582,6 +622,7 @@ static void aspeed_i2c_class_init(ObjectClass *klass, void *data)
     dc->reset = aspeed_i2c_reset;
     dc->realize = aspeed_i2c_realize;
     dc->desc = "Aspeed I2C Controller";
+    dc->props = aspeed_i2c_properties;
 }
 
 static const TypeInfo aspeed_i2c_info = {
