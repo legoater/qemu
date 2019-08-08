@@ -28,6 +28,7 @@
 #include "hw/sd/aspeed_sdhci.h"
 #include "hw/misc/aspeed_ibt.h"
 #include "hw/misc/aspeed_pwm.h"
+#include "hw/misc/aspeed_lpc.h"
 
 #define ASPEED_SPIS_NUM  2
 #define ASPEED_WDTS_NUM  4
@@ -60,6 +61,7 @@ typedef struct AspeedSoCState {
     AspeedSDHCIState sdhci;
     AspeedIBTState ibt;
     AspeedPWMState pwm;
+    AspeedLPCState lpc;
 } AspeedSoCState;
 
 #define TYPE_ASPEED_SOC "aspeed-soc"

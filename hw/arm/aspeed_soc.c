@@ -351,6 +351,9 @@ static void aspeed_soc_init(Object *obj)
 
     sysbus_init_child_obj(obj, "pwm", OBJECT(&s->pwm), sizeof(s->pwm),
                           TYPE_ASPEED_PWM);
+
+    sysbus_init_child_obj(obj, "lpc", OBJECT(&s->lpc), sizeof(s->lpc),
+                           TYPE_ASPEED_LPC);
 }
 
 /*
@@ -713,6 +716,15 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->pwm), 0, sc->info->memmap[ASPEED_PWM]);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->pwm), 0,
                        aspeed_soc_get_irq(s, ASPEED_PWM));
+
+    /* LPC */
+    object_property_set_bool(OBJECT(&s->lpc), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->lpc), 0, sc->info->memmap[ASPEED_LPC]);
+    /* LPC IRQ in use by the iBT sub controller */
 }
 static Property aspeed_soc_properties[] = {
     DEFINE_PROP_UINT32("num-cpus", AspeedSoCState, num_cpus, 0),
