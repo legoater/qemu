@@ -345,6 +345,9 @@ static void aspeed_soc_init(Object *obj)
                               sizeof(s->sdhci.slots[i].sdhci),
                               TYPE_SYSBUS_SDHCI);
     }
+
+    sysbus_init_child_obj(obj, "ibt", OBJECT(&s->ibt), sizeof(s->ibt),
+                          TYPE_ASPEED_IBT);
 }
 
 /*
@@ -680,6 +683,16 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
                     sc->info->memmap[ASPEED_SDHCI]);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->sdhci), 0,
                        aspeed_soc_get_irq(s, ASPEED_SDHCI));
+
+    /* iBT */
+    object_property_set_bool(OBJECT(&s->ibt), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->ibt), 0, sc->info->memmap[ASPEED_IBT]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->ibt), 0,
+                       aspeed_soc_get_irq(s, ASPEED_LPC));
 }
 static Property aspeed_soc_properties[] = {
     DEFINE_PROP_UINT32("num-cpus", AspeedSoCState, num_cpus, 0),

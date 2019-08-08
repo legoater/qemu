@@ -26,6 +26,7 @@
 #include "hw/net/ftgmac100.h"
 #include "hw/gpio/aspeed_gpio.h"
 #include "hw/sd/aspeed_sdhci.h"
+#include "hw/misc/aspeed_ibt.h"
 
 #define ASPEED_SPIS_NUM  2
 #define ASPEED_WDTS_NUM  4
@@ -56,6 +57,7 @@ typedef struct AspeedSoCState {
     AspeedMiiState mii[ASPEED_MACS_NUM];
     AspeedGPIOState gpio;
     AspeedSDHCIState sdhci;
+    AspeedIBTState ibt;
 } AspeedSoCState;
 
 #define TYPE_ASPEED_SOC "aspeed-soc"
