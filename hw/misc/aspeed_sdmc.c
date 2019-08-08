@@ -27,6 +27,7 @@
 /* Control/Status Register #1 (ast2500) */
 #define R_STATUS1         (0x60 / 4)
 #define   PHY_BUSY_STATE      BIT(0)
+#define   PHY_PLL_LOCK_STATUS BIT(4)
 
 #define R_ECC_TEST_CTRL   (0x70 / 4)
 #define   ECC_TEST_FINISHED   BIT(12)
@@ -83,6 +84,11 @@
 #define     ASPEED_SDMC_AST2500_256MB       0x1
 #define     ASPEED_SDMC_AST2500_512MB       0x2
 #define     ASPEED_SDMC_AST2500_1024MB      0x3
+
+#define     ASPEED_SDMC_AST2600_256MB       0x0
+#define     ASPEED_SDMC_AST2600_512MB       0x1
+#define     ASPEED_SDMC_AST2600_1024MB      0x2
+#define     ASPEED_SDMC_AST2600_2048MB      0x3
 
 #define ASPEED_SDMC_AST2500_READONLY_MASK                               \
     (ASPEED_SDMC_HW_VERSION(0xf) | ASPEED_SDMC_CACHE_INITIAL_DONE |     \
@@ -142,16 +148,20 @@ static void aspeed_sdmc_write(void *opaque, hwaddr addr, uint64_t data,
             data &= ~ASPEED_SDMC_AST2500_READONLY_MASK;
             data |= s->fixed_conf;
             break;
+        case AST2600_A0_SILICON_REV: /* TODO */
+            data &= ~ASPEED_SDMC_AST2500_READONLY_MASK;
+            data |= s->fixed_conf;
+            break;
         default:
             g_assert_not_reached();
         }
     }
-    if (s->silicon_rev == AST2500_A0_SILICON_REV ||
-            s->silicon_rev == AST2500_A1_SILICON_REV) {
+    if (ASPEED_IS_AST2500(s->silicon_rev) || ASPEED_IS_AST2600(s->silicon_rev)) {
         switch (addr) {
         case R_STATUS1:
-            /* Will never return 'busy' */
+            /* Will never return 'busy'. 'lock status' is always set */
             data &= ~PHY_BUSY_STATE;
+            data |= PHY_PLL_LOCK_STATUS;
             break;
         case R_ECC_TEST_CTRL:
             /* Always done, always happy */
@@ -218,6 +228,28 @@ static int ast2500_rambits(AspeedSDMCState *s)
     return ASPEED_SDMC_AST2500_512MB;
 }
 
+static int ast2600_rambits(AspeedSDMCState *s)
+{
+    switch (s->ram_size >> 20) {
+    case 256:
+        return ASPEED_SDMC_AST2600_256MB;
+    case 512:
+        return ASPEED_SDMC_AST2600_512MB;
+    case 1024:
+        return ASPEED_SDMC_AST2600_1024MB;
+    case 2048:
+        return ASPEED_SDMC_AST2600_2048MB;
+    default:
+        break;
+    }
+
+    /* use a common default */
+    warn_report("Invalid RAM size 0x%" PRIx64 ". Using default 512M",
+                s->ram_size);
+    s->ram_size = 512 << 20;
+    return ASPEED_SDMC_AST2600_512MB;
+}
+
 static void aspeed_sdmc_reset(DeviceState *dev)
 {
     AspeedSDMCState *s = ASPEED_SDMC(dev);
@@ -254,6 +286,13 @@ static void aspeed_sdmc_realize(DeviceState *dev, Error **errp)
         s->fixed_conf = ASPEED_SDMC_HW_VERSION(1) |
             ASPEED_SDMC_VGA_APERTURE(ASPEED_SDMC_VGA_64MB) |
             ASPEED_SDMC_CACHE_INITIAL_DONE |
+            ASPEED_SDMC_DRAM_SIZE(s->ram_bits);
+        break;
+    case AST2600_A0_SILICON_REV: /* TODO */
+        s->ram_bits = ast2600_rambits(s);
+        s->max_ram_size = 1024 << 21;
+        s->fixed_conf = ASPEED_SDMC_HW_VERSION(3) |
+            ASPEED_SDMC_VGA_APERTURE(ASPEED_SDMC_VGA_64MB) |
             ASPEED_SDMC_DRAM_SIZE(s->ram_bits);
         break;
     default:
