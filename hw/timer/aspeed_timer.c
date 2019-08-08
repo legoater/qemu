@@ -158,7 +158,9 @@ static uint64_t calculate_next(struct AspeedTimer *t)
     timer_del(&t->timer);
 
     if (timer_overflow_interrupt(t)) {
+        AspeedTimerCtrlState *s = timer_to_ctrl(t);
         t->level = !t->level;
+        s->irq_sts |= BIT(t->id);
         qemu_set_irq(t->irq, t->level);
     }
 
@@ -197,7 +199,9 @@ static void aspeed_timer_expire(void *opaque)
     }
 
     if (interrupt) {
+        AspeedTimerCtrlState *s = timer_to_ctrl(t);
         t->level = !t->level;
+        s->irq_sts |= BIT(t->id);
         qemu_set_irq(t->irq, t->level);
     }
 
@@ -263,8 +267,12 @@ static uint64_t aspeed_timer_read(void *opaque, hwaddr offset, unsigned size)
     case 0x30: /* Control Register */
         value = s->ctrl;
         break;
-    case 0x34: /* Control Register 2 */
-        value = s->ctrl2;
+    case 0x34:
+        if (ASPEED_IS_AST2600(s->scu->silicon_rev)) {
+            value = s->irq_sts;
+        } else {
+            value = s->ctrl2;
+        }
         break;
     case 0x38: /* Control Register 3 (ast2500 and ast2600 only) */
         value = s->ctrl3;
@@ -465,7 +473,11 @@ static void aspeed_timer_write(void *opaque, hwaddr offset, uint64_t value,
         aspeed_timer_set_ctrl(s, tv);
         break;
     case 0x34:
-        aspeed_timer_set_ctrl2(s, tv);
+        if (ASPEED_IS_AST2600(s->scu->silicon_rev)) {
+            s->irq_sts &= tv;
+        } else {
+            aspeed_timer_set_ctrl2(s, tv);
+        }
         break;
     case 0x38:
         if (ASPEED_IS_AST2500(s->scu->silicon_rev)) {
@@ -563,6 +575,7 @@ static void aspeed_timer_reset(DeviceState *dev)
     s->ctrl = 0;
     s->ctrl2 = 0;
     s->ctrl3 = 0;
+    s->irq_sts = 0;
 }
 
 static const VMStateDescription vmstate_aspeed_timer = {
