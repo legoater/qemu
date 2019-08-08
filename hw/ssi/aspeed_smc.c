@@ -188,7 +188,7 @@ static const AspeedSegments aspeed_segments_ast2500_spi2[] = {
 
 static const AspeedSMCController controllers[] = {
     {
-        .name              = "aspeed.smc.smc",
+        .name              = "aspeed.smc-ast2400",
         .r_conf            = R_CONF,
         .r_ce_ctrl         = R_CE_CTRL,
         .r_ctrl0           = R_CTRL0,
@@ -201,7 +201,7 @@ static const AspeedSMCController controllers[] = {
         .has_dma           = false,
         .nregs             = ASPEED_SMC_R_SMC_MAX,
     }, {
-        .name              = "aspeed.smc.fmc",
+        .name              = "aspeed.fmc-ast2400",
         .r_conf            = R_CONF,
         .r_ce_ctrl         = R_CE_CTRL,
         .r_ctrl0           = R_CTRL0,
@@ -214,7 +214,7 @@ static const AspeedSMCController controllers[] = {
         .has_dma           = true,
         .nregs             = ASPEED_SMC_R_MAX,
     }, {
-        .name              = "aspeed.smc.spi",
+        .name              = "aspeed.spi1-ast2400",
         .r_conf            = R_SPI_CONF,
         .r_ce_ctrl         = 0xff,
         .r_ctrl0           = R_SPI_CTRL0,
@@ -227,7 +227,7 @@ static const AspeedSMCController controllers[] = {
         .has_dma           = false,
         .nregs             = ASPEED_SMC_R_SPI_MAX,
     }, {
-        .name              = "aspeed.smc.ast2500-fmc",
+        .name              = "aspeed.fmc-ast2500",
         .r_conf            = R_CONF,
         .r_ce_ctrl         = R_CE_CTRL,
         .r_ctrl0           = R_CTRL0,
@@ -240,7 +240,7 @@ static const AspeedSMCController controllers[] = {
         .has_dma           = true,
         .nregs             = ASPEED_SMC_R_MAX,
     }, {
-        .name              = "aspeed.smc.ast2500-spi1",
+        .name              = "aspeed.spi1-ast2500",
         .r_conf            = R_CONF,
         .r_ce_ctrl         = R_CE_CTRL,
         .r_ctrl0           = R_CTRL0,
@@ -253,7 +253,7 @@ static const AspeedSMCController controllers[] = {
         .has_dma           = false,
         .nregs             = ASPEED_SMC_R_MAX,
     }, {
-        .name              = "aspeed.smc.ast2500-spi2",
+        .name              = "aspeed.spi2-ast2500",
         .r_conf            = R_CONF,
         .r_ce_ctrl         = R_CE_CTRL,
         .r_ctrl0           = R_CTRL0,
