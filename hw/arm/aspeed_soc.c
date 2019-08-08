@@ -86,6 +86,10 @@ static const hwaddr aspeed_soc_ast2600_memmap[] = {
     [ASPEED_FMC]    = 0x1E620000,
     [ASPEED_SPI1]   = 0x1E630000,
     [ASPEED_SPI2]   = 0x1E641000,
+    [ASPEED_MII1]   = 0x1E650000,
+    [ASPEED_MII2]   = 0x1E650008,
+    [ASPEED_MII3]   = 0x1E650010,
+    [ASPEED_MII4]   = 0x1E650018,
     [ASPEED_ETH1]   = 0x1E660000,
     [ASPEED_ETH3]   = 0x1E670000,
     [ASPEED_ETH2]   = 0x1E680000,
@@ -306,6 +310,14 @@ static void aspeed_soc_init(Object *obj)
     for (i = 0; i < sc->info->macs_num; i++) {
         sysbus_init_child_obj(obj, "ftgmac100[*]", OBJECT(&s->ftgmac100[i]),
                               sizeof(s->ftgmac100[i]), TYPE_FTGMAC100);
+
+        if (ASPEED_IS_AST2600(sc->info->silicon_rev)) {
+            sysbus_init_child_obj(obj, "mii[*]", &s->mii[i], sizeof(s->mii[i]),
+                                  TYPE_ASPEED_MII);
+            object_property_add_const_link(OBJECT(&s->mii[i]), "nic",
+                                           OBJECT(&s->ftgmac100[i]),
+                                           &error_abort);
+        }
     }
 
     sysbus_init_child_obj(obj, "xdma", OBJECT(&s->xdma), sizeof(s->xdma),
@@ -540,6 +552,18 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
                         sc->info->memmap[ASPEED_ETH1 + i]);
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->ftgmac100[i]), 0,
                            aspeed_soc_get_irq(s, ASPEED_ETH1 + i));
+
+
+        if (ASPEED_IS_AST2600(sc->info->silicon_rev)) {
+            object_property_set_bool(OBJECT(&s->mii[i]), true, "realized", &err);
+            if (err) {
+                error_propagate(errp, err);
+                return;
+            }
+
+            sysbus_mmio_map(SYS_BUS_DEVICE(&s->mii[i]), 0,
+                            sc->info->memmap[ASPEED_MII1 + i]);
+        }
     }
 
     /* XDMA */
