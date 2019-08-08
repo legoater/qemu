@@ -232,6 +232,27 @@ static uint64_t aspeed_timer_get_value(AspeedTimer *t, int reg)
     return value;
 }
 
+/*
+ * On ast2500 and ast2600 the 0x30 (control register) can only be set to 1,
+ * with a write to 0x3C used to clear.
+ *
+ * This is opt-in on ast2500 via 0x38 (control register 3). On the ast2600 it
+ * is not configurable.
+ */
+static bool aspeed_cr_set_only(AspeedTimerCtrlState *s)
+{
+    if (ASPEED_IS_AST2400(s->scu->silicon_rev))
+        return false;
+
+    if (ASPEED_IS_AST2500(s->scu->silicon_rev))
+        return !!(s->ctrl3 & BIT(0));
+
+    if (ASPEED_IS_AST2600(s->scu->silicon_rev))
+        return true;
+
+    g_assert_not_reached();
+}
+
 static uint64_t aspeed_timer_read(void *opaque, hwaddr offset, unsigned size)
 {
     AspeedTimerCtrlState *s = opaque;
@@ -245,6 +266,9 @@ static uint64_t aspeed_timer_read(void *opaque, hwaddr offset, unsigned size)
     case 0x34: /* Control Register 2 */
         value = s->ctrl2;
         break;
+    case 0x38: /* Control Register 3 (ast2500 and ast2600 only) */
+        value = s->ctrl3;
+        break;
     case 0x00 ... 0x2c: /* Timers 1 - 4 */
         value = aspeed_timer_get_value(&s->timers[(offset >> 4)], reg);
         break;
@@ -252,7 +276,6 @@ static uint64_t aspeed_timer_read(void *opaque, hwaddr offset, unsigned size)
         value = aspeed_timer_get_value(&s->timers[(offset >> 4) - 1], reg);
         break;
     /* Illegal */
-    case 0x38:
     case 0x3C:
     default:
         qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%" HWADDR_PRIx "\n",
@@ -444,6 +467,25 @@ static void aspeed_timer_write(void *opaque, hwaddr offset, uint64_t value,
     case 0x34:
         aspeed_timer_set_ctrl2(s, tv);
         break;
+    case 0x38:
+        if (ASPEED_IS_AST2500(s->scu->silicon_rev)) {
+            uint8_t command = (value >> 1) & 0xFF;
+            if (command == 0xAE) {
+                s->ctrl3 = 0x1;
+            } else if (command == 0xEA) {
+                s->ctrl3 = 0x0;
+            }
+        } else {
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x3C\n", __func__);
+        }
+        break;
+    case 0x3C:
+        if (ASPEED_IS_AST2400(s->scu->silicon_rev)) {
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x3C\n", __func__);
+        } else if (aspeed_cr_set_only(s)) {
+            aspeed_timer_set_ctrl(s, s->ctrl & ~tv);
+        }
+        break;
     /* Timer Registers */
     case 0x00 ... 0x2c:
         aspeed_timer_set_value(s, (offset >> TIMER_NR_REGS), reg, tv);
@@ -451,9 +493,6 @@ static void aspeed_timer_write(void *opaque, hwaddr offset, uint64_t value,
     case 0x40 ... 0x8c:
         aspeed_timer_set_value(s, (offset >> TIMER_NR_REGS) - 1, reg, tv);
         break;
-    /* Illegal */
-    case 0x38:
-    case 0x3C:
     default:
         qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%" HWADDR_PRIx "\n",
                 __func__, offset);
@@ -523,6 +562,7 @@ static void aspeed_timer_reset(DeviceState *dev)
     }
     s->ctrl = 0;
     s->ctrl2 = 0;
+    s->ctrl3 = 0;
 }
 
 static const VMStateDescription vmstate_aspeed_timer = {
