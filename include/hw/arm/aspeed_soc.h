@@ -12,6 +12,7 @@
 #ifndef ASPEED_SOC_H
 #define ASPEED_SOC_H
 
+#include "hw/cpu/a15mpcore.h"
 #include "hw/intc/aspeed_vic.h"
 #include "hw/misc/aspeed_scu.h"
 #include "hw/misc/aspeed_sdmc.h"
@@ -25,7 +26,7 @@
 #include "hw/gpio/aspeed_gpio.h"
 
 #define ASPEED_SPIS_NUM  2
-#define ASPEED_WDTS_NUM  3
+#define ASPEED_WDTS_NUM  4
 #define ASPEED_CPUS_NUM  2
 #define ASPEED_MACS_NUM  2
 
@@ -36,6 +37,7 @@ typedef struct AspeedSoCState {
     /*< public >*/
     ARMCPU cpu[ASPEED_CPUS_NUM];
     uint32_t num_cpus;
+    A15MPPrivState     a7mpcore;
     MemoryRegion sram;
     AspeedVICState vic;
     AspeedRtcState rtc;
