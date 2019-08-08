@@ -281,6 +281,9 @@ static void aspeed_soc_init(Object *obj)
     sysbus_init_child_obj(obj, "i2c", OBJECT(&s->i2c), sizeof(s->i2c),
                           TYPE_ASPEED_I2C);
 
+    sysbus_init_child_obj(obj, "adc", OBJECT(&s->adc), sizeof(s->adc),
+                          TYPE_ASPEED_ADC);
+
     snprintf(typename, sizeof(typename), "aspeed.fmc-%s", socname);
     sysbus_init_child_obj(obj, "fmc", OBJECT(&s->fmc), sizeof(s->fmc),
                           typename);
@@ -484,6 +487,16 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
         qemu_irq irq = aspeed_soc_get_irq(s, ASPEED_TIMER1 + i);
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->timerctrl), i, irq);
     }
+
+    /* ADC */
+    object_property_set_bool(OBJECT(&s->adc), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->adc), 0, sc->info->memmap[ASPEED_ADC]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->adc), 0,
+                       aspeed_soc_get_irq(s, ASPEED_ADC));
 
     /* UART - attach an 8250 to the IO space as our UART5 */
     if (serial_hd(0)) {
