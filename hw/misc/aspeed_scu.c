@@ -284,7 +284,6 @@ static void aspeed_ast2400_scu_write(void *opaque, uint64_t offset, uint64_t dat
     if (reg > PROT_KEY && reg < CPU2_BASE_SEG1 &&
             !s->regs[PROT_KEY]) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: SCU is locked!\n", __func__);
-        return;
     }
 
     trace_aspeed_scu_write(offset, size, data);
