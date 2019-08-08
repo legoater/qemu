@@ -505,6 +505,13 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
                        uart5, 38400, serial_hd(0), DEVICE_LITTLE_ENDIAN);
     }
 
+    /* VUART */
+    if (serial_hd(1)) {
+        qemu_irq vuart = qdev_get_gpio_in(DEVICE(&s->vic), 8);
+        serial_mm_init(get_system_memory(), sc->info->memmap[ASPEED_VUART], 2,
+                       vuart, 38400, serial_hd(1), DEVICE_LITTLE_ENDIAN);
+    }
+
     /* I2C */
     object_property_set_bool(OBJECT(&s->i2c), true, "realized", &err);
     if (err) {
