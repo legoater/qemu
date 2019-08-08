@@ -113,6 +113,8 @@ static const hwaddr aspeed_soc_ast2600_memmap[] = {
     [ASPEED_UART1]  = 0x1E783000,
     [ASPEED_UART5]  = 0x1E784000,
     [ASPEED_VUART]  = 0x1E787000,
+    [ASPEED_FSI1]   = 0x1E79B000,
+    [ASPEED_FSI2]   = 0x1E79B100,
     [ASPEED_SDRAM]  = 0x80000000,
 };
 
@@ -184,6 +186,8 @@ static const int aspeed_soc_ast2600_irqmap[] = {
     [ASPEED_I2C]    = 110, /* 110 -> 125 */
     [ASPEED_ETH1]   = 2,
     [ASPEED_ETH2]   = 3,
+    [ASPEED_FSI1]   = 100,
+    [ASPEED_FSI2]   = 101,
 };
 
 static const AspeedSoCInfo aspeed_socs[] = {
@@ -354,6 +358,11 @@ static void aspeed_soc_init(Object *obj)
 
     sysbus_init_child_obj(obj, "lpc", OBJECT(&s->lpc), sizeof(s->lpc),
                            TYPE_ASPEED_LPC);
+
+    if (ASPEED_IS_AST2600(sc->info->silicon_rev)) {
+        sysbus_init_child_obj(obj, "fsi[*]", OBJECT(&s->fsi[0]),
+                              sizeof(s->fsi[0]), TYPE_ASPEED_FSI);
+    }
 }
 
 /*
@@ -725,6 +734,19 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->lpc), 0, sc->info->memmap[ASPEED_LPC]);
     /* LPC IRQ in use by the iBT sub controller */
+
+    /* FSI */
+    if (ASPEED_IS_AST2600(sc->info->silicon_rev)) {
+        object_property_set_bool(OBJECT(&s->fsi[0]), true, "realized", &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
+        sysbus_mmio_map(SYS_BUS_DEVICE(&s->fsi[0]), 0,
+                        sc->info->memmap[ASPEED_FSI1]);
+        sysbus_connect_irq(SYS_BUS_DEVICE(&s->fsi[0]), 0,
+                           aspeed_soc_get_irq(s, ASPEED_FSI1));
+    }
 }
 static Property aspeed_soc_properties[] = {
     DEFINE_PROP_UINT32("num-cpus", AspeedSoCState, num_cpus, 0),
