@@ -111,6 +111,63 @@ static const MemoryRegionOps max_ram_ops = {
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
+/*
+ *       SMP mailbox
+ * +----------------------+
+ * |                      |
+ * | mailbox insn. for    |
+ * | cpuN polling SMP go  |
+ * |                      |
+ * +----------------------+ 0xC
+ * | mailbox ready signal |
+ * +----------------------+ 0x8
+ * | cpuN GO signal       |
+ * +----------------------+ 0x4
+ * | cpuN entrypoint      |
+ * +----------------------+ AST_SMP_MAILBOX_BASE
+ */
+
+#define AST_SMP_MAILBOX_BASE            0x1E6E2180
+#define AST_SMP_MBOX_FIELD_ENTRY        (AST_SMP_MAILBOX_BASE + 0x0)
+#define AST_SMP_MBOX_FIELD_GOSIGN       (AST_SMP_MAILBOX_BASE + 0x4)
+#define AST_SMP_MBOX_FIELD_READY        (AST_SMP_MAILBOX_BASE + 0x8)
+#define AST_SMP_MBOX_FIELD_POLLINSN     (AST_SMP_MAILBOX_BASE + 0xc)
+
+static void aspeed_write_smpboot(ARMCPU *cpu, const struct arm_boot_info *info)
+{
+    AddressSpace *as = arm_boot_address_space(cpu, info);
+
+    static const uint32_t poll_mailbox_ready[] = {
+        0xe320f002,	// wfe
+        0xe59f0020,	// ldr	r0, [pc, #32]	; 2c <poll_mailbox_ready+0x2c>
+        0xe59f1020,	// ldr	r1, [pc, #32]	; 30 <poll_mailbox_ready+0x30>
+        0xe5902000,	// ldr	r2, [r0]
+        0xe1510002,	// cmp	r1, r2
+        0x1afffff9,	// bne	0 <poll_mailbox_ready>
+        0xe59f0014,	// ldr	r0, [pc, #20]	; 34 <poll_mailbox_ready+0x34>
+        0xe59f1014,	// ldr	r1, [pc, #20]	; 38 <poll_mailbox_ready+0x38>
+        0xe59f2014,	// ldr	r2, [pc, #20]	; 3c <poll_mailbox_ready+0x3c>
+        0xe59f3014,	// ldr	r3, [pc, #20]	; 40 <poll_mailbox_ready+0x40>
+        0xe59ff014,	// ldr	pc, [pc, #20]	; 44 <poll_mailbox_ready+0x44>
+        0x1e6e2188,	// .word	0x1e6e2188
+        0xbabecafe,	// .word	0xbabecafe
+        0x1e6e2184,	// .word	0x1e6e2184
+        0x1e6e2180,	// .word	0x1e6e2180
+        0xabbaadda,	// .word	0xabbaadda
+        0x1e784000,	// .word	0x1e784000
+        0x1e6e218c,	// .word	0x1e6e218c
+    };
+
+    printf("%s: loading to %08lx\n", __func__, info->smp_loader_start);
+
+    if (rom_add_blob_fixed_as("ast2600_smpboot", poll_mailbox_ready,
+                       sizeof(poll_mailbox_ready),
+                       info->smp_loader_start, as) < 0) {
+        printf("%s: failed to set SMP boot rom", __func__);
+        return;
+    }
+}
+
 #define FIRMWARE_ADDR 0x0
 
 static void write_boot_rom(DriveInfo *dinfo, hwaddr addr, size_t rom_size,
@@ -252,6 +309,7 @@ static void aspeed_board_init(MachineState *machine,
     aspeed_board_binfo.ram_size = ram_size;
     aspeed_board_binfo.loader_start = sc->info->memmap[ASPEED_SDRAM];
     aspeed_board_binfo.nb_cpus = bmc->soc.num_cpus;
+    aspeed_board_binfo.write_secondary_boot = aspeed_write_smpboot;
 
     if (cfg->i2c_init) {
         cfg->i2c_init(bmc);
