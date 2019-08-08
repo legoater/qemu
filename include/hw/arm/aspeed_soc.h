@@ -24,6 +24,7 @@
 #include "hw/watchdog/wdt_aspeed.h"
 #include "hw/net/ftgmac100.h"
 #include "hw/gpio/aspeed_gpio.h"
+#include "hw/sd/aspeed_sdhci.h"
 
 #define ASPEED_SPIS_NUM  2
 #define ASPEED_WDTS_NUM  4
@@ -52,6 +53,7 @@ typedef struct AspeedSoCState {
     FTGMAC100State ftgmac100[ASPEED_MACS_NUM];
     AspeedMiiState mii[ASPEED_MACS_NUM];
     AspeedGPIOState gpio;
+    AspeedSDHCIState sdhci;
 } AspeedSoCState;
 
 #define TYPE_ASPEED_SOC "aspeed-soc"
@@ -97,6 +99,7 @@ enum {
     ASPEED_ADC,
     ASPEED_VIDEO,
     ASPEED_SRAM,
+    ASPEED_SDHCI,
     ASPEED_GPIO,
     ASPEED_RTC,
     ASPEED_TIMER1,

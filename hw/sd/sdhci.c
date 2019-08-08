@@ -213,7 +213,13 @@ static uint8_t sdhci_slotint(SDHCIState *s)
 
 static inline void sdhci_update_irq(SDHCIState *s)
 {
-    qemu_set_irq(s->irq, sdhci_slotint(s));
+    int level = sdhci_slotint(s);
+
+    qemu_set_irq(s->irq, level);
+
+    if (s->irq_notify) {
+        s->irq_notify(s, level);
+    }
 }
 
 static void sdhci_raise_insertion_irq(void *opaque)

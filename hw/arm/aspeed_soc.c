@@ -22,6 +22,7 @@
 #include "qemu/error-report.h"
 #include "hw/i2c/aspeed_i2c.h"
 #include "net/net.h"
+#include "sysemu/blockdev.h"
 
 #define ASPEED_SOC_IOMEM_SIZE       0x00200000
 
@@ -62,6 +63,7 @@ static const hwaddr aspeed_soc_ast2500_memmap[] = {
     [ASPEED_XDMA]   = 0x1E6E7000,
     [ASPEED_ADC]    = 0x1E6E9000,
     [ASPEED_SRAM]   = 0x1E720000,
+    [ASPEED_SDHCI]  = 0x1E740000,
     [ASPEED_GPIO]   = 0x1E780000,
     [ASPEED_RTC]    = 0x1E781000,
     [ASPEED_TIMER1] = 0x1E782000,
@@ -100,6 +102,7 @@ static const hwaddr aspeed_soc_ast2600_memmap[] = {
     [ASPEED_XDMA]   = 0x1E6E7000,
     [ASPEED_ADC]    = 0x1E6E9000,
     [ASPEED_VIDEO]  = 0x1E700000,
+    [ASPEED_SDHCI]  = 0x1E740000,
     [ASPEED_GPIO]   = 0x1E780000,
     [ASPEED_RTC]    = 0x1E781000,
     [ASPEED_TIMER1] = 0x1E782000,
@@ -144,6 +147,7 @@ static const int aspeed_soc_ast2400_irqmap[] = {
     [ASPEED_ETH1]   = 2,
     [ASPEED_ETH2]   = 3,
     [ASPEED_XDMA]   = 6,
+    [ASPEED_SDHCI]  = 26,
 };
 
 #define aspeed_soc_ast2500_irqmap aspeed_soc_ast2400_irqmap
@@ -161,6 +165,7 @@ static const int aspeed_soc_ast2600_irqmap[] = {
     [ASPEED_SDMC]   = 0,
     [ASPEED_SCU]    = 12,
     [ASPEED_XDMA]   = 6,
+    [ASPEED_SDHCI]  = 43,
     [ASPEED_ADC]    = 46,
     [ASPEED_GPIO]   = 40,
     [ASPEED_RTC]    = 13,
@@ -327,6 +332,16 @@ static void aspeed_soc_init(Object *obj)
     snprintf(typename, sizeof(typename), "aspeed.gpio-%s", socname);
     sysbus_init_child_obj(obj, "gpio", OBJECT(&s->gpio), sizeof(s->gpio),
                           typename);
+
+    sysbus_init_child_obj(obj, "sdhci", OBJECT(&s->sdhci), sizeof(s->sdhci),
+                          TYPE_ASPEED_SDHCI);
+
+    for (i = 0; i < ASPEED_SDHCI_NUM_SLOTS; ++i) {
+        sysbus_init_child_obj(obj, "sdhci_slot[*]",
+                              OBJECT(&s->sdhci.slots[i].sdhci),
+                              sizeof(s->sdhci.slots[i].sdhci),
+                              TYPE_SYSBUS_SDHCI);
+    }
 }
 
 /*
@@ -591,6 +606,60 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->gpio), 0, sc->info->memmap[ASPEED_GPIO]);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->gpio), 0,
                        aspeed_soc_get_irq(s, ASPEED_GPIO));
+
+    /* SD/SDIO */
+    for (i = 0; i < ASPEED_SDHCI_NUM_SLOTS; i++) {
+        hwaddr hci_addr = sc->info->memmap[ASPEED_SDHCI] + (0x100 * (i + 1));
+        DriveInfo *di;
+        BlockBackend *blk;
+        DeviceState *card;
+
+        /*
+         * Compatible with:
+         * - SD Host Controller Specification Version 2.0
+         * - SDIO Specification Version 2.0
+         * - MMC Specification Version 4.3
+         */
+        object_property_set_int(OBJECT(&s->sdhci.slots[i].sdhci), 2,
+                                "sd-spec-version", &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
+
+        object_property_set_uint(OBJECT(&s->sdhci.slots[i].sdhci),
+                                 ASPEED_SDHCI_CAPABILITIES, "capareg", &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
+
+        object_property_set_bool(OBJECT(&s->sdhci.slots[i].sdhci), true,
+                                 "realized", &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
+
+        sysbus_mmio_map(SYS_BUS_DEVICE(&s->sdhci.slots[i].sdhci), 0, hci_addr);
+
+        di = drive_get_next(IF_SD);
+        blk = di ? blk_by_legacy_dinfo(di) : NULL;
+        card = qdev_create(qdev_get_child_bus(DEVICE(&s->sdhci.slots[i].sdhci),
+                                              "sd-bus"), TYPE_SD_CARD);
+        qdev_prop_set_drive(card, "drive", blk, &error_fatal);
+        object_property_set_bool(OBJECT(card), true, "realized", &error_fatal);
+    }
+
+    object_property_set_bool(OBJECT(&s->sdhci), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sdhci), 0,
+                    sc->info->memmap[ASPEED_SDHCI]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->sdhci), 0,
+                       aspeed_soc_get_irq(s, ASPEED_SDHCI));
 }
 static Property aspeed_soc_properties[] = {
     DEFINE_PROP_UINT32("num-cpus", AspeedSoCState, num_cpus, 0),
