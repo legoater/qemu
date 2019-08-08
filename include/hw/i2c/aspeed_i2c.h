@@ -44,6 +44,7 @@ typedef struct AspeedI2CBus {
     uint32_t intr_status;
     uint32_t cmd;
     uint32_t buf;
+    uint32_t buf_ctrl;
 } AspeedI2CBus;
 
 typedef struct AspeedI2CState {
@@ -53,6 +54,8 @@ typedef struct AspeedI2CState {
     qemu_irq irq;
 
     uint32_t intr_status;
+    MemoryRegion page_iomem;
+    uint8_t pages[0x800];
 
     AspeedI2CBus busses[ASPEED_I2C_NR_BUSSES];
 } AspeedI2CState;
