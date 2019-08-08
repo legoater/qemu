@@ -1098,12 +1098,26 @@ static const TypeInfo ftgmac100_info = {
 #define ASPEED_MII_PHYCR_PHY(x)      (((x) >> 21) & 0x1f)
 #define ASPEED_MII_PHYCR_REG(x)      (((x) >> 16) & 0x1f)
 
+#define ASPEED_MII_PHYDATA_IDLE      BIT(16)
+
+static void aspeed_mii_transition(AspeedMiiState *s, bool fire)
+{
+    if (fire) {
+        s->phycr |= ASPEED_MII_PHYCR_FIRE;
+        s->phydata &= ~ASPEED_MII_PHYDATA_IDLE;
+    } else {
+        s->phycr &= ~ASPEED_MII_PHYCR_FIRE;
+        s->phydata |= ASPEED_MII_PHYDATA_IDLE;
+    }
+}
+
 static void aspeed_mii_do_phy_ctl(AspeedMiiState *s)
 {
     uint8_t reg;
     uint16_t data;
 
     if (!(s->phycr & ASPEED_MII_PHYCR_ST_22)) {
+        aspeed_mii_transition(s, !ASPEED_MII_PHYCR_FIRE);
         qemu_log_mask(LOG_UNIMP, "%s: unsupported ST code\n", __func__);
         return;
     }
@@ -1121,14 +1135,14 @@ static void aspeed_mii_do_phy_ctl(AspeedMiiState *s)
         do_phy_write(s->nic, reg, data);
         break;
     case ASPEED_MII_PHYCR_OP_READ:
-        s->phydata = do_phy_read(s->nic, reg) & 0xffff;
+        s->phydata = (s->phydata & ~0xffff) | do_phy_read(s->nic, reg);
         break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR, "%s: invalid OP code %08x\n",
                       __func__, s->phycr);
     }
 
-    s->phycr &= ~ASPEED_MII_PHYCR_FIRE;
+    aspeed_mii_transition(s, !ASPEED_MII_PHYCR_FIRE);
 }
 
 static uint64_t aspeed_mii_read(void *opaque, hwaddr addr, unsigned size)
@@ -1152,15 +1166,16 @@ static void aspeed_mii_write(void *opaque, hwaddr addr,
 
     switch (addr) {
     case 0x0:
-        s->phycr = value;
+        s->phycr = value & ~(s->phycr & ASPEED_MII_PHYCR_FIRE);
         break;
     case 0x4:
-        s->phydata = value & 0xffff;
+        s->phydata = value & ~(0xffff | ASPEED_MII_PHYDATA_IDLE);
         break;
     default:
         g_assert_not_reached();
     }
 
+    aspeed_mii_transition(s, !!(s->phycr & ASPEED_MII_PHYCR_FIRE));
     aspeed_mii_do_phy_ctl(s);
 }
 
@@ -1178,6 +1193,8 @@ static void aspeed_mii_reset(DeviceState *dev)
 
     s->phycr = 0;
     s->phydata = 0;
+
+    aspeed_mii_transition(s, !!(s->phycr & ASPEED_MII_PHYCR_FIRE));
 };
 
 static void aspeed_mii_realize(DeviceState *dev, Error **errp)
