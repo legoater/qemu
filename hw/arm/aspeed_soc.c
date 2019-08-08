@@ -87,7 +87,9 @@ static const hwaddr aspeed_soc_ast2600_memmap[] = {
     [ASPEED_SPI1]   = 0x1E630000,
     [ASPEED_SPI2]   = 0x1E641000,
     [ASPEED_ETH1]   = 0x1E660000,
+    [ASPEED_ETH3]   = 0x1E670000,
     [ASPEED_ETH2]   = 0x1E680000,
+    [ASPEED_ETH4]   = 0x1E690000,
     [ASPEED_VIC]    = 0x1E6C0000,
     [ASPEED_SDMC]   = 0x1E6E0000,
     [ASPEED_SCU]    = 0x1E6E2000,
@@ -182,6 +184,7 @@ static const AspeedSoCInfo aspeed_socs[] = {
         .sram_size    = 0x8000,
         .spis_num     = 1,
         .wdts_num     = 2,
+        .macs_num     = 2,
         .irqmap       = aspeed_soc_ast2400_irqmap,
         .memmap       = aspeed_soc_ast2400_memmap,
         .num_cpus     = 1,
@@ -192,6 +195,7 @@ static const AspeedSoCInfo aspeed_socs[] = {
         .sram_size    = 0x9000,
         .spis_num     = 2,
         .wdts_num     = 3,
+        .macs_num     = 2,
         .irqmap       = aspeed_soc_ast2500_irqmap,
         .memmap       = aspeed_soc_ast2500_memmap,
         .num_cpus     = 1,
@@ -202,6 +206,7 @@ static const AspeedSoCInfo aspeed_socs[] = {
         .sram_size    = 0x10000,
         .spis_num     = 2,
         .wdts_num     = 4,
+        .macs_num     = 4,
         .irqmap       = aspeed_soc_ast2600_irqmap,
         .memmap       = aspeed_soc_ast2600_memmap,
         .num_cpus     = 2,
@@ -298,7 +303,7 @@ static void aspeed_soc_init(Object *obj)
                                        OBJECT(&s->scu), &error_abort);
     }
 
-    for (i = 0; i < ASPEED_MACS_NUM; i++) {
+    for (i = 0; i < sc->info->macs_num; i++) {
         sysbus_init_child_obj(obj, "ftgmac100[*]", OBJECT(&s->ftgmac100[i]),
                               sizeof(s->ftgmac100[i]), TYPE_FTGMAC100);
     }
