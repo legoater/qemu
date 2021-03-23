@@ -57,6 +57,10 @@
 /* Other cmd bits */
 #define  HASH_IRQ_EN                    BIT(9)
 #define  HASH_SG_EN                     BIT(18)
+/* Scatter-gather data list */
+#define  SG_LIST_LAST                   BIT(31)
+#define  SG_LIST_LEN_MASK               0x7fffffff
+#define  SG_LIST_ADDR_MASK              0x7ffffff8  /* 8-byte aligned */
 
 static const struct {
     uint32_t mask;
@@ -86,24 +90,24 @@ static int hash_algo_lookup(uint32_t mask)
 
 static int do_hash_operation(AspeedHACEState *s, int algo)
 {
-    hwaddr src, len, dest;
-    uint8_t *digest_buf = NULL;
-    size_t digest_len = 0;
-    char *src_buf;
+    uint32_t src, len, dest;
+    uint8_t *digestBuf = NULL;
+    size_t digestLen = 0;
+    char *srcBuf;
     int rc;
 
     src = s->regs[R_HASH_SRC];
     len = s->regs[R_HASH_SRC_LEN];
     dest = s->regs[R_HASH_DEST];
 
-    src_buf = address_space_map(&s->dram_as, src, &len, false,
-                                MEMTXATTRS_UNSPECIFIED);
-    if (!src_buf) {
+    srcBuf = address_space_map(&s->dram_as, src, (hwaddr *) &len,
+                               false, MEMTXATTRS_UNSPECIFIED);
+    if (!srcBuf) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: failed to map dram\n", __func__);
         return -EACCES;
     }
 
-    rc = qcrypto_hash_bytes(algo, src_buf, len, &digest_buf, &digest_len,
+    rc = qcrypto_hash_bytes(algo, srcBuf, len, &digestBuf, &digestLen,
                             &error_fatal);
     if (rc < 0) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: qcrypto failed\n", __func__);
@@ -111,14 +115,14 @@ static int do_hash_operation(AspeedHACEState *s, int algo)
     }
 
     rc = address_space_write(&s->dram_as, dest, MEMTXATTRS_UNSPECIFIED,
-                             digest_buf, digest_len);
+                             digestBuf, digestLen);
     if (rc) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: address space write failed\n", __func__);
     }
-    g_free(digest_buf);
+    g_free(digestBuf);
 
-    address_space_unmap(&s->dram_as, src_buf, len, false, len);
+    address_space_unmap(&s->dram_as, srcBuf, len, false, len);
 
     /*
      * Set status bits to indicate completion. Testing shows hardware sets
@@ -131,80 +135,67 @@ static int do_hash_operation(AspeedHACEState *s, int algo)
 
 static int do_hash_sg_operation(AspeedHACEState *s, int algo)
 {
-    hwaddr src, dest, req_size, size, len;
-    const hwaddr req_len = sizeof(struct aspeed_sg_list);
+    uint32_t src, dest, reqSize;
+    hwaddr len;
+    const size_t reqLen = sizeof(struct aspeed_sg_list);
     struct iovec iov[ASPEED_HACE_MAX_SG];
     unsigned int i = 0;
-    unsigned int is_last = 0;
-    uint8_t *digest_buf = NULL;
-    size_t digest_len = 0;
-    struct aspeed_sg_list *sg_list;
+    unsigned int isLast = 0;
+    uint8_t *digestBuf = NULL;
+    size_t digestLen = 0, size = 0;
+    struct aspeed_sg_list *sgList;
     int rc;
 
-    req_size = s->regs[R_HASH_SRC_LEN];
+    reqSize = s->regs[R_HASH_SRC_LEN];
     dest = s->regs[R_HASH_DEST];
-    size = 0;
 
-    if (!QEMU_IS_ALIGNED(s->regs[R_HASH_SRC], 8)) {
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "%s: un-aligned SG source address '0x%0x'\n",
-                      __func__, s->regs[R_HASH_SRC]);
-        return -EACCES;
-    }
-
-    if (!QEMU_IS_ALIGNED(s->regs[R_HASH_DEST], 8)) {
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "%s: un-aligned SG destination address '0x%0x'\n",
-                      __func__, s->regs[R_HASH_DEST]);
-        return -EACCES;
-    }
-
-    while (!is_last && i < ASPEED_HACE_MAX_SG) {
-        src = s->regs[R_HASH_SRC] + (i * req_len);
-        len = req_len;
-        sg_list = (struct aspeed_sg_list *) address_space_map(&s->dram_as,
-                                                                src, &len,
-                                                                    false,
-                                                  MEMTXATTRS_UNSPECIFIED);
-        if (!sg_list) {
+    while (!isLast && i < ASPEED_HACE_MAX_SG) {
+        src = s->regs[R_HASH_SRC] + (i * reqLen);
+        len = reqLen;
+        sgList = (struct aspeed_sg_list *) address_space_map(&s->dram_as,
+                                                                     src,
+                                                         (hwaddr *) &len,
+                                                                   false,
+                                                 MEMTXATTRS_UNSPECIFIED);
+        if (!sgList) {
             qemu_log_mask(LOG_GUEST_ERROR,
-             "%s: failed to map dram for SG Array entry '%u' for address '0x%0lx'\n",
+             "%s: failed to map dram for SG Array entry '%u' for address '0x%0x'\n",
              __func__, i, src);
             rc = -EACCES;
             goto cleanup;
         }
-        if (len != req_len)
+        if (len != reqLen)
             qemu_log_mask(LOG_GUEST_ERROR,
              "%s:  Warning: dram map for SG array entry '%u' requested size '%lu' != mapped size '%lu'\n",
-             __func__, i, req_len, len);
+             __func__, i, reqLen, len);
 
-        is_last = sg_list->len & BIT(31);
+        isLast = sgList->len & SG_LIST_LAST;
 
-        iov[i].iov_len = (hwaddr) (sg_list->len & ~BIT(31));
+        iov[i].iov_len = (hwaddr) (sgList->len & SG_LIST_LEN_MASK);
         iov[i].iov_base = address_space_map(&s->dram_as,
-                            sg_list->phy_addr & ~BIT(31),
+                            sgList->phy_addr & SG_LIST_ADDR_MASK,
                             &iov[i].iov_len, false,
                             MEMTXATTRS_UNSPECIFIED);
         if (!iov[i].iov_base) {
             qemu_log_mask(LOG_GUEST_ERROR,
-             "%s: failed to map dram for SG array entry '%u' for region '0x%lx', len '%lu'\n",
-             __func__, i, sg_list->phy_addr & ~BIT(31), sg_list->len & ~BIT(31));
+             "%s: failed to map dram for SG array entry '%u' for region '0x%x', len '%u'\n",
+             __func__, i, sgList->phy_addr & SG_LIST_ADDR_MASK, sgList->len & SG_LIST_LEN_MASK);
             rc = -EACCES;
             goto cleanup;
         }
-        if (iov[i].iov_len != (sg_list->len & ~BIT(31)))
+        if (iov[i].iov_len != (sgList->len & SG_LIST_LEN_MASK))
             qemu_log_mask(LOG_GUEST_ERROR,
-             "%s:  Warning: dram map for SG region entry %u requested size %lu != mapped size %lu\n",
-             __func__, i, (sg_list->len & ~BIT(31)), iov[i].iov_len);
+             "%s:  Warning: dram map for SG region entry %u requested size %u != mapped size %lu\n",
+             __func__, i, (sgList->len & SG_LIST_LEN_MASK), iov[i].iov_len);
 
 
-        address_space_unmap(&s->dram_as, (void *) sg_list, len, false,
+        address_space_unmap(&s->dram_as, (void *) sgList, len, false,
                             len);
         size += iov[i].iov_len;
         i++;
     }
 
-    if (!is_last) {
+    if (!isLast) {
         qemu_log_mask(LOG_GUEST_ERROR,
                      "%s: Error: Exhausted maximum of '%u' SG array entries\n",
                      __func__, ASPEED_HACE_MAX_SG);
@@ -212,12 +203,12 @@ static int do_hash_sg_operation(AspeedHACEState *s, int algo)
         goto cleanup;
     }
 
-    if (size != req_size)
+    if (size != reqSize)
         qemu_log_mask(LOG_GUEST_ERROR,
-         "%s: Warning: requested SG total size %lu != actual size %lu\n",
-         __func__, req_size, size);
+         "%s: Warning: requested SG total size %u != actual size %lu\n",
+         __func__, reqSize, size);
 
-    rc = qcrypto_hash_bytesv(algo, iov, i, &digest_buf, &digest_len,
+    rc = qcrypto_hash_bytesv(algo, iov, i, &digestBuf, &digestLen,
                             &error_fatal);
     if (rc < 0) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: qcrypto failed\n",
@@ -226,11 +217,11 @@ static int do_hash_sg_operation(AspeedHACEState *s, int algo)
     }
 
     rc = address_space_write(&s->dram_as, dest, MEMTXATTRS_UNSPECIFIED,
-                             digest_buf, digest_len);
+                             digestBuf, digestLen);
     if (rc)
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: address space write failed\n", __func__);
-    g_free(digest_buf);
+    g_free(digestBuf);
 
 cleanup:
 
@@ -321,10 +312,13 @@ static void aspeed_hace_write(void *opaque, hwaddr addr, uint64_t data,
                         __func__, data & ahc->hash_mask);
                 break;
         }
-        if (data & HASH_SG_EN)
+        if (data & HASH_SG_EN) {
+            s->regs[(R_HASH_SRC >> 2)] &= 0x7FFFFFF8;
             do_hash_sg_operation(s, algo);
-        else
+	}
+        else {
             do_hash_operation(s, algo);
+	}
 
         if (data & HASH_IRQ_EN) {
             qemu_irq_raise(s->irq);

@@ -41,6 +41,7 @@ struct AspeedHACEClass {
     uint32_t hash_mask;
 };
 
+#define ASPEED_HACE_MAX_SG      256
 struct aspeed_sg_list {
         uint32_t len;
         uint32_t phy_addr;
