@@ -18,6 +18,7 @@
 OBJECT_DECLARE_TYPE(AspeedHACEState, AspeedHACEClass, ASPEED_HACE)
 
 #define ASPEED_HACE_NR_REGS (0x64 >> 2)
+#define ASPEED_HACE_MAX_SG  256
 
 struct AspeedHACEState {
     SysBusDevice parent;
@@ -39,5 +40,10 @@ struct AspeedHACEClass {
     uint32_t dest_mask;
     uint32_t hash_mask;
 };
+
+struct aspeed_sg_list {
+        uint32_t len;
+        uint32_t phy_addr;
+} __attribute__ ((__packed__));
 
 #endif /* _ASPEED_HACE_H_ */

@@ -129,6 +129,128 @@ static int do_hash_operation(AspeedHACEState *s, int algo)
     return 0;
 }
 
+static int do_hash_sg_operation(AspeedHACEState *s, int algo)
+{
+    hwaddr src, dest, req_size, size, len;
+    const hwaddr req_len = sizeof(struct aspeed_sg_list);
+    struct iovec iov[ASPEED_HACE_MAX_SG];
+    unsigned int i = 0;
+    unsigned int is_last = 0;
+    uint8_t *digest_buf = NULL;
+    size_t digest_len = 0;
+    struct aspeed_sg_list *sg_list;
+    int rc;
+
+    req_size = s->regs[R_HASH_SRC_LEN];
+    dest = s->regs[R_HASH_DEST];
+    size = 0;
+
+    if (!QEMU_IS_ALIGNED(s->regs[R_HASH_SRC], 8)) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: un-aligned SG source address '0x%0x'\n",
+                      __func__, s->regs[R_HASH_SRC]);
+        return -EACCES;
+    }
+
+    if (!QEMU_IS_ALIGNED(s->regs[R_HASH_DEST], 8)) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: un-aligned SG destination address '0x%0x'\n",
+                      __func__, s->regs[R_HASH_DEST]);
+        return -EACCES;
+    }
+
+    while (!is_last && i < ASPEED_HACE_MAX_SG) {
+        src = s->regs[R_HASH_SRC] + (i * req_len);
+        len = req_len;
+        sg_list = (struct aspeed_sg_list *) address_space_map(&s->dram_as,
+                                                                src, &len,
+                                                                    false,
+                                                  MEMTXATTRS_UNSPECIFIED);
+        if (!sg_list) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+             "%s: failed to map dram for SG Array entry '%u' for address '0x%0lx'\n",
+             __func__, i, src);
+            rc = -EACCES;
+            goto cleanup;
+        }
+        if (len != req_len)
+            qemu_log_mask(LOG_GUEST_ERROR,
+             "%s:  Warning: dram map for SG array entry '%u' requested size '%lu' != mapped size '%lu'\n",
+             __func__, i, req_len, len);
+
+        is_last = sg_list->len & BIT(31);
+
+        iov[i].iov_len = (hwaddr) (sg_list->len & ~BIT(31));
+        iov[i].iov_base = address_space_map(&s->dram_as,
+                            sg_list->phy_addr & ~BIT(31),
+                            &iov[i].iov_len, false,
+                            MEMTXATTRS_UNSPECIFIED);
+        if (!iov[i].iov_base) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+             "%s: failed to map dram for SG array entry '%u' for region '0x%lx', len '%lu'\n",
+             __func__, i, sg_list->phy_addr & ~BIT(31), sg_list->len & ~BIT(31));
+            rc = -EACCES;
+            goto cleanup;
+        }
+        if (iov[i].iov_len != (sg_list->len & ~BIT(31)))
+            qemu_log_mask(LOG_GUEST_ERROR,
+             "%s:  Warning: dram map for SG region entry %u requested size %lu != mapped size %lu\n",
+             __func__, i, (sg_list->len & ~BIT(31)), iov[i].iov_len);
+
+
+        address_space_unmap(&s->dram_as, (void *) sg_list, len, false,
+                            len);
+        size += iov[i].iov_len;
+        i++;
+    }
+
+    if (!is_last) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                     "%s: Error: Exhausted maximum of '%u' SG array entries\n",
+                     __func__, ASPEED_HACE_MAX_SG);
+        rc = -ENOTSUP;
+        goto cleanup;
+    }
+
+    if (size != req_size)
+        qemu_log_mask(LOG_GUEST_ERROR,
+         "%s: Warning: requested SG total size %lu != actual size %lu\n",
+         __func__, req_size, size);
+
+    rc = qcrypto_hash_bytesv(algo, iov, i, &digest_buf, &digest_len,
+                            &error_fatal);
+    if (rc < 0) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: qcrypto failed\n",
+                      __func__);
+        goto cleanup;
+    }
+
+    rc = address_space_write(&s->dram_as, dest, MEMTXATTRS_UNSPECIFIED,
+                             digest_buf, digest_len);
+    if (rc)
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: address space write failed\n", __func__);
+    g_free(digest_buf);
+
+cleanup:
+
+    for (; i > 0; i--) {
+        address_space_unmap(&s->dram_as, iov[i - 1].iov_base,
+                            iov[i - 1].iov_len, false,
+                            iov[i - 1].iov_len);
+    }
+
+    /*
+     * Set status bits to indicate completion. Testing shows hardware sets
+     * these irrespective of HASH_IRQ_EN.
+     */
+    if (!rc)
+        s->regs[R_STATUS] |= HASH_IRQ;
+
+    return rc;
+}
+
+
 
 static uint64_t aspeed_hace_read(void *opaque, hwaddr addr, unsigned int size)
 {
@@ -187,11 +309,6 @@ static void aspeed_hace_write(void *opaque, hwaddr addr, uint64_t data,
                           "%s: HMAC engine command mode %"PRIx64" not implemented",
                           __func__, (data & HASH_HMAC_MASK) >> 8);
         }
-        if (data & HASH_SG_EN) {
-            qemu_log_mask(LOG_UNIMP,
-                          "%s: Hash scatter gather mode not implemented",
-                          __func__);
-        }
         if (data & BIT(1)) {
             qemu_log_mask(LOG_UNIMP,
                           "%s: Cascaded mode not implemented",
@@ -204,7 +321,10 @@ static void aspeed_hace_write(void *opaque, hwaddr addr, uint64_t data,
                         __func__, data & ahc->hash_mask);
                 break;
         }
-        do_hash_operation(s, algo);
+        if (data & HASH_SG_EN)
+            do_hash_sg_operation(s, algo);
+        else
+            do_hash_operation(s, algo);
 
         if (data & HASH_IRQ_EN) {
             qemu_irq_raise(s->irq);
