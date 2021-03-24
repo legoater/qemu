@@ -1064,9 +1064,12 @@ static sd_rsp_type_t sd_normal_command(SDState *sd, SDRequest req)
         break;
 
     case 1:	/* CMD1:   SEND_OP_CMD */
+        /* MMC: Powerup & send r3
+         * SD: send r1 in spi mode
+         */
         if (sd->emmc) {
-            sd->state = sd_ready_state;
-            return sd_r3;
+            sd_ocr_powerup(sd);
+            return sd->state == sd_idle_state ? sd_r3 : sd_r0;
         }
 
         if (!sd->spi)
