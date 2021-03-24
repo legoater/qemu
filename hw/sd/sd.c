@@ -110,6 +110,7 @@ struct SDState {
     BlockBackend *blk;
     bool spi;
     bool emmc;
+    uint8_t boot_config;
 
     /* Runtime changeables */
 
@@ -418,6 +419,8 @@ static void mmc_set_ext_csd(SDState *sd, uint64_t size)
     sd->ext_csd[159] = 0x00; /* Max enhanced area size */
     sd->ext_csd[158] = 0x00; /* ... */
     sd->ext_csd[157] = 0xEC; /* ... */
+
+    sd->ext_csd[EXT_CSD_PART_CONFIG] = sd->boot_config;
 }
 
 
@@ -836,9 +839,11 @@ static uint32_t sd_bootpart_offset(SDState *sd)
 {
     unsigned int access = sd->ext_csd[EXT_CSD_PART_CONFIG] &
         EXT_CSD_PART_CONFIG_ACC_MASK;
+    unsigned int enable = sd->ext_csd[EXT_CSD_PART_CONFIG] &
+         EXT_CSD_PART_CONFIG_EN_MASK;
     unsigned int boot_capacity = sd->ext_csd[EXT_CSD_BOOT_MULT] << 17;
 
-    if (!sd->emmc)
+    if (!sd->emmc || !enable)
         return 0;
 
     switch (access) {
@@ -2408,6 +2413,7 @@ static Property sd_properties[] = {
      * is asserted.  */
     DEFINE_PROP_BOOL("spi", SDState, spi, false),
     DEFINE_PROP_BOOL("emmc", SDState, emmc, false),
+    DEFINE_PROP_UINT8("boot-config", SDState, boot_config, 0x0),
     DEFINE_PROP_END_OF_LIST()
 };
 
