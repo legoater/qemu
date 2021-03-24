@@ -25,11 +25,22 @@
 #define XDMA_IRQ_ENG_CTRL          0x20
 #define  XDMA_IRQ_ENG_CTRL_US_COMP BIT(4)
 #define  XDMA_IRQ_ENG_CTRL_DS_COMP BIT(5)
-#define  XDMA_IRQ_ENG_CTRL_W_MASK  0xBFEFF07F
+#define  XDMA_IRQ_ENG_CTRL_W_MASK  0xBFEFF07F /* TODO */
 #define XDMA_IRQ_ENG_STAT          0x24
 #define  XDMA_IRQ_ENG_STAT_US_COMP BIT(4)
 #define  XDMA_IRQ_ENG_STAT_DS_COMP BIT(5)
 #define  XDMA_IRQ_ENG_STAT_RESET   0xF8000000
+
+#define XDMA_AST2600_BMC_CMDQ_ENDP   0x18
+#define XDMA_AST2600_BMC_CMDQ_WRP    0x1c
+#define XDMA_AST2600_BMC_CMDQ_RDP    0x20
+#define XDMA_AST2600_CTRL            0x38
+#define  XDMA_AST2600_CTRL_US_COMP    BIT(16)
+#define  XDMA_AST2600_CTRL_DS_COMP    BIT(17)
+#define XDMA_AST2600_STATUS          0x3c
+#define  XDMA_AST2600_STATUS_US_COMP  BIT(16)
+#define  XDMA_AST2600_STATUS_DS_COMP  BIT(17)
+
 #define XDMA_MEM_SIZE              0x1000
 
 #define TO_REG(addr) ((addr) / sizeof(uint32_t))
@@ -52,56 +63,48 @@ static void aspeed_xdma_write(void *opaque, hwaddr addr, uint64_t val,
     unsigned int idx;
     uint32_t val32 = (uint32_t)val;
     AspeedXDMAState *xdma = opaque;
+    AspeedXDMAClass *axc = ASPEED_XDMA_GET_CLASS(xdma);
 
     if (addr >= ASPEED_XDMA_REG_SIZE) {
         return;
     }
 
-    switch (addr) {
-    case XDMA_BMC_CMDQ_ENDP:
+    if (addr == axc->cmdq_endp) {
         xdma->regs[TO_REG(addr)] = val32 & XDMA_BMC_CMDQ_W_MASK;
-        break;
-    case XDMA_BMC_CMDQ_WRP:
+    } else if (addr == axc->cmdq_wrp) {
         idx = TO_REG(addr);
         xdma->regs[idx] = val32 & XDMA_BMC_CMDQ_W_MASK;
-        xdma->regs[TO_REG(XDMA_BMC_CMDQ_RDP)] = xdma->regs[idx];
+        xdma->regs[TO_REG(axc->cmdq_rdp)] = xdma->regs[idx];
 
         trace_aspeed_xdma_write(addr, val);
 
         if (xdma->bmc_cmdq_readp_set) {
             xdma->bmc_cmdq_readp_set = 0;
         } else {
-            xdma->regs[TO_REG(XDMA_IRQ_ENG_STAT)] |=
-                XDMA_IRQ_ENG_STAT_US_COMP | XDMA_IRQ_ENG_STAT_DS_COMP;
+            xdma->regs[TO_REG(axc->eng_stat)] |= axc->eng_complete;
 
-            if (xdma->regs[TO_REG(XDMA_IRQ_ENG_CTRL)] &
-                (XDMA_IRQ_ENG_CTRL_US_COMP | XDMA_IRQ_ENG_CTRL_DS_COMP))
+            if (xdma->regs[TO_REG(axc->eng_ctrl)] & axc->eng_complete) {
                 qemu_irq_raise(xdma->irq);
+            }
         }
-        break;
-    case XDMA_BMC_CMDQ_RDP:
+    } else if (addr == axc->cmdq_rdp) {
         trace_aspeed_xdma_write(addr, val);
 
         if (val32 == XDMA_BMC_CMDQ_RDP_MAGIC) {
             xdma->bmc_cmdq_readp_set = 1;
         }
-        break;
-    case XDMA_IRQ_ENG_CTRL:
+    } else if (addr == axc->eng_ctrl) {
         xdma->regs[TO_REG(addr)] = val32 & XDMA_IRQ_ENG_CTRL_W_MASK;
-        break;
-    case XDMA_IRQ_ENG_STAT:
+    } else if (addr == axc->eng_stat) {
         trace_aspeed_xdma_write(addr, val);
 
         idx = TO_REG(addr);
-        if (val32 & (XDMA_IRQ_ENG_STAT_US_COMP | XDMA_IRQ_ENG_STAT_DS_COMP)) {
-            xdma->regs[idx] &=
-                ~(XDMA_IRQ_ENG_STAT_US_COMP | XDMA_IRQ_ENG_STAT_DS_COMP);
+        if (val32 & axc->eng_complete) {
+            xdma->regs[idx] &= ~axc->eng_complete;
             qemu_irq_lower(xdma->irq);
         }
-        break;
-    default:
+    } else {
         xdma->regs[TO_REG(addr)] = val32;
-        break;
     }
 }
 
@@ -127,10 +130,11 @@ static void aspeed_xdma_realize(DeviceState *dev, Error **errp)
 static void aspeed_xdma_reset(DeviceState *dev)
 {
     AspeedXDMAState *xdma = ASPEED_XDMA(dev);
+    AspeedXDMAClass *axc = ASPEED_XDMA_GET_CLASS(xdma);
 
     xdma->bmc_cmdq_readp_set = 0;
     memset(xdma->regs, 0, ASPEED_XDMA_REG_SIZE);
-    xdma->regs[TO_REG(XDMA_IRQ_ENG_STAT)] = XDMA_IRQ_ENG_STAT_RESET;
+    xdma->regs[TO_REG(axc->eng_stat)] = XDMA_IRQ_ENG_STAT_RESET;
 
     qemu_irq_lower(xdma->irq);
 }
@@ -142,6 +146,69 @@ static const VMStateDescription aspeed_xdma_vmstate = {
         VMSTATE_UINT32_ARRAY(regs, AspeedXDMAState, ASPEED_XDMA_NUM_REGS),
         VMSTATE_END_OF_LIST(),
     },
+};
+
+static void aspeed_2600_xdma_class_init(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    AspeedXDMAClass *axc = ASPEED_XDMA_CLASS(klass);
+
+    dc->desc = "ASPEED 2600 XDMA Controller";
+
+    axc->cmdq_endp = XDMA_AST2600_BMC_CMDQ_ENDP;
+    axc->cmdq_wrp = XDMA_AST2600_BMC_CMDQ_WRP;
+    axc->cmdq_rdp = XDMA_AST2600_BMC_CMDQ_RDP;
+    axc->eng_ctrl = XDMA_AST2600_CTRL;
+    axc->eng_stat = XDMA_AST2600_STATUS;
+    axc->eng_complete = BIT(16) | BIT(17);
+}
+
+static const TypeInfo aspeed_2600_xdma_info = {
+    .name = TYPE_ASPEED_2600_XDMA,
+    .parent = TYPE_ASPEED_XDMA,
+    .class_init = aspeed_2600_xdma_class_init,
+};
+
+static void aspeed_2500_xdma_class_init(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    AspeedXDMAClass *axc = ASPEED_XDMA_CLASS(klass);
+
+    dc->desc = "ASPEED 2500 XDMA Controller";
+
+    axc->cmdq_endp = XDMA_BMC_CMDQ_ENDP;
+    axc->cmdq_wrp = XDMA_BMC_CMDQ_WRP;
+    axc->cmdq_rdp = XDMA_BMC_CMDQ_RDP;
+    axc->eng_ctrl = XDMA_IRQ_ENG_CTRL;
+    axc->eng_stat = XDMA_IRQ_ENG_STAT;
+    axc->eng_complete = BIT(4) | BIT(5);
+};
+
+static const TypeInfo aspeed_2500_xdma_info = {
+    .name = TYPE_ASPEED_2500_XDMA,
+    .parent = TYPE_ASPEED_XDMA,
+    .class_init = aspeed_2500_xdma_class_init,
+};
+
+static void aspeed_2400_xdma_class_init(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    AspeedXDMAClass *axc = ASPEED_XDMA_CLASS(klass);
+
+    dc->desc = "ASPEED 2400 XDMA Controller";
+
+    axc->cmdq_endp = XDMA_BMC_CMDQ_ENDP;
+    axc->cmdq_wrp = XDMA_BMC_CMDQ_WRP;
+    axc->cmdq_rdp = XDMA_BMC_CMDQ_RDP;
+    axc->eng_ctrl = XDMA_IRQ_ENG_CTRL;
+    axc->eng_stat = XDMA_IRQ_ENG_STAT;
+    axc->eng_complete = BIT(4) | BIT(5);
+};
+
+static const TypeInfo aspeed_2400_xdma_info = {
+    .name = TYPE_ASPEED_2400_XDMA,
+    .parent = TYPE_ASPEED_XDMA,
+    .class_init = aspeed_2400_xdma_class_init,
 };
 
 static void aspeed_xdma_class_init(ObjectClass *classp, void *data)
@@ -158,10 +225,15 @@ static const TypeInfo aspeed_xdma_info = {
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(AspeedXDMAState),
     .class_init    = aspeed_xdma_class_init,
+    .class_size    = sizeof(AspeedXDMAClass),
+    .abstract      = true,
 };
 
 static void aspeed_xdma_register_type(void)
 {
     type_register_static(&aspeed_xdma_info);
+    type_register_static(&aspeed_2400_xdma_info);
+    type_register_static(&aspeed_2500_xdma_info);
+    type_register_static(&aspeed_2600_xdma_info);
 }
 type_init(aspeed_xdma_register_type);
