@@ -254,6 +254,17 @@ static void write_boot_rom(DriveInfo *dinfo, hwaddr addr, size_t rom_size,
     g_free(storage);
 }
 
+static void install_boot_rom(DriveInfo *dinfo, size_t rom_size)
+{
+    MemoryRegion *boot_rom = g_new(MemoryRegion, 1);
+
+    memory_region_init_rom(boot_rom, NULL, "aspeed.boot_rom",
+                           rom_size, &error_abort);
+    memory_region_add_subregion(get_system_memory(), FIRMWARE_ADDR,
+                                boot_rom);
+    write_boot_rom(dinfo, FIRMWARE_ADDR, rom_size, &error_abort);
+}
+
 static void aspeed_board_init_flashes(AspeedSMCState *s,
                                       const char *flashtype)
 {
@@ -410,8 +421,13 @@ static void aspeed_machine_init(MachineState *machine)
     }
 
     if (bmc->soc.emmc.num_slots) {
-        sdhci_attach_drive(&bmc->soc.emmc.slots[0], drive_get_next(IF_SD),
-                           true);
+        DriveInfo *sd0 = drive_get_next(IF_SD);
+
+        sdhci_attach_drive(&bmc->soc.emmc.slots[0], sd0, true);
+
+        if (!drive0 && sd0) {
+            install_boot_rom(sd0, 64 * KiB);
+        }
     }
 
     arm_load_kernel(ARM_CPU(first_cpu), machine, &aspeed_board_binfo);
