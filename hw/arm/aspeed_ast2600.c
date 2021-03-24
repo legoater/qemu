@@ -349,6 +349,13 @@ static void aspeed_soc_ast2600_realize(DeviceState *dev, Error **errp)
                        vuart, 38400, serial_hd(1), DEVICE_LITTLE_ENDIAN);
     }
 
+    /* UART1 */
+    if (serial_hd(2)) {
+        qemu_irq uart1 = aspeed_soc_get_irq(s, ASPEED_DEV_UART1);
+        serial_mm_init(get_system_memory(), sc->memmap[ASPEED_DEV_UART1], 2,
+                       uart1, 38400, serial_hd(2), DEVICE_LITTLE_ENDIAN);
+    }
+
     /* I2C */
     object_property_set_link(OBJECT(&s->i2c), "dram", OBJECT(s->dram_mr),
                              &error_abort);
