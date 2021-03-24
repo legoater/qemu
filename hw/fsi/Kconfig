@@ -1,0 +1,10 @@
+config APB2OPB_ASPEED
+    bool
+    select OPB
+
+config OPB
+    bool
+    select FSI
+
+config FSI
+    bool

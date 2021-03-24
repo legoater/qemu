@@ -61,6 +61,8 @@ static const hwaddr aspeed_soc_ast2600_memmap[] = {
     [ASPEED_DEV_UART1]     = 0x1E783000,
     [ASPEED_DEV_UART5]     = 0x1E784000,
     [ASPEED_DEV_VUART]     = 0x1E787000,
+    [ASPEED_DEV_FSI1]      = 0x1E79B000,
+    [ASPEED_DEV_FSI2]      = 0x1E79B100,
     [ASPEED_DEV_SDRAM]     = 0x80000000,
 };
 
@@ -107,6 +109,8 @@ static const int aspeed_soc_ast2600_irqmap[] = {
     [ASPEED_DEV_ETH3]      = 32,
     [ASPEED_DEV_ETH4]      = 33,
     [ASPEED_DEV_KCS]       = 138,   /* 138 -> 142 */
+    [ASPEED_DEV_FSI1]      = 100,
+    [ASPEED_DEV_FSI2]      = 101,
 };
 
 static qemu_irq aspeed_soc_get_irq(AspeedSoCState *s, int ctrl)
@@ -225,6 +229,8 @@ static void aspeed_soc_ast2600_init(Object *obj)
     object_initialize_child(obj, "ibt", &s->ibt, TYPE_ASPEED_IBT);
 
     object_initialize_child(obj, "pwm", &s->pwm, TYPE_ASPEED_PWM);
+
+    object_initialize_child(obj, "fsi[*]", &s->fsi[0], TYPE_ASPEED_APB2OPB);
 }
 
 /*
@@ -556,6 +562,15 @@ static void aspeed_soc_ast2600_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->pwm), 0, sc->memmap[ASPEED_DEV_PWM]);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->pwm), 0,
                        aspeed_soc_get_irq(s, ASPEED_DEV_PWM));
+
+    /* FSI */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->fsi[0]), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->fsi[0]), 0,
+                    sc->memmap[ASPEED_DEV_FSI1]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->fsi[0]), 0,
+                       aspeed_soc_get_irq(s, ASPEED_DEV_FSI1));
 }
 
 static void aspeed_soc_ast2600_class_init(ObjectClass *oc, void *data)
