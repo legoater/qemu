@@ -287,7 +287,8 @@ static void aspeed_board_init_flashes(AspeedSMCState *s,
     }
 }
 
-static void sdhci_attach_drive(SDHCIState *sdhci, DriveInfo *dinfo, bool emmc)
+static void sdhci_attach_drive(SDHCIState *sdhci, DriveInfo *dinfo, bool emmc,
+                               uint8_t boot_config)
 {
         DeviceState *card;
 
@@ -298,6 +299,8 @@ static void sdhci_attach_drive(SDHCIState *sdhci, DriveInfo *dinfo, bool emmc)
         qdev_prop_set_drive_err(card, "drive", blk_by_legacy_dinfo(dinfo),
                                 &error_fatal);
         qdev_prop_set_bit(card, "emmc", emmc);
+        if (boot_config)
+            qdev_prop_set_uint8(card, "boot-config", boot_config);
         qdev_realize_and_unref(card,
                                qdev_get_child_bus(DEVICE(sdhci), "sd-bus"),
                                &error_fatal);
@@ -417,13 +420,13 @@ static void aspeed_machine_init(MachineState *machine)
 
     for (i = 0; i < bmc->soc.sdhci.num_slots; i++) {
         sdhci_attach_drive(&bmc->soc.sdhci.slots[i], drive_get_next(IF_SD),
-                           false);
+                           false, 0);
     }
 
     if (bmc->soc.emmc.num_slots) {
         DriveInfo *sd0 = drive_get_next(IF_SD);
 
-        sdhci_attach_drive(&bmc->soc.emmc.slots[0], sd0, true);
+        sdhci_attach_drive(&bmc->soc.emmc.slots[0], sd0, true, 0x48);
 
         if (!drive0 && sd0) {
             install_boot_rom(sd0, 64 * KiB);
