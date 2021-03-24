@@ -353,6 +353,7 @@ static void test_addresses(const char *machine, const uint32_t base,
     g_assert_cmphex(qtest_readl(s, base + HACE_HASH_DATA_LEN), ==, 0);
 }
 
+#if 0
 static void test_addresses_sg(const char *machine, const uint32_t base,
                            const struct masks *expected)
 {
@@ -391,6 +392,7 @@ static void test_addresses_sg(const char *machine, const uint32_t base,
     g_assert_cmphex(qtest_readl(s, base + HACE_HASH_DIGEST), ==, 0);
     g_assert_cmphex(qtest_readl(s, base + HACE_HASH_DATA_LEN), ==, 0);
 }
+#endif
 
 /* ast2600 */
 static void test_md5_ast2600(void)
@@ -423,10 +425,12 @@ static void test_addresses_ast2600(void)
     test_addresses("-machine ast2600-evb", 0x1e6d0000, &ast2600_masks);
 }
 
+#if 0
 static void test_addresses_sg_ast2600(void)
 {
     test_addresses_sg("-machine ast2600-evb", 0x1e6d0000, &ast2600_masks);
 }
+#endif
 
 /* ast2500 */
 static void test_md5_ast2500(void)
@@ -479,7 +483,9 @@ int main(int argc, char **argv)
     qtest_add_func("ast2600/hace/sha256", test_sha256_ast2600);
     qtest_add_func("ast2600/hace/md5", test_md5_ast2600);
 
+#if 0
     qtest_add_func("ast2600/hace/addresses_sg", test_addresses_sg_ast2600);
+#endif
     qtest_add_func("ast2600/hace/sha512_sg", test_sha512_sg_ast2600);
     qtest_add_func("ast2600/hace/sha256_sg", test_sha256_sg_ast2600);
 
