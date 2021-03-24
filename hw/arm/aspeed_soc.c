@@ -27,6 +27,7 @@
 #define ASPEED_SOC_IOMEM_SIZE       0x00200000
 
 static const hwaddr aspeed_soc_ast2400_memmap[] = {
+    [ASPEED_DEV_SMC]    = 0x16000000,
     [ASPEED_DEV_IOMEM]  = 0x1E600000,
     [ASPEED_DEV_FMC]    = 0x1E620000,
     [ASPEED_DEV_SPI1]   = 0x1E630000,
@@ -95,6 +96,7 @@ static const int aspeed_soc_ast2400_irqmap[] = {
     [ASPEED_DEV_UART4]  = 34,
     [ASPEED_DEV_UART5]  = 10,
     [ASPEED_DEV_VUART]  = 8,
+    [ASPEED_DEV_SMC]    = 19,
     [ASPEED_DEV_FMC]    = 19,
     [ASPEED_DEV_EHCI1]  = 5,
     [ASPEED_DEV_EHCI2]  = 13,
@@ -169,6 +171,11 @@ static void aspeed_soc_init(Object *obj)
 
     snprintf(typename, sizeof(typename), "aspeed.i2c-%s", socname);
     object_initialize_child(obj, "i2c", &s->i2c, typename);
+
+    if (ASPEED_IS_AST2400(sc->silicon_rev)) {
+        snprintf(typename, sizeof(typename), "aspeed.smc-%s", socname);
+        object_initialize_child(obj, "smc", &s->smc, typename);
+    }
 
     snprintf(typename, sizeof(typename), "aspeed.fmc-%s", socname);
     object_initialize_child(obj, "fmc", &s->fmc, typename);
@@ -332,6 +339,18 @@ static void aspeed_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->i2c), 0, sc->memmap[ASPEED_DEV_I2C]);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->i2c), 0,
                        aspeed_soc_get_irq(s, ASPEED_DEV_I2C));
+
+    /* SMC legacy (AST2400 only) */
+    if (ASPEED_IS_AST2400(sc->silicon_rev)) {
+        if (!sysbus_realize(SYS_BUS_DEVICE(&s->smc), errp)) {
+            return;
+        }
+        sysbus_mmio_map(SYS_BUS_DEVICE(&s->smc), 0, sc->memmap[ASPEED_DEV_SMC]);
+        sysbus_mmio_map(SYS_BUS_DEVICE(&s->smc), 1,
+                        s->smc.ctrl->flash_window_base);
+        sysbus_connect_irq(SYS_BUS_DEVICE(&s->smc), 0,
+                           aspeed_soc_get_irq(s, ASPEED_DEV_SMC));
+    }
 
     /* FMC, The number of CS is set at the board level */
     object_property_set_link(OBJECT(&s->fmc), "dram", OBJECT(s->dram_mr),

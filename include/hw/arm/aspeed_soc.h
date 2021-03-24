@@ -57,6 +57,7 @@ struct AspeedSoCState {
     AspeedHACEState hace;
     AspeedXDMAState xdma;
     AspeedADCState adc;
+    AspeedSMCState smc;
     AspeedSMCState fmc;
     AspeedSMCState spi[ASPEED_SPIS_NUM];
     EHCISysBusState ehci[ASPEED_EHCIS_NUM];
@@ -101,6 +102,7 @@ enum {
     ASPEED_DEV_UART4,
     ASPEED_DEV_UART5,
     ASPEED_DEV_VUART,
+    ASPEED_DEV_SMC,
     ASPEED_DEV_FMC,
     ASPEED_DEV_SPI1,
     ASPEED_DEV_SPI2,
