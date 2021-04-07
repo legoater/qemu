@@ -23,6 +23,7 @@
 #include "hw/misc/aspeed_xdma.h"
 #include "hw/timer/aspeed_timer.h"
 #include "hw/rtc/aspeed_rtc.h"
+#include "hw/misc/aspeed_ibt.h"
 #include "hw/i2c/aspeed_i2c.h"
 #include "hw/i3c/aspeed_i3c.h"
 #include "hw/ssi/aspeed_smc.h"
@@ -76,6 +77,7 @@ struct AspeedSoCState {
     AddressSpace dram_as;
     AspeedRtcState rtc;
     AspeedTimerCtrlState timerctrl;
+    AspeedIBTState ibt;
     AspeedI2CState i2c;
     AspeedI3CState i3c;
     AspeedSCUState scu;
