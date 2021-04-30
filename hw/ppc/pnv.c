@@ -746,7 +746,7 @@ static void pnv_chip_power10_pic_print_info(PnvChip *chip, Monitor *mon)
 
 static void pnv_init(MachineState *machine)
 {
-    const char *bios_name = machine->firmware ?: FW_FILE_NAME;
+    const char *bios_name = machine->firmware;
     PnvMachineState *pnv = PNV_MACHINE(machine);
     MachineClass *mc = MACHINE_GET_CLASS(machine);
     char *fw_filename;
@@ -755,6 +755,7 @@ static void pnv_init(MachineState *machine)
     char *chip_typename;
     DriveInfo *pnor = drive_get(IF_MTD, 0, 0);
     DeviceState *dev;
+    bool load_skiboot_from_pnor = false;
 
     /* allocate RAM */
     if (machine->ram_size < mc->default_ram_size) {
@@ -775,19 +776,34 @@ static void pnv_init(MachineState *machine)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
     pnv->pnor = PNV_PNOR(dev);
 
-    /* load skiboot firmware  */
-    fw_filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
-    if (!fw_filename) {
-        error_report("Could not find OPAL firmware '%s'", bios_name);
-        exit(1);
+    /*
+     * Try to load skiboot from pnor if no 'bios' was provided on the
+     * command line. skiboot will load the kernel and initramfs from
+     * the PNOR.
+     */
+    if (bios_name == NULL) {
+        bios_name = FW_FILE_NAME;
+        load_skiboot_from_pnor = !!pnor;
     }
 
-    fw_size = load_image_targphys(fw_filename, pnv->fw_load_addr, FW_MAX_SIZE);
-    if (fw_size < 0) {
-        error_report("Could not load OPAL firmware '%s'", fw_filename);
-        exit(1);
-    }
-    g_free(fw_filename);
+    if (load_skiboot_from_pnor) {
+        pnv_pnor_load_skiboot(pnv->pnor, pnv->fw_load_addr, FW_MAX_SIZE,
+                              &error_fatal);
+    } else {
+        fw_filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
+        if (!fw_filename) {
+            error_report("Could not find OPAL firmware '%s'", bios_name);
+            exit(1);
+        }
+
+        fw_size = load_image_targphys(fw_filename, pnv->fw_load_addr,
+                                      FW_MAX_SIZE);
+        if (fw_size < 0) {
+            error_report("Could not load OPAL firmware '%s'", fw_filename);
+            exit(1);
+        }
+        g_free(fw_filename);
+     }
 
     /* load kernel */
     if (machine->kernel_filename) {

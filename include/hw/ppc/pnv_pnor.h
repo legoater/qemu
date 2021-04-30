@@ -26,6 +26,12 @@ struct PnvPnor {
     uint8_t        *storage;
     int64_t        size;
     MemoryRegion   mmio;
+
+    uint32_t       skiboot_addr;
+    uint32_t       skiboot_size;
 };
+
+extern int pnv_pnor_load_skiboot(PnvPnor *pnor, hwaddr addr, size_t max_size,
+                                 Error **errp);
 
 #endif /* _PPC_PNV_PNOR_H */
