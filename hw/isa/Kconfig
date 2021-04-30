@@ -4,6 +4,10 @@ config ISA_BUS
 config APM
     bool
 
+config ASPEED_MBOX
+    bool
+    select ISA_BUS
+
 config I82378
     bool
     select ISA_BUS

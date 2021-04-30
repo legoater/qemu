@@ -45,6 +45,7 @@
 #include "monitor/monitor.h"
 #include "hw/intc/intc.h"
 #include "hw/ipmi/ipmi.h"
+#include "hw/isa/aspeed_mbox.h"
 #include "target/ppc/mmu-hash64.h"
 #include "hw/pci/msi.h"
 
@@ -440,6 +441,33 @@ static void pnv_dt_ipmi_bt(ISADevice *d, void *fdt, int lpc_off)
                            fdt_get_phandle(fdt, lpc_off))));
 }
 
+static void pnv_dt_mbox(ISADevice *d, void *fdt, int lpc_off)
+{
+    uint32_t io_base = d->ioport_id;
+    uint32_t io_regs[] = {
+        cpu_to_be32(1),
+        cpu_to_be32(io_base),
+        cpu_to_be32(6)
+    };
+    uint32_t irq;
+    char *name;
+    int node;
+
+    irq = object_property_get_int(OBJECT(d), "irq", &error_fatal);
+
+    name = g_strdup_printf("mbox@i%x", io_base);
+    node = fdt_add_subnode(fdt, lpc_off, name);
+    _FDT(node);
+    g_free(name);
+
+    _FDT((fdt_setprop(fdt, node, "reg", io_regs, sizeof(io_regs))));
+    _FDT((fdt_setprop_string(fdt, node, "compatible", "mbox")));
+    _FDT((fdt_setprop_string(fdt, node, "status", "reserved")));
+    _FDT((fdt_setprop_cell(fdt, node, "interrupts", irq)));
+    _FDT((fdt_setprop_cell(fdt, node, "interrupt-parent",
+                           fdt_get_phandle(fdt, lpc_off))));
+}
+
 typedef struct ForeachPopulateArgs {
     void *fdt;
     int offset;
@@ -456,6 +484,8 @@ static int pnv_dt_isa_device(DeviceState *dev, void *opaque)
         pnv_dt_serial(d, args->fdt, args->offset);
     } else if (object_dynamic_cast(OBJECT(dev), "isa-ipmi-bt")) {
         pnv_dt_ipmi_bt(d, args->fdt, args->offset);
+    } else if (object_dynamic_cast(OBJECT(dev), TYPE_ASPEED_MBOX)) {
+        pnv_dt_mbox(d, args->fdt, args->offset);
     } else {
         error_report("unknown isa device %s@i%x", qdev_fw_name(dev),
                      d->ioport_id);
@@ -866,6 +896,9 @@ static void pnv_init(MachineState *machine)
 
     /* Create an RTC ISA device too */
     mc146818_rtc_init(pnv->isa_bus, 2000, NULL);
+
+    /* Create Aspeed MBOX device */
+    aspeed_mbox_create(pnv->isa_bus);
 
     /*
      * Create the machine BMC simulator and the IPMI BT device for
