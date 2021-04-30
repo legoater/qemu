@@ -15,4 +15,6 @@ typedef struct {
     uint64_t (*read_cfg)(int func, int reg, int size);
 } ocapi_afu_t;
 
+extern ocapi_afu_t ocapi_afu_memcpy;
+
 #endif /* PPC_OCAPI_AFU_H */
