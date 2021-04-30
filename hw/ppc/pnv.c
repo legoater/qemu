@@ -1336,6 +1336,10 @@ static void pnv_chip_power9_instance_init(Object *obj)
     chip->num_phbs = pcc->num_phbs;
 
     object_initialize_child(obj, "npu", &chip9->npu2, TYPE_PNV_NPU2);
+
+    for (i = 0; i < PNV9_CHIP_MAX_I2C; i++) {
+        object_initialize_child(obj, "i2c[*]", &chip9->i2c[i], TYPE_PNV_I2C);
+    }
 }
 
 static void pnv_chip_quad_realize(Pnv9Chip *chip9, Error **errp)
@@ -1439,6 +1443,7 @@ static void pnv_chip_power9_realize(DeviceState *dev, Error **errp)
     PnvChip *chip = PNV_CHIP(dev);
     Pnv9Psi *psi9 = &chip9->psi;
     Error *local_err = NULL;
+    int i;
 
     /* XSCOM bridge is first */
     pnv_xscom_realize(chip, PNV9_XSCOM_SIZE, &local_err);
@@ -1545,6 +1550,24 @@ static void pnv_chip_power9_realize(DeviceState *dev, Error **errp)
                             &chip9->npu2.xscom_obus0_regs);
     pnv_xscom_add_subregion(chip, PNV9_XSCOM_OBUS0_INDIRECT_BASE,
                             &chip9->npu2.xscom_obus0_indirect_regs);
+
+    /*
+     * The number of busses is specific to each platform
+     */
+    for (i = 0; i < PNV9_CHIP_MAX_I2C; i++) {
+        Object *obj =  OBJECT(&chip9->i2c[i]);
+
+        object_property_set_int(obj, "engine", i + 1, &error_fatal);
+        object_property_set_int(obj, "num-busses", 1, &error_fatal);
+        object_property_set_link(obj, "psi", OBJECT(&chip9->psi), &error_abort);
+        object_property_set_link(obj, "chip", OBJECT(chip), &error_abort);
+        if (!qdev_realize(DEVICE(obj), NULL, errp)) {
+            return;
+        }
+        pnv_xscom_add_subregion(chip, PNV9_XSCOM_I2CM_BASE +
+                                chip9->i2c[i].engine * PNV9_XSCOM_I2CM_SIZE,
+                                &chip9->i2c[i].xscom_regs);
+    }
 }
 
 static uint32_t pnv_chip_power9_xscom_pcba(PnvChip *chip, uint64_t addr)

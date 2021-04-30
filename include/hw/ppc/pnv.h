@@ -33,6 +33,7 @@
 #include "hw/ppc/pnv_npu.h"
 #include "hw/pci-host/pnv_phb3.h"
 #include "hw/pci-host/pnv_phb4.h"
+#include "hw/ppc/pnv_i2c.h"
 #include "qom/object.h"
 
 #define TYPE_PNV_CHIP "pnv-chip"
@@ -108,6 +109,9 @@ struct Pnv9Chip {
 
 #define PNV9_CHIP_MAX_PEC 3
     PnvPhb4PecState pecs[PNV9_CHIP_MAX_PEC];
+
+#define PNV9_CHIP_MAX_I2C 3
+    PnvI2C      i2c[PNV9_CHIP_MAX_I2C];
 };
 
 /*
