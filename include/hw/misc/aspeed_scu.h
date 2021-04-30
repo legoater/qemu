@@ -317,4 +317,11 @@ uint32_t aspeed_scu_get_apb_freq(AspeedSCUState *s);
         SCU_HW_STRAP_VGA_SIZE_SET(VGA_16M_DRAM) |                       \
         SCU_AST2500_HW_STRAP_RESERVED1)
 
+/* STRAP1 SCU500 */
+#define AST26500_HW_STRAP_BOOT_SRC_EMMC            (0x1 << 2)
+#define AST26500_HW_STRAP_BOOT_SRC_SPI             (0x0 << 2)
+
+/* STRAP2 SCU510 */
+#define AST26500_HW_STRAP_BOOT_SRC_UART            (0x1 << 8)
+
 #endif /* ASPEED_SCU_H */
