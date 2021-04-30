@@ -1568,6 +1568,9 @@ static void pnv_chip_power9_realize(DeviceState *dev, Error **errp)
                                 chip9->i2c[i].engine * PNV9_XSCOM_I2CM_SIZE,
                                 &chip9->i2c[i].xscom_regs);
     }
+
+    /* Add a PCA9552 I2C device for NPU detection */
+    i2c_slave_create_simple(chip9->i2c[0].busses[0], "pca9552", 0x20);
 }
 
 static uint32_t pnv_chip_power9_xscom_pcba(PnvChip *chip, uint64_t addr)
