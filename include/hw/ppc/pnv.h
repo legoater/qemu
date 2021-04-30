@@ -30,6 +30,7 @@
 #include "hw/ppc/pnv_homer.h"
 #include "hw/ppc/pnv_xive.h"
 #include "hw/ppc/pnv_core.h"
+#include "hw/ppc/pnv_npu.h"
 #include "hw/pci-host/pnv_phb3.h"
 #include "hw/pci-host/pnv_phb4.h"
 #include "qom/object.h"
@@ -100,6 +101,7 @@ struct Pnv9Chip {
     PnvLpcController lpc;
     PnvOCC       occ;
     PnvHomer     homer;
+    PnvNpu2      npu2;
 
     uint32_t     nr_quads;
     PnvQuad      *quads;
@@ -305,6 +307,10 @@ void pnv_bmc_set_pnor(IPMIBmc *bmc, PnvPnor *pnor);
 
 #define PNV9_LPCM_SIZE               0x0000000100000000ull
 #define PNV9_LPCM_BASE(chip)         PNV9_CHIP_BASE(chip, 0x0006030000000000ull)
+
+/* fxb BASE is used to set device property. Useless? */
+#define PNV9_NPU_GENID_SIZE          0x0000000000020000ull
+#define PNV9_NPU_GENID_BASE(chip)    PNV9_CHIP_BASE(chip, 0x00060302016e0000ull)
 
 #define PNV9_PSIHB_SIZE              0x0000000000100000ull
 #define PNV9_PSIHB_BASE(chip)        PNV9_CHIP_BASE(chip, 0x0006030203000000ull)

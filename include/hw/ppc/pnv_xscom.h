@@ -36,6 +36,14 @@ struct PnvXScomInterfaceClass {
     int (*dt_xscom)(PnvXScomInterface *dev, void *fdt, int offset);
 };
 
+/* Definitions relating to indirect XSCOMs */
+#define XSCOM_ADDR_IND_FLAG             PPC_BIT(0)
+#define XSCOM_ADDR_IND_ADDR             PPC_BITMASK(12, 31)
+#define XSCOM_ADDR_IND_DATA             PPC_BITMASK(48, 63)
+
+#define XSCOM_DATA_IND_READ             PPC_BIT(0)
+#define XSCOM_DATA_IND_COMPLETE         PPC_BIT(32)
+
 /*
  * Layout of the XSCOM PCB addresses of EX core 1 (POWER 8)
  *
@@ -95,6 +103,14 @@ struct PnvXScomInterfaceClass {
 #define PNV9_XSCOM_PBA_BASE       0x5012b00
 #define PNV9_XSCOM_PBA_SIZE       0x40
 
+#define PNV9_XSCOM_NPU_BASE1      0x5011000
+#define PNV9_XSCOM_NPU_SIZE1      0x702
+#define PNV9_XSCOM_NPU_BASE2      0x5013c00
+#define PNV9_XSCOM_NPU_SIZE2      0x88
+
+/* OB0 - indirect access */
+#define PNV9_XSCOM_NPU_INDIRECT0  0x8000000009010c3fUL
+
 #define PNV9_XSCOM_PSIHB_BASE     0x5012900
 #define PNV9_XSCOM_PSIHB_SIZE     0x100
 
@@ -103,6 +119,12 @@ struct PnvXScomInterfaceClass {
 
 #define PNV9_XSCOM_PEC_NEST_BASE  0x4010c00
 #define PNV9_XSCOM_PEC_NEST_SIZE  0x100
+
+#define PNV9_XSCOM_OBUS0_BASE          0x9010800
+#define PNV9_XSCOM_OBUS3_BASE          0xc010800
+#define PNV9_XSCOM_OBUS_SIZE           0x34
+#define PNV9_XSCOM_OBUS0_INDIRECT_BASE 0x9010C3F
+#define PNV9_XSCOM_OBUS_INDIRECT_SIZE  0x1
 
 #define PNV9_XSCOM_PEC_PCI_BASE   0xd010800
 #define PNV9_XSCOM_PEC_PCI_SIZE   0x200
