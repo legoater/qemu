@@ -48,6 +48,8 @@ struct PnvOCC {
 
     MemoryRegion xscom_regs;
     MemoryRegion sram_regs;
+
+    uint8_t sensor_data[PNV_OCC_SENSOR_DATA_BLOCK_SIZE];
 };
 
 

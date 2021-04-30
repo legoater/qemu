@@ -19,8 +19,10 @@
 #include "qemu/osdep.h"
 #include "target/ppc/cpu.h"
 #include "qapi/error.h"
+#include "qapi/visitor.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
+#include "include/sysemu/reset.h"
 #include "hw/qdev-properties.h"
 #include "hw/ppc/pnv.h"
 #include "hw/ppc/pnv_xscom.h"
@@ -29,24 +31,6 @@
 #define OCB_OCI_OCCMISC         0x4020
 #define OCB_OCI_OCCMISC_AND     0x4021
 #define OCB_OCI_OCCMISC_OR      0x4022
-
-/* OCC sensors */
-#define OCC_SENSOR_DATA_BLOCK_OFFSET          0x580000
-#define OCC_SENSOR_DATA_VALID                 0x580001
-#define OCC_SENSOR_DATA_VERSION               0x580002
-#define OCC_SENSOR_DATA_READING_VERSION       0x580004
-#define OCC_SENSOR_DATA_NR_SENSORS            0x580008
-#define OCC_SENSOR_DATA_NAMES_OFFSET          0x580010
-#define OCC_SENSOR_DATA_READING_PING_OFFSET   0x580014
-#define OCC_SENSOR_DATA_READING_PONG_OFFSET   0x58000c
-#define OCC_SENSOR_DATA_NAME_LENGTH           0x58000d
-#define OCC_SENSOR_NAME_STRUCTURE_TYPE        0x580023
-#define OCC_SENSOR_LOC_CORE                   0x580022
-#define OCC_SENSOR_LOC_GPU                    0x580020
-#define OCC_SENSOR_TYPE_POWER                 0x580003
-#define OCC_SENSOR_NAME                       0x580005
-#define HWMON_SENSORS_MASK                    0x58001e
-#define SLW_IMAGE_BASE                        0x0
 
 static void pnv_occ_set_misc(PnvOCC *occ, uint64_t val)
 {
@@ -100,46 +84,31 @@ static void pnv_occ_power8_xscom_write(void *opaque, hwaddr addr,
     }
 }
 
+#undef OCC_SENSOR_DEBUG
+
 static uint64_t pnv_occ_common_area_read(void *opaque, hwaddr addr,
-                                         unsigned width)
+                                         unsigned size)
 {
-    switch (addr) {
-    /*
-     * occ-sensor sanity check that asserts the sensor
-     * header block
-     */
-    case OCC_SENSOR_DATA_BLOCK_OFFSET:
-    case OCC_SENSOR_DATA_VALID:
-    case OCC_SENSOR_DATA_VERSION:
-    case OCC_SENSOR_DATA_READING_VERSION:
-    case OCC_SENSOR_DATA_NR_SENSORS:
-    case OCC_SENSOR_DATA_NAMES_OFFSET:
-    case OCC_SENSOR_DATA_READING_PING_OFFSET:
-    case OCC_SENSOR_DATA_READING_PONG_OFFSET:
-    case OCC_SENSOR_NAME_STRUCTURE_TYPE:
-        return 1;
-    case OCC_SENSOR_DATA_NAME_LENGTH:
-        return 0x30;
-    case OCC_SENSOR_LOC_CORE:
-        return 0x0040;
-    case OCC_SENSOR_TYPE_POWER:
-        return 0x0080;
-    case OCC_SENSOR_NAME:
-        return 0x1000;
-    case HWMON_SENSORS_MASK:
-    case OCC_SENSOR_LOC_GPU:
-        return 0x8e00;
-    case SLW_IMAGE_BASE:
-        return 0x1000000000000000;
+    uint64_t ret = 0;
+    PnvOCC *occ = PNV_OCC(opaque);
+    int i;
+
+    for (i = 0; i < size; i++) {
+        ret |= (uint64_t) occ->sensor_data[addr + i]  << (8 * i);
     }
-    return 0;
+
+#ifdef OCC_SENSOR_DEBUG
+    printf("%s: @%"HWADDR_PRIx" sz=%d -> 0x%016"PRIx64"\n", __func__,
+           addr, size, ret);
+#endif
+    return ret;
 }
 
 static void pnv_occ_common_area_write(void *opaque, hwaddr addr,
                                              uint64_t val, unsigned width)
 {
-    /* callback function defined to occ common area write */
-    return;
+    qemu_log_mask(LOG_UNIMP, "OCC: write to unimplemented address: Ox%"
+                  HWADDR_PRIx "\n", addr);
 }
 
 static const MemoryRegionOps pnv_occ_power8_xscom_ops = {
@@ -262,6 +231,195 @@ static const TypeInfo pnv_occ_power9_type_info = {
     .class_init    = pnv_occ_power9_class_init,
 };
 
+/* OCC sensors */
+struct occ_sensor_record {
+        uint16_t gsid;
+        uint64_t timestamp;
+        uint16_t sample;
+        uint16_t sample_min;
+        uint16_t sample_max;
+        uint16_t csm_min;
+        uint16_t csm_max;
+        uint16_t profiler_min;
+        uint16_t profiler_max;
+        uint16_t job_scheduler_min;
+        uint16_t job_scheduler_max;
+        uint64_t accumulator;
+        uint32_t update_tag;
+        uint8_t  pad[8];
+} __attribute__((__packed__));
+
+static struct occ_sensor_record sensor_records[] = {
+    {
+        .gsid = 1,
+        .sample = 38,
+        .csm_max = 48,
+        .csm_min = 28,
+    },
+};
+
+#define MAX_CHARS_SENSOR_NAME 16
+#define MAX_CHARS_SENSOR_UNIT 4
+
+struct occ_sensor_name {
+        char     name[MAX_CHARS_SENSOR_NAME];
+        char     units[MAX_CHARS_SENSOR_UNIT];
+        uint16_t gsid;
+        uint32_t freq;
+        uint32_t scale_factor;
+        uint16_t type;
+        uint16_t location;
+        uint8_t  structure_type;
+        uint32_t reading_offset;
+        uint8_t  sensor_data;
+        uint8_t  pad[8];
+} __attribute__((__packed__));
+
+static struct occ_sensor_name sensor_names[] = {
+    {
+        .name           = "TEMPPROCTHRMC01",
+        .units          = "",
+        .gsid           = 0,
+        .freq           = 0,
+        .scale_factor   = 0,
+        .type           = 0x8,  /* OCC_SENSOR_TYPE_TEMPERATURE */
+        .location       = 0x40, /* OCC_SENSOR_LOC_CORE */
+        .structure_type = 1,    /* OCC_SENSOR_READING_FULL */
+        .reading_offset = 0,
+        .sensor_data    = 0,
+    },
+};
+
+struct occ_sensor_data_header {
+        uint8_t  valid;
+        uint8_t  version;
+        uint16_t nr_sensors;
+        uint8_t  reading_version;
+        uint8_t  pad[3];
+        uint32_t names_offset;
+        uint8_t  names_version;
+        uint8_t  name_length;
+        uint16_t reserved;
+        uint32_t reading_ping_offset;
+        uint32_t reading_pong_offset;
+} __attribute__((__packed__));
+
+static struct occ_sensor_data_header header = {
+    .valid               = 1,
+    .version             = 1,
+    .nr_sensors          = ARRAY_SIZE(sensor_names),
+    .reading_version     = 1,
+    .names_offset        = 0x400,
+    .names_version       = 1,
+    .name_length         = sizeof(struct occ_sensor_name),
+    .reading_ping_offset = 0xDC00,
+    .reading_pong_offset = 0x18C00,
+};
+
+/*
+ * OCC N Sensor Data Block Layout (150kB)
+ *
+ * The sensor data block layout is the same for each OCC N. It contains
+ * sensor-header-block, sensor-names buffer, sensor-readings-ping buffer and
+ * sensor-readings-pong buffer.
+ *
+ * ----------------------------------------------------------------------------
+ * | Start (Offset from OCC |   End        | Size |Description                |
+ * | N Sensor Data Block)   |              |      |                           |
+ * ----------------------------------------------------------------------------
+ * |    0x00000000          |  0x000003FF  |1kB   |Sensor Data Header Block   |
+ * |    0x00000400          |  0x0000CBFF  |50kB  |Sensor Names               |
+ * |    0x0000CC00          |  0x0000DBFF  |4kB   |Reserved                   |
+ * |    0x0000DC00          |  0x00017BFF  |40kB  |Sensor Readings ping buffer|
+ * |    0x00017C00          |  0x00018BFF  |4kB   |Reserved                   |
+ * |    0x00018C00          |  0x00022BFF  |40kB  |Sensor Readings pong buffer|
+ * |    0x00022C00          |  0x000257FF  |11kB  |Reserved                   |
+ * ----------------------------------------------------------------------------
+ */
+static void pnv_occ_reset(void *dev)
+{
+    PnvOCC *occ = PNV_OCC(dev);
+
+    memcpy(&occ->sensor_data[0], &header, sizeof(header));
+    memcpy(&occ->sensor_data[0x400], &sensor_names, sizeof(sensor_names));
+    memcpy(&occ->sensor_data[0xDC00], &sensor_records, sizeof(sensor_records));
+    memcpy(&occ->sensor_data[0x18C00], &sensor_records, sizeof(sensor_records));
+}
+
+static struct occ_sensor_record *pnv_occ_get_record(PnvOCC *occ,
+                                                    const char *name)
+{
+    struct occ_sensor_data_header *h = (struct occ_sensor_data_header *)
+        &occ->sensor_data[0];
+    struct occ_sensor_name *names = (struct occ_sensor_name *)
+        &occ->sensor_data[0x400];
+    struct occ_sensor_record *record = NULL;
+    int i;
+
+    for (i = 0; i < h->nr_sensors; i++) {
+        uint32_t offset;
+        if (strcmp(names[i].name, name)) {
+            continue;
+        }
+
+        offset = h->reading_ping_offset + names[i].reading_offset;
+        record = (struct occ_sensor_record *) &occ->sensor_data[offset];
+    }
+
+    return record;
+}
+
+static void pnv_occ_get_sensor(Object *obj, Visitor *v, const char *name,
+                               void *opaque, Error **errp)
+{
+    PnvOCC *occ = PNV_OCC(obj);
+    struct occ_sensor_record *record;
+    uint16_t value;
+
+    record = pnv_occ_get_record(occ, name);
+    if (!record) {
+        error_setg(errp, "%s: error reading %s", __func__, name);
+        return;
+    }
+
+    value = record->sample;
+    visit_type_uint16(v, name, &value, errp);
+}
+
+static void pnv_occ_set_sensor(Object *obj, Visitor *v, const char *name,
+                               void *opaque, Error **errp)
+{
+    PnvOCC *occ = PNV_OCC(obj);
+    struct occ_sensor_record *record;
+    uint16_t value;
+    Error *local_err = NULL;
+
+    visit_type_uint16(v, name, &value, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return;
+    }
+
+    record = pnv_occ_get_record(occ, name);
+    if (!record) {
+        error_setg(errp, "%s: error reading %s", __func__, name);
+        return;
+    }
+
+    record->sample = value;
+}
+
+static void pnv_occ_instance_init(Object *obj)
+{
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(sensor_names); i++) {
+        object_property_add(obj, sensor_names[i].name, "uint16",
+                            pnv_occ_get_sensor,
+                            pnv_occ_set_sensor, NULL, NULL);
+    }
+}
+
 static void pnv_occ_realize(DeviceState *dev, Error **errp)
 {
     PnvOCC *occ = PNV_OCC(dev);
@@ -279,6 +437,8 @@ static void pnv_occ_realize(DeviceState *dev, Error **errp)
     memory_region_init_io(&occ->sram_regs, OBJECT(dev), &pnv_occ_sram_ops,
                           occ, "occ-common-area",
                           PNV_OCC_SENSOR_DATA_BLOCK_SIZE);
+
+    qemu_register_reset(pnv_occ_reset, dev);
 }
 
 static Property pnv_occ_properties[] = {
@@ -300,6 +460,7 @@ static const TypeInfo pnv_occ_type_info = {
     .name          = TYPE_PNV_OCC,
     .parent        = TYPE_DEVICE,
     .instance_size = sizeof(PnvOCC),
+    .instance_init = pnv_occ_instance_init,
     .class_init    = pnv_occ_class_init,
     .class_size    = sizeof(PnvOCCClass),
     .abstract      = true,
