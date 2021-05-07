@@ -653,6 +653,8 @@ static void pnv_npu2_realize(DeviceState *dev, Error **errp)
     memory_region_init_io(&npu->genid_mr[1], OBJECT(npu),
                           &pnv_npu2_genid_mmio_ops,
                           npu, "genid-stack1", PNV9_NPU_GENID_SIZE);
+
+    npu->afu[2] = &ocapi_afu_memcpy;
 }
 
 static Property pnv_npu2_properties[] = {
