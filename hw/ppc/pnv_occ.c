@@ -182,6 +182,9 @@ static const TypeInfo pnv_occ_power8_type_info = {
 #define P9_OCB_OCI_OCCMISC_CLEAR        0x6081
 #define P9_OCB_OCI_OCCMISC_OR           0x6082
 
+#define OCCFLG_BASE                     0x608A
+#define OCCFLG_CLEAR                    0x608B
+#define OCCFLG_SET                      0x608C
 
 static uint64_t pnv_occ_power9_xscom_read(void *opaque, hwaddr addr,
                                           unsigned size)
@@ -193,6 +196,9 @@ static uint64_t pnv_occ_power9_xscom_read(void *opaque, hwaddr addr,
     switch (offset) {
     case P9_OCB_OCI_OCCMISC:
         val = occ->occmisc;
+        break;
+    case OCCFLG_BASE:
+        val = occ->occbase;
         break;
     default:
         qemu_log_mask(LOG_UNIMP, "OCC Unimplemented register: Ox%"
@@ -217,6 +223,13 @@ static void pnv_occ_power9_xscom_write(void *opaque, hwaddr addr,
     case P9_OCB_OCI_OCCMISC:
         pnv_occ_set_misc(occ, val);
        break;
+    case OCCFLG_SET:
+        occ->occbase |= val;
+        break;
+    case OCCFLG_CLEAR:
+        occ->occbase &= ~val;
+        break;
+
     default:
         qemu_log_mask(LOG_UNIMP, "OCC Unimplemented register: Ox%"
                       HWADDR_PRIx "\n", addr >> 3);

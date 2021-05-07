@@ -42,6 +42,8 @@ struct PnvOCC {
     /* OCC Misc interrupt */
     uint64_t occmisc;
 
+    uint64_t occbase;
+
     PnvPsi *psi;
 
     MemoryRegion xscom_regs;
