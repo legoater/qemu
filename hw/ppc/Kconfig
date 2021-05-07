@@ -26,6 +26,7 @@ config POWERNV
     select IPMI_LOCAL
     select ISA_BUS
     select MC146818RTC
+    select ASPEED_MBOX
     select XICS
     select XIVE
     select FDT_PPC
