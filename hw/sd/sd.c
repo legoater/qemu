@@ -1282,7 +1282,7 @@ static sd_rsp_type_t sd_cmd_SET_BLOCK_COUNT(SDState *sd, SDRequest req)
             return sd_invalid_state_for_cmd(sd, req);
         }
 
-        sd->multi_blk_cnt = req.arg;
+        sd->multi_blk_cnt = req.arg & 0xFFFF;
 
         return sd_r1;
 }
