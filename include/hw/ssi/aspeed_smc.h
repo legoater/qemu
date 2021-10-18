@@ -78,6 +78,9 @@ struct AspeedSMCState {
     AddressSpace dram_as;
     uint64_t     dram_base;
 
+    AddressSpace wdt2_as;
+    MemoryRegion *wdt2_mr;
+
     AspeedSMCFlash flashes[ASPEED_SMC_CS_MAX];
 
     uint8_t snoop_index;
