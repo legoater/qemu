@@ -46,6 +46,7 @@ struct AspeedMachineState {
     uint32_t uart_chosen;
     char *fmc_model;
     char *spi_model;
+    uint32_t hw_strap1;
 };
 
 /* On 32-bit hosts, lower RAM to 1G because of the 2047 MB limit */
@@ -378,7 +379,7 @@ static void aspeed_machine_init(MachineState *machine)
     sc = ASPEED_SOC_GET_CLASS(bmc->soc);
 
     boot_emmc = sc->boot_emmc &&
-        !!(amc->hw_strap1 & AST26500_HW_STRAP_BOOT_SRC_EMMC);
+        !!(bmc->hw_strap1 & AST26500_HW_STRAP_BOOT_SRC_EMMC);
 
     /*
      * This will error out if the RAM size is not supported by the
@@ -395,7 +396,7 @@ static void aspeed_machine_init(MachineState *machine)
         }
     }
 
-    object_property_set_int(OBJECT(bmc->soc), "hw-strap1", amc->hw_strap1,
+    object_property_set_int(OBJECT(bmc->soc), "hw-strap1", bmc->hw_strap1,
                             &error_abort);
     object_property_set_int(OBJECT(bmc->soc), "hw-strap2", amc->hw_strap2,
                             &error_abort);
@@ -1077,7 +1078,10 @@ static void aspeed_set_mmio_exec(Object *obj, bool value, Error **errp)
 
 static void aspeed_machine_instance_init(Object *obj)
 {
+    AspeedMachineClass *amc = ASPEED_MACHINE_GET_CLASS(obj);
+
     ASPEED_MACHINE(obj)->mmio_exec = false;
+    ASPEED_MACHINE(obj)->hw_strap1 = amc->hw_strap1;
 }
 
 static char *aspeed_get_fmc_model(Object *obj, Error **errp)
@@ -1356,6 +1360,32 @@ static void aspeed_machine_witherspoon_class_init(ObjectClass *oc, void *data)
     aspeed_machine_class_init_cpus_defaults(mc);
 };
 
+static bool aspeed_get_boot_emmc(Object *obj, Error **errp)
+{
+    AspeedMachineState *bmc = ASPEED_MACHINE(obj);
+
+    return !!(bmc->hw_strap1 & AST26500_HW_STRAP_BOOT_SRC_EMMC);
+}
+
+static void aspeed_set_boot_emmc(Object *obj, bool value, Error **errp)
+{
+    AspeedMachineState *bmc = ASPEED_MACHINE(obj);
+
+    if (value) {
+        bmc->hw_strap1 |= AST26500_HW_STRAP_BOOT_SRC_EMMC;
+    } else {
+        bmc->hw_strap1 &= ~AST26500_HW_STRAP_BOOT_SRC_EMMC;
+    }
+}
+
+static void aspeed_machine_ast2600_class_init(ObjectClass *oc, void *data)
+{
+    object_class_property_add_bool(oc, "boot-emmc", aspeed_get_boot_emmc,
+                                  aspeed_set_boot_emmc);
+    object_class_property_set_description(oc, "boot-emmc",
+                                          "Set or unset boot from EMMC");
+}
+
 static void aspeed_machine_ast2600_evb_class_init(ObjectClass *oc, void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -1373,6 +1403,7 @@ static void aspeed_machine_ast2600_evb_class_init(ObjectClass *oc, void *data)
     amc->i2c_init  = ast2600_evb_i2c_init;
     mc->default_ram_size = 1 * GiB;
     aspeed_machine_class_init_cpus_defaults(mc);
+    aspeed_machine_ast2600_class_init(oc, data);
 };
 
 static void aspeed_machine_tacoma_class_init(ObjectClass *oc, void *data)
@@ -1391,6 +1422,7 @@ static void aspeed_machine_tacoma_class_init(ObjectClass *oc, void *data)
     amc->i2c_init  = witherspoon_bmc_i2c_init; /* Same board layout */
     mc->default_ram_size = 1 * GiB;
     aspeed_machine_class_init_cpus_defaults(mc);
+    aspeed_machine_ast2600_class_init(oc, data);
 };
 
 static void aspeed_machine_g220a_class_init(ObjectClass *oc, void *data)
@@ -1443,6 +1475,7 @@ static void aspeed_machine_rainier_class_init(ObjectClass *oc, void *data)
     amc->i2c_init  = rainier_bmc_i2c_init;
     mc->default_ram_size = 1 * GiB;
     aspeed_machine_class_init_cpus_defaults(mc);
+    aspeed_machine_ast2600_class_init(oc, data);
 };
 
 #define FUJI_BMC_RAM_SIZE ASPEED_RAM_SIZE(2 * GiB)
@@ -1464,6 +1497,7 @@ static void aspeed_machine_fuji_class_init(ObjectClass *oc, void *data)
     amc->uart_default = ASPEED_DEV_UART1;
     mc->default_ram_size = FUJI_BMC_RAM_SIZE;
     aspeed_machine_class_init_cpus_defaults(mc);
+    aspeed_machine_ast2600_class_init(oc, data);
 };
 
 #define BLETCHLEY_BMC_RAM_SIZE ASPEED_RAM_SIZE(2 * GiB)
@@ -1484,6 +1518,7 @@ static void aspeed_machine_bletchley_class_init(ObjectClass *oc, void *data)
     amc->i2c_init  = bletchley_bmc_i2c_init;
     mc->default_ram_size = BLETCHLEY_BMC_RAM_SIZE;
     aspeed_machine_class_init_cpus_defaults(mc);
+    aspeed_machine_ast2600_class_init(oc, data);
 }
 
 static void fby35_reset(MachineState *state, ShutdownCause reason)
@@ -1643,6 +1678,7 @@ static void aspeed_machine_qcom_dc_scm_v1_class_init(ObjectClass *oc,
     amc->i2c_init  = qcom_dc_scm_bmc_i2c_init;
     mc->default_ram_size = 1 * GiB;
     aspeed_machine_class_init_cpus_defaults(mc);
+    aspeed_machine_ast2600_class_init(oc, data);
 };
 
 static void aspeed_machine_qcom_firework_class_init(ObjectClass *oc,
