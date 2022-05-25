@@ -708,6 +708,7 @@ static unsigned sd_boot_capacity_bytes(SDState *sd)
 static void sd_reset(DeviceState *dev)
 {
     SDState *sd = SD_CARD(dev);
+    SDCardClass *sc = SD_CARD_GET_CLASS(sd);
     uint64_t size;
     uint64_t sect;
 
@@ -718,6 +719,10 @@ static void sd_reset(DeviceState *dev)
         sect = 0;
     }
     size = sect << HWBLOCK_SHIFT;
+
+    if (sc->bootpart_offset) {
+        size -= sd_boot_capacity_bytes(sd) * 2;
+    }
 
     sect = sd_addr_to_wpnum(size) + 1;
 
