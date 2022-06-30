@@ -292,3 +292,11 @@ lasi_chip_write(uint64_t addr, uint32_t val) "addr 0x%"PRIx64" val 0x%08x"
 # fby35_sb_cpld.c
 fby35_sb_cpld_read(uint8_t reg, uint8_t value) "reg 0x%02x value 0x%02x"
 fby35_sb_cpld_write(uint8_t reg, uint8_t value) "reg 0x%02x value 0x%02x"
+
+# intel_me.c
+intel_me_rx_start(uint8_t addr) "addr 0x%02x"
+intel_me_rx_data(uint8_t addr, uint8_t data) "addr 0x%02x data 0x%02x"
+intel_me_rx_end(uint8_t addr) "addr 0x%02x"
+intel_me_tx_start(uint8_t addr, uint8_t target_addr) "addr 0x%02x target_addr 0x%02x"
+intel_me_tx_data(uint8_t addr, uint8_t data) "addr 0x%02x data 0x%02x"
+intel_me_tx_end(uint8_t addr) "addr 0x%02x"
