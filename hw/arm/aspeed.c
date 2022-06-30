@@ -30,6 +30,7 @@
 #include "qemu/units.h"
 #include "hw/qdev-clock.h"
 #include "sysemu/sysemu.h"
+#include "hw/arm/fby35.h"
 
 static struct arm_boot_info aspeed_board_binfo = {
     .board_id = -1, /* device-tree-only board */
@@ -1702,6 +1703,20 @@ static void aspeed_machine_qcom_firework_class_init(ObjectClass *oc,
         aspeed_soc_num_cpus(amc->soc_name);
 };
 
+static void oby35_cl_i2c_init(AspeedMachineState *bmc)
+{
+    fby35_cl_bic_i2c_init(&bmc->soc);
+}
+
+static void aspeed_machine_oby35_cl_class_init(ObjectClass *oc, void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+    AspeedMachineClass *amc = ASPEED_MACHINE_CLASS(oc);
+
+    mc->desc = "Meta Platforms fby35 CraterLake BIC (Cortex-M4)";
+    amc->i2c_init = oby35_cl_i2c_init;
+}
+
 static const TypeInfo aspeed_machine_types[] = {
     {
         .name          = MACHINE_TYPE_NAME("palmetto-bmc"),
@@ -1787,6 +1802,10 @@ static const TypeInfo aspeed_machine_types[] = {
         .name           = MACHINE_TYPE_NAME("ast1030-evb"),
         .parent         = TYPE_ASPEED_MACHINE,
         .class_init     = aspeed_minibmc_machine_ast1030_evb_class_init,
+    }, {
+        .name          = MACHINE_TYPE_NAME("oby35-cl"),
+        .parent        = MACHINE_TYPE_NAME("ast1030-evb"),
+        .class_init    = aspeed_machine_oby35_cl_class_init,
     }, {
         .name          = TYPE_ASPEED_MACHINE,
         .parent        = TYPE_MACHINE,

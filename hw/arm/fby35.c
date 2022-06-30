@@ -14,6 +14,8 @@
 #include "hw/qdev-clock.h"
 #include "hw/arm/aspeed_soc.h"
 #include "hw/arm/boot.h"
+#include "hw/arm/fby35.h"
+#include "hw/i2c/i2c_mux_pca954x.h"
 
 #define TYPE_FBY35 MACHINE_TYPE_NAME("fby35")
 OBJECT_DECLARE_SIMPLE_TYPE(Fby35State, FBY35);
@@ -130,6 +132,41 @@ static void fby35_bic_init(Fby35State *s)
     aspeed_board_init_flashes(&s->bic.fmc, "sst25vf032b", 2, 2);
     aspeed_board_init_flashes(&s->bic.spi[0], "sst25vf032b", 2, 4);
     aspeed_board_init_flashes(&s->bic.spi[1], "sst25vf032b", 2, 6);
+
+    fby35_cl_bic_i2c_init(&s->bic);
+}
+
+void fby35_cl_bic_i2c_init(AspeedSoCState *s)
+{
+    I2CBus *i2c[14];
+    I2CBus *ssd[8];
+
+    for (int i = 0; i < 14; i++) {
+        i2c[i] = aspeed_i2c_get_bus(&s->i2c, i);
+    }
+    pca954x_i2c_get_channels(i2c[1], 0x71, "pca9548", ssd);
+
+    i2c_slave_create_simple(i2c[0], "fby35-sb-cpld", 0x21);
+    i2c_slave_create_simple(i2c[1], "tmp105", 0x48);
+    i2c_slave_create_simple(i2c[1], "tmp105", 0x49);
+    i2c_slave_create_simple(i2c[1], "tmp105", 0x4a);
+    i2c_slave_create_simple(i2c[1], "adm1272", 0x40);
+    i2c_slave_create_simple(i2c[1], "tmp421", 0x4c);
+    i2c_slave_create_simple(i2c[2], "intel-me", 0x16);
+    i2c_slave_create_simple(i2c[4], "isl69259", 0x76);
+    i2c_slave_create_simple(i2c[4], "isl69259", 0x62);
+    i2c_slave_create_simple(i2c[4], "isl69259", 0x60);
+
+    for (int i = 0; i < 8; i++) {
+        i2c_slave_create_simple(ssd[i], "tmp105", 0x6a);
+    }
+
+    /*
+     * FIXME: This should actually be the BMC, but both the ME and the BMC
+     * are IPMB endpoints, and the current ME implementation is generic
+     * enough to respond normally to some things.
+     */
+    i2c_slave_create_simple(i2c[6], "intel-me", 0x10);
 }
 
 static void fby35_init(MachineState *machine)
