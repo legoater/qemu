@@ -41,6 +41,7 @@
 #include "qom/object.h"
 #include "hw/misc/aspeed_lpc.h"
 #include "hw/misc/unimp.h"
+#include "hw/pci-host/aspeed_pcie.h"
 #include "hw/misc/aspeed_peci.h"
 #include "hw/fsi/aspeed_apb2opb.h"
 #include "hw/char/serial-mm.h"
@@ -92,6 +93,8 @@ struct AspeedSoCState {
     AspeedSDHCIState sdhci;
     AspeedSDHCIState emmc;
     AspeedLPCState lpc;
+    AspeedPCIECfg pcie;
+    AspeedPCIEPhy pcie_phy[2];
     AspeedPECIState peci;
     AspeedGFXState gfx;
     SerialMM uart[ASPEED_UARTS_NUM];
@@ -230,6 +233,11 @@ enum {
     ASPEED_DEV_LPC,
     ASPEED_DEV_IBT,
     ASPEED_DEV_I2C,
+    ASPEED_DEV_PCIE_PHY1,
+    ASPEED_DEV_PCIE_PHY2,
+    ASPEED_DEV_PCIE,
+    ASPEED_DEV_PCIE_MMIO1,
+    ASPEED_DEV_PCIE_MMIO2,
     ASPEED_DEV_PECI,
     ASPEED_DEV_ETH1,
     ASPEED_DEV_ETH2,
