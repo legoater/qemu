@@ -528,6 +528,7 @@ config ASPEED_SOC
     bool
     default y
     depends on TCG && ARM
+    imply PCI_DEVICES
     select DS1338
     select FTGMAC100
     select I2C
@@ -548,6 +549,8 @@ config ASPEED_SOC
     select FSI_APB2OPB_ASPEED
     select AT24C
     select USB_UHCI_SYSBUS
+    select PCI_EXPRESS
+    select PCI_EXPRESS_ASPEED
 
 config MPS2
     bool
