@@ -457,6 +457,9 @@ static void powerpc_excp_40x(PowerPCCPU *cpu, int excp)
             }
             cs->halted = 1;
             cpu_interrupt_exittb(cs);
+            if ((env->error_code & ~0xf) == POWERPC_EXCP_ATTN) {
+                exit(env->error_code & 0xf);
+            }
         }
 
         /* machine check exceptions don't have ME set */
@@ -1972,6 +1975,30 @@ void helper_pminsn(CPUPPCState *env, powerpc_pm_insn_t insn)
     /* Condition for waking up at 0x100 */
     env->resume_as_sreset = (insn != PPC_PM_STOP) ||
         (env->spr[SPR_PSSCR] & PSSCR_EC);
+}
+
+/*
+ * Processor Attention instruction (Implementation dependent)
+ */
+void helper_attn(CPUPPCState *env, target_ulong r3)
+{
+    bool attn = false;
+
+    if (env->excp_model == POWERPC_EXCP_POWER8) {
+        attn = !!(env->spr[SPR_HID0] & HID0_ATTN);
+    } else if (env->excp_model == POWERPC_EXCP_POWER9 ||
+               env->excp_model == POWERPC_EXCP_POWER10) {
+        attn = !!(env->spr[SPR_HID0] & HID0_POWER9_ATTN);
+    }
+
+    if (attn) {
+        raise_exception_err(env, POWERPC_EXCP_MCHECK,
+                            POWERPC_EXCP_ATTN | (r3 & 0xf));
+    } else {
+        raise_exception_err_ra(env, POWERPC_EXCP_PROGRAM,
+                               POWERPC_EXCP_INVAL |
+                               POWERPC_EXCP_INVAL_INVAL, GETPC());
+    }
 }
 #endif /* defined(TARGET_PPC64) */
 
