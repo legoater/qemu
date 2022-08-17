@@ -171,3 +171,9 @@ ppc405ep_clocks_setup(const char *trace) "%s"
 ppc4xx_sdram_enable(const char *trace) "%s SDRAM controller"
 ppc4xx_sdram_unmap(uint64_t addr, uint64_t size) "Unmap RAM area 0x%" PRIx64 " size 0x%" PRIx64
 ppc4xx_sdram_map(uint64_t addr, uint64_t size) "Map RAM area 0x%" PRIx64 " size 0x%" PRIx64
+
+# microwatt
+mw_syscon_read(uint64_t addr, uint32_t size, uint64_t data)  "@0x%" PRIx64 " size:%u value=%"PRIx64
+mw_syscon_write(uint64_t addr, uint32_t size, uint64_t data) "@0x%" PRIx64 " size:%u value=%"PRIx64
+mw_ics_read(uint64_t addr, uint64_t data)  "@0x%" PRIx64 " value=%"PRIx64
+mw_ics_write(uint64_t addr, uint64_t data) "@0x%" PRIx64 " value=%"PRIx64
