@@ -522,8 +522,6 @@ static void mw_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->gpio), 0, mw_soc_memmap[MW_DEV_GPIO]);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->sdhci), 0,
-                       mw_soc_get_irq(s, MW_DEV_GPIO));
 
     /* DRAM init firmware (is not a ROM !) */
     memory_region_init_ram(&s->dram_init, OBJECT(s), "dram-init", 16 * MiB,
