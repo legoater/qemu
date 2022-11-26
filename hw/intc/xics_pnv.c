@@ -23,6 +23,8 @@
 #include "qemu/module.h"
 #include "hw/ppc/xics.h"
 
+#include "trace.h"
+
 #define ICP_XIRR_POLL    0 /* 1 byte (CPRR) or 4 bytes */
 #define ICP_XIRR         4 /* 1 byte (CPRR) or 4 bytes */
 #define ICP_MFRR        12 /* 1 byte access only */
@@ -90,6 +92,8 @@ bad_access:
                       HWADDR_PRIx"/%d\n", addr, width);
     }
 
+    trace_pnv_icp_read(addr, val);
+
     return val;
 }
 
@@ -99,6 +103,8 @@ static void pnv_icp_write(void *opaque, hwaddr addr, uint64_t val,
     ICPState *icp = ICP(opaque);
     PnvICPState *picp = PNV_ICP(opaque);
     bool byte0 = (width == 1 && (addr & 0x3) == 0);
+
+    trace_pnv_icp_write(addr, val);
 
     switch (addr & 0xffc) {
     case ICP_XIRR:

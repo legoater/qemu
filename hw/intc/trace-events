@@ -65,6 +65,10 @@ xics_ics_write_xive(int nr, int srcno, int server, uint8_t priority) "ics_write_
 xics_ics_reject(int nr, int srcno) "reject irq 0x%x [src %d]"
 xics_ics_eoi(int nr) "ics_eoi: irq 0x%x"
 
+# xics_pnv.c
+pnv_icp_read(uint64_t addr, uint64_t data)  "@0x%" PRIx64 " value=%"PRIx64
+pnv_icp_write(uint64_t addr, uint64_t data) "@0x%" PRIx64 " value=%"PRIx64
+
 # s390_flic_kvm.c
 flic_create_device(int err) "flic: create device failed %d"
 flic_reset_failed(int err) "flic: reset failed %d"
