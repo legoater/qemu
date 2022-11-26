@@ -734,6 +734,8 @@
                 "POWER9 v2.0")
     POWERPC_DEF("power9_v2.2",   CPU_POWERPC_POWER9_DD22,            POWER9,
                 "POWER9 v2.2")
+    POWERPC_DEF("power9mw_v1.0",   CPU_POWERPC_POWER9_DD1,           POWER9MW,
+                "POWER9 Microwatt v1.0")
     POWERPC_DEF("power10_v1.0",  CPU_POWERPC_POWER10_DD1,            POWER10,
                 "POWER10 v1.0")
     POWERPC_DEF("power10_v2.0",  CPU_POWERPC_POWER10_DD20,           POWER10,
@@ -910,6 +912,7 @@ PowerPCCPUAlias ppc_cpu_aliases[] = {
     { "power8", "power8_v2.0" },
     { "power8nvl", "power8nvl_v1.0" },
     { "power9", "power9_v2.2" },
+    { "power9mw", "power9mw_v1.0" },
     { "power10", "power10_v2.0" },
 #endif
 
