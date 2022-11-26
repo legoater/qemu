@@ -736,6 +736,20 @@ static void mw_attach_flash(LiteSPIState *s, const char *flashtype)
     sysbus_connect_irq(SYS_BUS_DEVICE(s), 0, cs_line);
 }
 
+static void mw_attach_sd(LiteSDState *sd, DriveInfo *dinfo)
+{
+    DeviceState *card;
+
+    if (!dinfo) {
+        return;
+    }
+    card = qdev_new(TYPE_SD_CARD);
+    qdev_prop_set_drive_err(card, "drive", blk_by_legacy_dinfo(dinfo),
+                            &error_fatal);
+    qdev_realize_and_unref(card, qdev_get_child_bus(DEVICE(sd), "sd-bus"),
+                           &error_fatal);
+}
+
 static void write_boot_rom(DriveInfo *dinfo, hwaddr addr, size_t rom_size,
                            Error **errp)
 {
@@ -806,6 +820,8 @@ static void mw_machine_init(MachineState *machine)
     sysbus_realize(SYS_BUS_DEVICE(&mw->soc), &error_abort);
 
     mw_attach_flash(&mw->soc.spi, "n25q128a13");
+
+    mw_attach_sd(&mw->soc.sd, drive_get(IF_SD, 0, 0));
 
     /* load kernel and initrd */
     if (machine->kernel_filename) {
