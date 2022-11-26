@@ -190,6 +190,8 @@ enum {
     POWERPC_EXCP_PRIV_REG      = 0x02,  /* Privileged register exception     */
     /* Trap                                                                  */
     POWERPC_EXCP_TRAP          = 0x40,
+    /* Processor Attention                                                   */
+    POWERPC_EXCP_ATTN          = 0x50,
 };
 
 /* Exception model                                                           */
@@ -2268,6 +2270,8 @@ void ppc_compat_add_property(Object *obj, const char *name,
 #define HID0_DOZE           (1 << 23)           /* pre-2.06 */
 #define HID0_NAP            (1 << 22)           /* pre-2.06 */
 #define HID0_HILE           PPC_BIT(19) /* POWER8 */
+#define HID0_ATTN           PPC_BIT(31) /* Processor Attention */
+#define HID0_POWER9_ATTN    PPC_BIT(3)
 #define HID0_POWER9_HILE    PPC_BIT(4)
 
 /*****************************************************************************/

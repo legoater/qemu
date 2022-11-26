@@ -4127,6 +4127,18 @@ static void gen_rvwinkle(DisasContext *ctx)
     gen_exception_nip(ctx, EXCP_HLT, ctx->base.pc_next);
 #endif /* defined(CONFIG_USER_ONLY) */
 }
+
+static void gen_attn(DisasContext *ctx)
+{
+ #if defined(CONFIG_USER_ONLY)
+    GEN_PRIV(ctx);
+#else
+    CHK_HV(ctx); /* or SV ? */
+
+    gen_helper_attn(tcg_env, cpu_gpr[3]);
+#endif
+}
+
 #endif /* #if defined(TARGET_PPC64) */
 
 static inline void gen_update_cfar(DisasContext *ctx, target_ulong nip)
@@ -6594,6 +6606,7 @@ GEN_HANDLER_E(nap, 0x13, 0x12, 0x0d, 0x03FFF801, PPC_NONE, PPC2_PM_ISA206),
 GEN_HANDLER_E(sleep, 0x13, 0x12, 0x0e, 0x03FFF801, PPC_NONE, PPC2_PM_ISA206),
 GEN_HANDLER_E(rvwinkle, 0x13, 0x12, 0x0f, 0x03FFF801, PPC_NONE, PPC2_PM_ISA206),
 GEN_HANDLER(hrfid, 0x13, 0x12, 0x08, 0x03FF8001, PPC_64H),
+GEN_HANDLER(attn, 0x0, 0x00, 0x8, 0xfffffdff, PPC_FLOW),
 #endif
 /* Top bit of opc2 corresponds with low bit of LEV, so use two handlers */
 GEN_HANDLER(sc, 0x11, 0x11, 0xFF, 0x03FFF01D, PPC_FLOW),

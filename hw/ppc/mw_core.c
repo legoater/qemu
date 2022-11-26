@@ -47,7 +47,7 @@ static void mw_core_cpu_reset(MwCore *mc, PowerPCCPU *cpu)
     env->msr |= 1ull << MSR_HV;
 
     /* and Little endian interrupts when under HV */
-    env->spr[SPR_HID0] |= HID0_POWER9_HILE;
+    env->spr[SPR_HID0] |= HID0_POWER9_HILE| HID0_POWER9_ATTN;
 
     /* Minimum LPCR for QEMU : Host Radix and Large Decrementer */
     env->spr[SPR_LPCR] = LPCR_HR | LPCR_LD;
