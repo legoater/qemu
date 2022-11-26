@@ -8,3 +8,6 @@ CONFIG_POWERNV=y
 
 # For pSeries
 CONFIG_PSERIES=y
+
+# For pSeries
+CONFIG_MICROWATT=y

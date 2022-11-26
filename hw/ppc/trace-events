@@ -180,3 +180,9 @@ ppc4xx_sdram_enable(const char *trace) "%s SDRAM controller"
 ppc4xx_sdram_unmap(uint64_t addr, uint64_t size) "Unmap RAM area 0x%" PRIx64 " size 0x%" PRIx64
 ppc4xx_sdram_map(uint64_t addr, uint64_t size) "Map RAM area 0x%" PRIx64 " size 0x%" PRIx64
 ppc4xx_sdram_init(uint64_t base, uint64_t size, uint32_t bcr) "Init RAM area 0x%" PRIx64 " size 0x%" PRIx64 " bcr 0x%x"
+
+# microwatt
+mw_syscon_read(uint64_t addr, uint32_t size, uint64_t data)  "@0x%" PRIx64 " size:%u value=%"PRIx64
+mw_syscon_write(uint64_t addr, uint32_t size, uint64_t data) "@0x%" PRIx64 " size:%u value=%"PRIx64
+mw_ics_read(uint64_t addr, uint64_t data)  "@0x%" PRIx64 " value=%"PRIx64
+mw_ics_write(uint64_t addr, uint64_t data) "@0x%" PRIx64 " value=%"PRIx64

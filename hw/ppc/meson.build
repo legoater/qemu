@@ -38,6 +38,12 @@ ppc_ss.add(when: ['CONFIG_PSERIES', 'CONFIG_LINUX'], if_true: files(
   'spapr_pci_vfio.c',
 ))
 
+# Microwatt
+ppc_ss.add(when: 'CONFIG_MICROWATT', if_true: files(
+  'microwatt.c',
+  'mw_core.c',
+))
+
 # IBM PowerNV
 ppc_ss.add(when: 'CONFIG_POWERNV', if_true: files(
   'pnv.c',
