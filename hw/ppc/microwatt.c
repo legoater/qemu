@@ -533,6 +533,15 @@ static void mw_soc_realize(DeviceState *dev, Error **errp)
                                 &s->dram_init);
 }
 
+static void mw_soc_reset(DeviceState *dev)
+{
+    MwSoCState *s = MW_SOC(dev);
+    MwSysConState *syscon = &s->syscon;
+
+    memory_region_set_enabled(&s->sd.iomem,
+                              syscon->info & SYS_REG_INFO_HAS_LITESDCARD);
+}
+
 static void mw_soc_instance_init(Object *obj)
 {
     MwSoCState *s = MW_SOC(obj);
@@ -618,6 +627,7 @@ static void mw_soc_class_init(ObjectClass *oc, void *data)
     DeviceClass *dc = DEVICE_CLASS(oc);
 
     dc->realize = mw_soc_realize;
+    dc->reset   = mw_soc_reset;
     dc->user_creatable = false;
     device_class_set_props(dc, mw_soc_properties);
 }
