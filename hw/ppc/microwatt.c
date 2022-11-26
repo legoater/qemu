@@ -174,6 +174,7 @@ static Property mw_syscon_properties[] = {
                        SYS_REG_INFO_HAS_DRAM |
                        SYS_REG_INFO_HAS_SPI_FLASH |
                        SYS_REG_INFO_HAS_LITEETH |
+                       SYS_REG_INFO_HAS_LITESDCARD |
                        SYS_REG_INFO_HAS_LARGE_SYSCON),
     DEFINE_PROP_UINT64("ram-size", MwSysConState, ram_size, 0),
     DEFINE_PROP_END_OF_LIST(),
@@ -509,6 +510,16 @@ static void mw_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->spi), 0, mw_soc_memmap[MW_DEV_SPI]);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->spi), 1, MW_SOC_FLASH_BASE);
 
+    /* SD/MMC */
+    object_property_set_link(OBJECT(&s->sd), "dma",
+                             OBJECT(get_system_memory()), &error_fatal);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->sd), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sd), 0, mw_soc_memmap[MW_DEV_SD]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->sd), 0,
+                       mw_soc_get_irq(s, MW_DEV_SD));
+
     /* GPIO */
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->gpio), errp)) {
         return;
@@ -538,6 +549,7 @@ static void mw_soc_instance_init(Object *obj)
     object_initialize_child(obj, "mw-icp", &s->icp, TYPE_MW_ICP);
     object_initialize_child(obj, "eth", &s->eth, TYPE_LITEETH);
     object_initialize_child(obj, "spi", &s->spi, TYPE_LITESPI);
+    object_initialize_child(obj, "sd", &s->sd, TYPE_LITESD);
     object_initialize_child(obj, "gpio", &s->gpio, TYPE_UNIMPLEMENTED_DEVICE);
     qdev_prop_set_uint64(DEVICE(&s->gpio), "size", 0x1000);
     qdev_prop_set_string(DEVICE(&s->gpio), "name", "gpio");

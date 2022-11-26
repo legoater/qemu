@@ -72,3 +72,18 @@ pl181_data_engine_idle(void) "data engine idle"
 # aspeed_sdhci.c
 aspeed_sdhci_read(uint64_t addr, uint32_t size, uint64_t data) "@0x%" PRIx64 " size %u: 0x%" PRIx64
 aspeed_sdhci_write(uint64_t addr, uint32_t size, uint64_t data) "@0x%" PRIx64 " size %u: 0x%" PRIx64
+
+# litesd.c
+litesd_dma_to_sd(uint64_t addr, size_t size, uint32_t blklen, uint32_t blkcnt) "0x%08" PRIx64 " 0x%zx (0x%" PRIx32 " x %" PRId32 " blocks)"
+litesd_dma_from_sd(uint64_t addr, size_t size, uint32_t blklen, uint32_t blkcnt) "0x%08" PRIx64 " 0x%zx (0x%" PRIx32 " x %" PRId32 " blocks)"
+litesd_command(uint8_t cmd, uint32_t arg, uint8_t xfer, uint8_t rlen) "cmd 0x%02x arg 0x%02" PRIx32 " req 0x%x rlen 0x%x"
+litesd_phy_read(uint64_t addr, uint32_t size, uint64_t val) "@0x%" PRIx64 " size %" PRId32 ": 0x%" PRIx64
+litesd_phy_write(uint64_t addr, uint32_t size, uint64_t val) "@0x%" PRIx64 " size %" PRId32 ": 0x%" PRIx64
+litesd_core_read(uint64_t addr, uint32_t size, uint64_t val) "@0x%" PRIx64 " size %" PRId32 ": 0x%" PRIx64
+litesd_core_write(uint64_t addr, uint32_t size, uint64_t val) "@0x%" PRIx64 " size %" PRId32 ": 0x%" PRIx64
+litesd_reader_read(uint64_t addr, uint32_t size, uint64_t val) "@0x%" PRIx64 " size %" PRId32 ": 0x%" PRIx64
+litesd_reader_write(uint64_t addr, uint32_t size, uint64_t val) "@0x%" PRIx64 " size %" PRId32 ": 0x%" PRIx64
+litesd_writer_read(uint64_t addr, uint32_t size, uint64_t val) "@0x%" PRIx64 " size %" PRId32 ": 0x%" PRIx64
+litesd_writer_write(uint64_t addr, uint32_t size, uint64_t val) "@0x%" PRIx64 " size %" PRId32 ": 0x%" PRIx64
+litesd_irq_read(uint64_t addr, uint32_t size, uint64_t val) "@0x%" PRIx64 " size %" PRId32 ": 0x%" PRIx64
+litesd_irq_write(uint64_t addr, uint32_t size, uint64_t val) "@0x%" PRIx64 " size %" PRId32 ": 0x%" PRIx64
