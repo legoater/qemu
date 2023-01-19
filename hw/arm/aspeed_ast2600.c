@@ -45,6 +45,7 @@ static const hwaddr aspeed_soc_ast2600_memmap[] = {
     [ASPEED_DEV_HACE]      = 0x1E6D0000,
     [ASPEED_DEV_SDMC]      = 0x1E6E0000,
     [ASPEED_DEV_SCU]       = 0x1E6E2000,
+    [ASPEED_DEV_GFX]       = 0x1E6E6000,
     [ASPEED_DEV_XDMA]      = 0x1E6E7000,
     [ASPEED_DEV_ADC]       = 0x1E6E9000,
     [ASPEED_DEV_DP]        = 0x1E6EB000,
@@ -109,6 +110,7 @@ static const int aspeed_soc_ast2600_irqmap[] = {
     [ASPEED_DEV_SDMC]      = 0,
     [ASPEED_DEV_SCU]       = 12,
     [ASPEED_DEV_ADC]       = 78,
+    [ASPEED_DEV_GFX]       = 14,
     [ASPEED_DEV_XDMA]      = 6,
     [ASPEED_DEV_SDHCI]     = 43,
     [ASPEED_DEV_EHCI1]     = 5,
@@ -281,6 +283,8 @@ static void aspeed_soc_ast2600_init(Object *obj)
     for (i = 0; i < ASPEED_FSI_NUM; i++) {
         object_initialize_child(obj, "fsi[*]", &s->fsi[i], TYPE_ASPEED_APB2OPB);
     }
+
+    object_initialize_child(obj, "gfx", &s->gfx, TYPE_ASPEED_GFX);
 }
 
 /*
@@ -740,6 +744,15 @@ static void aspeed_soc_ast2600_realize(DeviceState *dev, Error **errp)
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->fsi[i]), 0,
                            aspeed_soc_ast2600_get_irq(s, ASPEED_DEV_FSI1 + i));
     }
+
+    /* GFX */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->gfx), errp)) {
+        return;
+    }
+    aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->gfx), 0,
+                    sc->memmap[ASPEED_DEV_GFX]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->gfx), 0,
+                       aspeed_soc_ast2600_get_irq(s, ASPEED_DEV_GFX));
 }
 
 static bool aspeed_soc_ast2600_boot_from_emmc(AspeedSoCState *s)
