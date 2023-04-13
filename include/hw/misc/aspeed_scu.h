@@ -361,4 +361,11 @@ uint32_t aspeed_scu_get_apb_freq(AspeedSCUState *s);
  */
 #define SCU_AST1030_CLK_GET_PCLK_DIV(x)                    (((x) >> 8) & 0xf)
 
+/* STRAP1 SCU500 */
+#define AST26500_HW_STRAP_BOOT_SRC_EMMC            (0x1 << 2)
+#define AST26500_HW_STRAP_BOOT_SRC_SPI             (0x0 << 2)
+
+/* STRAP2 SCU510 */
+#define AST26500_HW_STRAP_BOOT_SRC_UART            (0x1 << 8)
+
 #endif /* ASPEED_SCU_H */

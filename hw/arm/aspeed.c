@@ -171,11 +171,11 @@ struct AspeedMachineState {
 #define AST2600_EVB_HW_STRAP2 0x00000003
 
 /* Tacoma hardware value */
-#define TACOMA_BMC_HW_STRAP1  0x00000000
+#define TACOMA_BMC_HW_STRAP1  (0x00000000 | AST26500_HW_STRAP_BOOT_SRC_EMMC)
 #define TACOMA_BMC_HW_STRAP2  0x00000040
 
 /* Rainier hardware value: (QEMU prototype) */
-#define RAINIER_BMC_HW_STRAP1 0x00422016
+#define RAINIER_BMC_HW_STRAP1 (0x00422016 | AST26500_HW_STRAP_BOOT_SRC_EMMC)
 #define RAINIER_BMC_HW_STRAP2 0x80000848
 
 /* Fuji hardware value */
