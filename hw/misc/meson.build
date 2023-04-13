@@ -142,5 +142,7 @@ specific_ss.add(when: 'CONFIG_MIPS_ITU', if_true: files('mips_itu.c'))
 
 softmmu_ss.add(when: 'CONFIG_SBSA_REF', if_true: files('sbsa_ec.c'))
 
+softmmu_ss.add(when: 'CONFIG_IBM_CFFPS', if_true: files('ibm-cffps.c'))
+
 # HPPA devices
 softmmu_ss.add(when: 'CONFIG_LASI', if_true: files('lasi.c'))
