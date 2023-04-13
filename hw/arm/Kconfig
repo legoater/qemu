@@ -500,6 +500,7 @@ config FSL_IMX7
     select SDHCI
     select UNIMP
     select IBM_CFFPS
+    select IR35221
 
 config ARM_SMMUV3
     bool
