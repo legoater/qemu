@@ -307,6 +307,10 @@ class AST2x00MachineSDK(QemuSystemTest):
             self, 'boot', '## Loading kernel from FIT Image')
         self.wait_for_console_pattern('Starting kernel ...')
 
+    def do_test_arm_aspeed_sdk_poweroff(self):
+        exec_command_and_wait_for_pattern(self, 'poweroff', 'shutdown-sh#');
+
+
     @skipIf(os.getenv('GITLAB_CI'), 'Running on GitLab')
     def test_arm_ast2500_evb_sdk(self):
         """
@@ -324,6 +328,11 @@ class AST2x00MachineSDK(QemuSystemTest):
         self.do_test_arm_aspeed_sdk_start(
             self.workdir + '/ast2500-default/image-bmc')
         self.wait_for_console_pattern('ast2500-default login:')
+        # TODO: this is broken for some reason
+#        exec_command_and_wait_for_pattern(self, 'root', 'Password:')
+#        exec_command_and_wait_for_pattern(self, '0penBmc', 'root@ast2500-default:~#')
+
+#        self.do_test_arm_aspeed_sdk_poweroff()
 
     @skipIf(os.getenv('GITLAB_CI'), 'Running on GitLab')
     def test_arm_ast2600_evb_sdk(self):
@@ -364,3 +373,5 @@ class AST2x00MachineSDK(QemuSystemTest):
              'i2c i2c-5: new_device: Instantiated device ds1307 at 0x32');
         year = time.strftime("%Y")
         exec_command_and_wait_for_pattern(self, 'hwclock -f /dev/rtc1', year);
+
+        self.do_test_arm_aspeed_sdk_poweroff()
