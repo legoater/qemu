@@ -2166,10 +2166,17 @@ static const SDProto sd_proto_sd = {
     },
 };
 
+static sd_rsp_type_t emmc_cmd_SEND_OP_CMD(SDState *sd, SDRequest req)
+{
+    sd->state = sd_ready_state;
+    return sd_r3;
+}
+
 static const SDProto sd_proto_emmc = {
     .name = "eMMC",
     .cmd = {
         [0]         = sd_cmd_GO_IDLE_STATE,
+        [1]         = emmc_cmd_SEND_OP_CMD,
         [5]         = sd_cmd_illegal,
         [19]        = sd_cmd_SEND_TUNING_BLOCK,
         [23]        = sd_cmd_SET_BLOCK_COUNT,
