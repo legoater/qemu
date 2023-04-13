@@ -1,5 +1,16 @@
 # See docs/devel/tracing.rst for syntax documentation.
 
+# aspeed_pcie.c
+aspeed_pcie_phy_read(uint64_t offset, uint64_t data) "offset 0x%" PRIx64 " data 0x%" PRIx64
+aspeed_pcie_phy_write(uint64_t offset, uint64_t data) "offset 0x%" PRIx64 " data 0x%" PRIx64
+aspeed_pcie_cfg_read(uint64_t offset, uint64_t data) "offset 0x%" PRIx64 " data 0x%" PRIx64
+aspeed_pcie_cfg_write(uint64_t offset, uint64_t data) "offset 0x%" PRIx64 " data 0x%" PRIx64
+aspeed_pcie_cfg_rw(const char *dir, uint8_t bus, uint8_t devfn, uint64_t offset, uint64_t data) "%s bus:0x%x devfn:0x%x addr 0x%" PRIx64 " data 0x%" PRIx64
+aspeed_pcie_cfg_msi_notify(uint64_t offset, uint64_t data) "@0x%" PRIx64 " IRQ 0x%" PRIx64
+
+aspeed_pcie_rc_read(uint64_t offset, uint64_t data) "offset 0x%" PRIx64 " data 0x%" PRIx64
+aspeed_pcie_rc_write(uint64_t offset, uint64_t data) "offset 0x%" PRIx64 " data 0x%" PRIx64
+
 # bonito.c
 bonito_spciconf_small_access(uint64_t addr, unsigned size) "PCI config address is smaller then 32-bit, addr: 0x%"PRIx64", size: %u"
 
