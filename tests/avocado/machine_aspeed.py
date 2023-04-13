@@ -319,8 +319,8 @@ class AST2x00MachineSDK(QemuSystemTest):
         """
 
         image_url = ('https://github.com/AspeedTech-BMC/openbmc/releases/'
-                     'download/v08.01/ast2500-default-obmc.tar.gz')
-        image_hash = ('5375f82b4c43a79427909342a1e18b4e48bd663e38466862145d27bb358796fd')
+                     'download/v08.03/ast2500-default-obmc.tar.gz')
+        image_hash = ('8ff14c0247ed34b76841c57dc1de67fab6509c98cbdbab42d40d165a410e4105')
         image_path = self.fetch_asset(image_url, asset_hash=image_hash,
                                       algorithm='sha256')
         archive.extract(image_path, self.workdir)
@@ -342,8 +342,8 @@ class AST2x00MachineSDK(QemuSystemTest):
         """
 
         image_url = ('https://github.com/AspeedTech-BMC/openbmc/releases/'
-                     'download/v08.01/ast2600-default-obmc.tar.gz')
-        image_hash = ('f12ef15e8c1f03a214df3b91c814515c5e2b2f56119021398c1dbdd626817d15')
+                     'download/v08.03/ast2600-default-obmc.tar.gz')
+        image_hash = ('d52b2db8591bb1a0261a79474260dd44917f3c4e8914fbe0cd92f1891a5ccaed')
         image_path = self.fetch_asset(image_url, asset_hash=image_hash,
                                       algorithm='sha256')
         archive.extract(image_path, self.workdir)
