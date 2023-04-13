@@ -352,6 +352,7 @@ static void aspeed_machine_init(MachineState *machine)
     AspeedSoCClass *sc;
     int i;
     NICInfo *nd = &nd_table[0];
+    DriveInfo *emmc0 = NULL;
 
     object_initialize_child(OBJECT(machine), "soc", &bmc->soc, amc->soc_name);
 
@@ -427,9 +428,8 @@ static void aspeed_machine_init(MachineState *machine)
     }
 
     if (bmc->soc.emmc.num_slots) {
-        sdhci_attach_drive(&bmc->soc.emmc.slots[0],
-                           drive_get(IF_SD, 0, bmc->soc.sdhci.num_slots),
-                           true);
+        emmc0 = drive_get(IF_SD, 0, bmc->soc.sdhci.num_slots);
+        sdhci_attach_drive(&bmc->soc.emmc.slots[0], emmc0, true);
     }
 
     if (!bmc->mmio_exec) {
@@ -439,6 +439,9 @@ static void aspeed_machine_init(MachineState *machine)
         if (fmc0) {
             uint64_t rom_size = memory_region_size(&bmc->soc.spi_boot);
             aspeed_install_boot_rom(&bmc->soc, fmc0, rom_size);
+        } else if (emmc0) {
+            aspeed_install_boot_rom(&bmc->soc, blk_by_legacy_dinfo(emmc0),
+                                    64 * KiB);
         }
     }
 
