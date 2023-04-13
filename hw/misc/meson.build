@@ -117,7 +117,6 @@ softmmu_ss.add(when: 'CONFIG_ASPEED_SOC', if_true: files(
   'aspeed_gfx.c',
   'aspeed_hace.c',
   'aspeed_ibt.c',
-  'aspeed_i3c.c',
   'aspeed_lpc.c',
   'aspeed_pwm.c',
   'aspeed_scu.c',
