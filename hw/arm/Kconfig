@@ -501,6 +501,7 @@ config FSL_IMX7
     select UNIMP
     select IBM_CFFPS
     select IR35221
+    select APB2OPB_ASPEED
 
 config ARM_SMMUV3
     bool
