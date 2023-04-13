@@ -2202,6 +2202,11 @@ static sd_rsp_type_t emmc_cmd_ALL_SEND_CID(SDState *sd, SDRequest req)
     return sd_r2_i;
 }
 
+static sd_rsp_type_t emmc_cmd_APP_CMD(SDState *sd, SDRequest req)
+{
+    return sd_r0;
+}
+
 static const SDProto sd_proto_emmc = {
     .name = "eMMC",
     .cmd = {
@@ -2214,6 +2219,7 @@ static const SDProto sd_proto_emmc = {
         [23]        = sd_cmd_SET_BLOCK_COUNT,
         [41]        = sd_cmd_illegal,
         [52 ... 54] = sd_cmd_illegal,
+        [55]        = emmc_cmd_APP_CMD,
         [58]        = sd_cmd_illegal,
         [59]        = sd_cmd_illegal,
     },
