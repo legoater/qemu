@@ -311,7 +311,8 @@ void aspeed_board_init_flashes(AspeedSMCState *s, const char *flashtype,
     }
 }
 
-static void sdhci_attach_drive(SDHCIState *sdhci, DriveInfo *dinfo, bool emmc)
+static void sdhci_attach_drive(SDHCIState *sdhci, DriveInfo *dinfo, bool emmc,
+                               bool boot_emmc)
 {
         DeviceState *card;
 
@@ -321,6 +322,7 @@ static void sdhci_attach_drive(SDHCIState *sdhci, DriveInfo *dinfo, bool emmc)
         card = qdev_new(emmc ? TYPE_EMMC : TYPE_SD_CARD);
         if (emmc) {
             qdev_prop_set_uint8(card, "spec_version", SD_PHY_SPECv3_01_VERS);
+            qdev_prop_set_uint8(card, "boot-config", boot_emmc ? 0x48 : 0x0);
         }
         qdev_prop_set_drive_err(card, "drive", blk_by_legacy_dinfo(dinfo),
                                 &error_fatal);
@@ -353,10 +355,14 @@ static void aspeed_machine_init(MachineState *machine)
     int i;
     NICInfo *nd = &nd_table[0];
     DriveInfo *emmc0 = NULL;
+    bool boot_emmc;
 
     object_initialize_child(OBJECT(machine), "soc", &bmc->soc, amc->soc_name);
 
     sc = ASPEED_SOC_GET_CLASS(&bmc->soc);
+
+    boot_emmc = sc->boot_emmc &&
+        !!(amc->hw_strap1 & AST26500_HW_STRAP_BOOT_SRC_EMMC);
 
     /*
      * This will error out if the RAM size is not supported by the
@@ -424,19 +430,19 @@ static void aspeed_machine_init(MachineState *machine)
 
     for (i = 0; i < bmc->soc.sdhci.num_slots; i++) {
         sdhci_attach_drive(&bmc->soc.sdhci.slots[i],
-                           drive_get(IF_SD, 0, i), false);
+                           drive_get(IF_SD, 0, i), false, false);
     }
 
     if (bmc->soc.emmc.num_slots) {
         emmc0 = drive_get(IF_SD, 0, bmc->soc.sdhci.num_slots);
-        sdhci_attach_drive(&bmc->soc.emmc.slots[0], emmc0, true);
+        sdhci_attach_drive(&bmc->soc.emmc.slots[0], emmc0, true, boot_emmc);
     }
 
     if (!bmc->mmio_exec) {
         DeviceState *dev = ssi_get_cs(bmc->soc.fmc.spi, 0);
         BlockBackend *fmc0 = dev ? m25p80_get_blk(dev) : NULL;
 
-        if (fmc0) {
+        if (fmc0 && !boot_emmc) {
             uint64_t rom_size = memory_region_size(&bmc->soc.spi_boot);
             aspeed_install_boot_rom(&bmc->soc, fmc0, rom_size);
         } else if (emmc0) {
