@@ -700,6 +700,21 @@ bool aspeed_soc_dram_init(AspeedSoCState *s, Error **errp)
     return true;
 }
 
+void aspeed_soc_i2c_set_bus(AspeedSoCState *s, int bus_id, I2CBus *bus)
+{
+    object_property_set_link(OBJECT(&s->i2c.busses[bus_id]), "bus", OBJECT(bus),
+                             &error_abort);
+}
+
+I2CBus *aspeed_soc_i2c_bus(AspeedSoCState *s, int bus_id)
+{
+    Object *obj;
+
+    obj = object_property_get_link(OBJECT(&s->i2c.busses[bus_id]),
+                                   "bus", &error_abort);
+    return I2C_BUS(obj);
+}
+
 void aspeed_mmio_map(AspeedSoCState *s, SysBusDevice *dev, int n, hwaddr addr)
 {
     memory_region_add_subregion(s->memory, addr,

@@ -1240,7 +1240,12 @@ static void aspeed_i2c_bus_realize(DeviceState *dev, Error **errp)
 
     sysbus_init_irq(SYS_BUS_DEVICE(dev), &s->irq);
 
-    s->bus = i2c_init_bus(dev, name);
+    /*
+     * If a bus hasn't been provided to the controller, create one from scratch.
+     */
+    if (!s->bus) {
+        s->bus = i2c_init_bus(dev, name);
+    }
     s->slave = i2c_slave_create_simple(s->bus, TYPE_ASPEED_I2C_BUS_SLAVE,
                                        0xff);
 
@@ -1253,6 +1258,7 @@ static Property aspeed_i2c_bus_properties[] = {
     DEFINE_PROP_UINT8("bus-id", AspeedI2CBus, id, 0),
     DEFINE_PROP_LINK("controller", AspeedI2CBus, controller, TYPE_ASPEED_I2C,
                      AspeedI2CState *),
+    DEFINE_PROP_LINK("bus", AspeedI2CBus, bus, TYPE_I2C_BUS, I2CBus *),
     DEFINE_PROP_END_OF_LIST(),
 };
 
