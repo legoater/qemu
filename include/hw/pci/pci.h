@@ -417,12 +417,34 @@ typedef struct PCIIOMMUOps {
      * @devfn: device and function number of the PCI device.
      */
     void (*unset_iommu_device)(PCIBus *bus, void *opaque, int devfn);
+
+    /**
+     * @get_iommu_attr: get vIOMMU attributes from the PCI device
+     *
+     * Optional callback.
+     *
+     * @bus: the #PCIBus of the PCI device.
+     *
+     * @opaque: the data passed to pci_setup_iommu().
+     *
+     * @devfn: device and function number of the PCI device.
+     *
+     * @attr: IOMMU attribute
+     *
+     * @data: IOMMU attribute value
+     *
+     * Returns: 0 on success, -errno on error
+     */
+    int (*get_iommu_attr)(PCIBus *bus, void *opaque, int32_t devfn,
+                          enum IOMMUMemoryRegionAttr attr, void *data);
 } PCIIOMMUOps;
 
 AddressSpace *pci_device_iommu_address_space(PCIDevice *dev);
 bool pci_device_set_iommu_device(PCIDevice *dev, HostIOMMUDevice *hiod,
                                  Error **errp);
 void pci_device_unset_iommu_device(PCIDevice *dev);
+int pci_device_iommu_get_attr(PCIDevice *dev, enum IOMMUMemoryRegionAttr attr,
+                              void *data);
 
 /**
  * pci_setup_iommu: Initialize specific IOMMU handlers for a PCIBus
