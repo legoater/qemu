@@ -27,6 +27,7 @@ typedef struct {
 typedef struct VFIOAddressSpace {
     AddressSpace *as;
     bool no_dma_translation;
+    hwaddr max_iova;
     QLIST_HEAD(, VFIOContainerBase) containers;
     QLIST_ENTRY(VFIOAddressSpace) list;
 } VFIOAddressSpace;

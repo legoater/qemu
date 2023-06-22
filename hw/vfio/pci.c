@@ -2977,6 +2977,12 @@ static void vfio_viommu_init(VFIOPCIDevice *vdev)
     pci_device_iommu_get_attr(pdev, IOMMU_ATTR_DMA_TRANSLATION,
                               &dma_translation);
     space->no_dma_translation = !dma_translation;
+
+    /*
+     * Support for advertised IOMMU address space boundaries is optional.
+     * By default, it is not advertised i.e. space::max_iova is 0.
+     */
+    pci_device_iommu_get_attr(pdev, IOMMU_ATTR_MAX_IOVA, &space->max_iova);
 }
 
 static void vfio_realize(PCIDevice *pdev, Error **errp)

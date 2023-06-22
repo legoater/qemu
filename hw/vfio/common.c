@@ -148,6 +148,13 @@ bool vfio_viommu_preset(VFIODevice *vbasedev)
         !vbasedev->bcontainer->space->no_dma_translation;
 }
 
+int vfio_viommu_get_max_iova(const VFIOContainerBase *bcontainer,
+                             hwaddr *max_iova)
+{
+    *max_iova = bcontainer->space->max_iova;
+    return *max_iova == 0;
+}
+
 static void vfio_set_migration_error(int ret)
 {
     if (migration_is_setup_or_active()) {
@@ -900,10 +907,23 @@ static const MemoryListener vfio_dirty_tracking_listener = {
     .region_add = vfio_dirty_tracking_update,
 };
 
-static void vfio_dirty_tracking_init(VFIOContainerBase *bcontainer,
-                                     VFIODirtyRanges *ranges)
+static bool vfio_devices_all_viommu_preset(const VFIOContainerBase *bcontainer)
+{
+    VFIODevice *vbasedev;
+
+    QLIST_FOREACH(vbasedev, &bcontainer->device_list, container_next) {
+        if (!vfio_viommu_preset(vbasedev))
+            return false;
+    }
+    return true;
+}
+
+static bool vfio_dirty_tracking_init(VFIOContainerBase *bcontainer,
+                                     VFIODirtyRanges *ranges,
+                                     Error** errp)
 {
     VFIODirtyRangesListener dirty;
+    int ret;
 
     memset(&dirty, 0, sizeof(dirty));
     dirty.ranges.min32 = UINT32_MAX;
@@ -912,17 +932,31 @@ static void vfio_dirty_tracking_init(VFIOContainerBase *bcontainer,
     dirty.listener = vfio_dirty_tracking_listener;
     dirty.bcontainer = bcontainer;
 
-    memory_listener_register(&dirty.listener,
-                             bcontainer->space->as);
+    if (vfio_devices_all_viommu_preset(bcontainer)) {
+        hwaddr iommu_max_iova;
+
+        ret = vfio_viommu_get_max_iova(bcontainer, &iommu_max_iova);
+        if (ret) {
+            error_setg(errp, "Invalid IOVA width");
+            return false;
+        }
+
+        vfio_dirty_tracking_update_range(&dirty.ranges, 0, iommu_max_iova,
+                                         true);
+    } else {
+        memory_listener_register(&dirty.listener,
+                                 bcontainer->space->as);
+        /*
+         * The memory listener is synchronous, and used to calculate the range
+         * to dirty tracking. Unregister it after we are done as we are not
+         * interested in any follow-up updates.
+         */
+        memory_listener_unregister(&dirty.listener);
+    }
 
     *ranges = dirty.ranges;
 
-    /*
-     * The memory listener is synchronous, and used to calculate the range
-     * to dirty tracking. Unregister it after we are done as we are not
-     * interested in any follow-up updates.
-     */
-    memory_listener_unregister(&dirty.listener);
+    return true;
 }
 
 static void vfio_devices_dma_logging_stop(VFIOContainerBase *bcontainer)
@@ -1031,7 +1065,10 @@ static bool vfio_devices_dma_logging_start(VFIOContainerBase *bcontainer,
     VFIODevice *vbasedev;
     int ret = 0;
 
-    vfio_dirty_tracking_init(bcontainer, &ranges);
+    if (!vfio_dirty_tracking_init(bcontainer, &ranges, errp)) {
+        return false;
+    }
+
     feature = vfio_device_feature_dma_logging_start_create(bcontainer,
                                                            &ranges);
     if (!feature) {
