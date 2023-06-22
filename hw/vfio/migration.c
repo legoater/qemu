@@ -1013,6 +1013,7 @@ void vfio_reset_bytes_transferred(void)
 bool vfio_migration_realize(VFIODevice *vbasedev, Error **errp)
 {
     Error *err = NULL;
+    hwaddr max;
     int ret;
 
     if (vbasedev->enable_migration == ON_OFF_AUTO_OFF) {
@@ -1055,10 +1056,12 @@ bool vfio_migration_realize(VFIODevice *vbasedev, Error **errp)
         goto out_deinit;
     }
 
-    if (vfio_viommu_preset(vbasedev)) {
-        error_setg(&err, "%s: Migration is currently not supported "
-                   "with vIOMMU enabled", vbasedev->name);
-        goto add_blocker;
+    if (vfio_viommu_preset(vbasedev) &&
+        !vfio_viommu_get_max_iova(vbasedev->bcontainer, &max)) {
+        error_setg(&err,
+                   "%s: Migration with vIOMMU is currently not supported "
+                   "without vIOMMU address space boundaries", vbasedev->name);
+       goto add_blocker;
     }
 
     trace_vfio_migration_realize(vbasedev->name);
