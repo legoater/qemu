@@ -2958,6 +2958,27 @@ static void vfio_unregister_req_notifier(VFIOPCIDevice *vdev)
     vdev->req_enabled = false;
 }
 
+/*
+ * To be called after VFIOIOMMUClass::attach_device() handler
+ */
+static void vfio_viommu_init(VFIOPCIDevice *vdev)
+{
+    PCIDevice *pdev = &vdev->pdev;
+    VFIODevice *vbasedev = &vdev->vbasedev;
+    VFIOAddressSpace *space = vbasedev->bcontainer->space;
+    bool dma_translation;
+
+    /*
+     * Support for toggling DMA translation is optional.
+     * By default, DMA translation is assumed to be enabled i.e.
+     * space::no_dma_translation is 0.
+     */
+    dma_translation = true;
+    pci_device_iommu_get_attr(pdev, IOMMU_ATTR_DMA_TRANSLATION,
+                              &dma_translation);
+    space->no_dma_translation = !dma_translation;
+}
+
 static void vfio_realize(PCIDevice *pdev, Error **errp)
 {
     ERRP_GUARD();
@@ -3015,6 +3036,8 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
                             pci_device_iommu_address_space(pdev), errp)) {
         goto error;
     }
+
+    vfio_viommu_init(vdev);
 
     if (!vfio_populate_device(vdev, errp)) {
         goto error;
