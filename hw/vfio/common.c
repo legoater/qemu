@@ -144,7 +144,8 @@ void vfio_unblock_multiple_devices_migration(void)
 
 bool vfio_viommu_preset(VFIODevice *vbasedev)
 {
-    return vbasedev->bcontainer->space->as != &address_space_memory;
+    return vbasedev->bcontainer->space->as != &address_space_memory &&
+        !vbasedev->bcontainer->space->no_dma_translation;
 }
 
 static void vfio_set_migration_error(int ret)
