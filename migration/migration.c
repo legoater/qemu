@@ -3210,6 +3210,8 @@ static void migration_iteration_finish(MigrationState *s)
             }
         }
         break;
+    case MIGRATION_STATUS_SETUP:
+        break;
 
     default:
         /* Should not reach here, but if so, forgive the VM. */
@@ -3237,6 +3239,8 @@ static void bg_migration_iteration_finish(MigrationState *s)
     case MIGRATION_STATUS_FAILED:
     case MIGRATION_STATUS_CANCELLED:
     case MIGRATION_STATUS_CANCELLING:
+        break;
+    case MIGRATION_STATUS_SETUP:
         break;
 
     default:
