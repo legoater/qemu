@@ -1561,3 +1561,11 @@ void vfio_detach_device(VFIODevice *vbasedev)
     }
     vbasedev->bcontainer->ops->detach_device(vbasedev);
 }
+
+void host_iommu_device_create(VFIODevice *vbasedev)
+{
+    const VFIOIOMMUClass *ops = vbasedev->bcontainer->ops;
+
+    assert(ops->host_iommu_device_create);
+    ops->host_iommu_device_create(vbasedev);
+}
