@@ -1,6 +1,7 @@
 /*
  * QEMU Crypto hash algorithms
  *
+ * Copyright (c) 2024 Seagate Technology LLC and/or its Affiliates
  * Copyright (c) 2015 Red Hat, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -75,6 +76,47 @@ int qcrypto_hash_bytes(QCryptoHashAlgorithm alg,
     struct iovec iov = { .iov_base = (char *)buf,
                          .iov_len = len };
     return qcrypto_hash_bytesv(alg, &iov, 1, result, resultlen, errp);
+}
+
+int qcrypto_hash_accumulate_bytesv(QCryptoHashAlgorithm alg,
+                                   qcrypto_hash_accumulate_ctx_t *accumulate_ctx,
+                                   const struct iovec *iov,
+                                   size_t niov,
+                                   uint8_t **result,
+                                   size_t *resultlen,
+                                   Error **errp)
+{
+#ifdef CONFIG_AF_ALG
+    qemu_log_mask(LOG_UNIMP, "%s: AF_ALG support unimplemented.\n", __func__);
+    return 1;
+#else
+    return qcrypto_hash_lib_driver.hash_accumulate_bytesv(alg, accumulate_ctx,
+                                                          iov, niov, result,
+                                                          resultlen, NULL);
+#endif /* CONFIG_AF_ALG */
+}
+
+int qcrypto_hash_accumulate_new_ctx(QCryptoHashAlgorithm alg,
+                                    qcrypto_hash_accumulate_ctx_t **accumulate_ctx,
+                                    Error **errp)
+{
+#ifdef CONFIG_AF_ALG
+    qemu_log_mask(LOG_UNIMP, "%s: AF_ALG support unimplemented.\n", __func__);
+    return 1;
+#else
+    return qcrypto_hash_lib_driver.accumulate_new_ctx(alg, accumulate_ctx, errp);
+#endif /* CONFIG_AF_ALG */
+}
+
+int qcrypto_hash_accumulate_free_ctx(qcrypto_hash_accumulate_ctx_t *accumulate_ctx,
+                                     Error **errp)
+{
+#ifdef CONFIG_AF_ALG
+    qemu_log_mask(LOG_UNIMP, "%s: AF_ALG support unimplemented.\n", __func__);
+    return 1;
+#else
+    return qcrypto_hash_lib_driver.accumulate_free_ctx(accumulate_ctx, errp);
+#endif /* CONFIG_AF_ALG */
 }
 
 static const char hex[] = "0123456789abcdef";

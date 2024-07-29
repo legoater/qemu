@@ -1,6 +1,7 @@
 /*
  * QEMU Crypto hash algorithms
  *
+ * Copyright (c) 2024 Seagate Technology LLC and/or its Affiliates
  * Copyright (c) 2016 Red Hat, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -110,7 +111,111 @@ qcrypto_gcrypt_hash_bytesv(QCryptoHashAlgorithm alg,
     return -1;
 }
 
+static
+int qcrypto_gcrypt_hash_accumulate_new_ctx(QCryptoHashAlgorithm alg,
+                                           qcrypto_hash_accumulate_ctx_t **accumulate_ctx,
+                                           Error **errp)
+{
+    int ret;
+
+    if (!qcrypto_hash_supports(alg)) {
+        error_setg(errp,
+                   "Unknown hash algorithm %d",
+                   alg);
+        return -1;
+    }
+
+    ret = gcry_md_open((gcry_md_hd_t *) accumulate_ctx, qcrypto_hash_alg_map[alg], 0);
+
+    if (ret < 0) {
+        error_setg(errp,
+                   "Unable to initialize hash algorithm: %s",
+                   gcry_strerror(ret));
+        return -1;
+    }
+
+    return 0;
+}
+
+static
+int qcrypto_gcrypt_hash_accumulate_free_ctx(qcrypto_hash_accumulate_ctx_t *hash_ctx,
+                                            Error **errp)
+{
+    if (hash_ctx != NULL) {
+        gcry_md_close((gcry_md_hd_t) hash_ctx);
+    }
+
+    return 0;
+}
+
+static
+int qcrypto_gcrypt_hash_accumulate_bytesv(QCryptoHashAlgorithm alg,
+                                          qcrypto_hash_accumulate_ctx_t *accumulate_ctx,
+                                          const struct iovec *iov,
+                                          size_t niov,
+                                          uint8_t **result,
+                                          size_t *resultlen,
+                                          Error **errp)
+{
+    int i, ret;
+    gcry_md_hd_t ctx_copy;
+    unsigned char *digest;
+
+    if (!qcrypto_hash_supports(alg)) {
+        error_setg(errp,
+                   "Unknown hash algorithm %d",
+                   alg);
+        return -1;
+    }
+
+    for (i = 0; i < niov; i++) {
+        gcry_md_write((gcry_md_hd_t) accumulate_ctx, iov[i].iov_base, iov[i].iov_len);
+    }
+
+    ret = gcry_md_get_algo_dlen(qcrypto_hash_alg_map[alg]);
+    if (ret <= 0) {
+        error_setg(errp,
+                   "Unable to get hash length: %s",
+                   gcry_strerror(ret));
+        return -1;
+    }
+
+    if (*resultlen == 0) {
+        *resultlen = ret;
+        *result = g_new0(uint8_t, *resultlen);
+    } else if (*resultlen != ret) {
+        error_setg(errp,
+                   "Result buffer size %zu is smaller than hash %d",
+                   *resultlen, ret);
+        return -1;
+    }
+
+    /*
+     * Make a copy so we don't distort the main context
+     * by calculating the intermediate hash
+     */
+    ret = gcry_md_copy(&ctx_copy, (gcry_md_hd_t) accumulate_ctx);
+    if (ret) {
+        error_setg(errp, "Unable to make copy: %s", gcry_strerror(ret));
+        return -1;
+    }
+
+    digest = gcry_md_read(ctx_copy, 0);
+    if (!digest) {
+        error_setg(errp,
+                   "No digest produced");
+        return -1;
+    }
+    memcpy(*result, digest, *resultlen);
+    gcry_md_close(ctx_copy);
+
+    return 0;
+}
+
 
 QCryptoHashDriver qcrypto_hash_lib_driver = {
     .hash_bytesv = qcrypto_gcrypt_hash_bytesv,
+    .hash_accumulate_bytesv = qcrypto_gcrypt_hash_accumulate_bytesv,
+    .accumulate_new_ctx = qcrypto_gcrypt_hash_accumulate_new_ctx,
+    .accumulate_free_ctx = qcrypto_gcrypt_hash_accumulate_free_ctx,
 };

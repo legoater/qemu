@@ -1,6 +1,7 @@
 /*
  * QEMU Crypto hash algorithms
  *
+ * Copyright (c) 2024 Seagate Technology LLC and/or its Affiliates
  * Copyright (c) 2021 Red Hat, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -99,6 +100,87 @@ qcrypto_gnutls_hash_bytesv(QCryptoHashAlgorithm alg,
 }
 
 
+static
+int qcrypto_gnutls_hash_accumulate_new_ctx(QCryptoHashAlgorithm alg,
+                                           qcrypto_hash_accumulate_ctx_t **hash_ctx,
+                                           Error **errp)
+{
+    int ret;
+
+    if (!qcrypto_hash_supports(alg)) {
+        error_setg(errp,
+                   "Unknown hash algorithm %d",
+                   alg);
+        return -1;
+    }
+
+    ret = gnutls_hash_init((gnutls_hash_hd_t *) hash_ctx, qcrypto_hash_alg_map[alg]);
+    if (ret < 0) {
+        error_setg(errp,
+                   "Unable to initialize hash algorithm: %s",
+                   gnutls_strerror(ret));
+        return -1;
+    }
+
+    return 0;
+}
+
+static
+int qcrypto_gnutls_hash_accumulate_free_ctx(qcrypto_hash_accumulate_ctx_t *hash_ctx,
+                                            Error **errp)
+{
+    if (hash_ctx != NULL) {
+        gnutls_hash_deinit((gnutls_hash_hd_t) hash_ctx, NULL);
+    }
+
+    return 0;
+}
+
+static
+int qcrypto_gnutls_hash_accumulate_bytesv(QCryptoHashAlgorithm alg,
+                                          qcrypto_hash_accumulate_ctx_t *hash_ctx,
+                                          const struct iovec *iov,
+                                          size_t niov,
+                                          uint8_t **result,
+                                          size_t *resultlen,
+                                          Error **errp)
+{
+    int i, ret;
+
+    if (!qcrypto_hash_supports(alg)) {
+        error_setg(errp,
+                   "Unknown hash algorithm %d",
+                   alg);
+        return -1;
+    }
+
+    ret = gnutls_hash_get_len(qcrypto_hash_alg_map[alg]);
+    if (*resultlen == 0) {
+        *resultlen = ret;
+        *result = g_new0(uint8_t, *resultlen);
+    } else if (*resultlen != ret) {
+        error_setg(errp,
+                   "Result buffer size %zu is smaller than hash %d",
+                   *resultlen, ret);
+        return -1;
+    }
+
+    for (i = 0; i < niov; i++) {
+        gnutls_hash((gnutls_hash_hd_t) hash_ctx,
+                    iov[i].iov_base, iov[i].iov_len);
+    }
+
+    /* Make a copy so we don't distort the main context */
+    gnutls_hash_hd_t copy = gnutls_hash_copy((gnutls_hash_hd_t) hash_ctx);
+    gnutls_hash_deinit(copy, *result);
+
+    return 0;
+}
+
+
 QCryptoHashDriver qcrypto_hash_lib_driver = {
     .hash_bytesv = qcrypto_gnutls_hash_bytesv,
+    .hash_accumulate_bytesv = qcrypto_gnutls_hash_accumulate_bytesv,
+    .accumulate_new_ctx = qcrypto_gnutls_hash_accumulate_new_ctx,
+    .accumulate_free_ctx = qcrypto_gnutls_hash_accumulate_free_ctx,
 };

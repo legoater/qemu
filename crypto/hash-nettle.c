@@ -1,6 +1,7 @@
 /*
  * QEMU Crypto hash algorithms
  *
+ * Copyright (c) 2024 Seagate Technology LLC and/or its Affiliates
  * Copyright (c) 2016 Red Hat, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -155,7 +156,99 @@ qcrypto_nettle_hash_bytesv(QCryptoHashAlgorithm alg,
     return 0;
 }
 
+static
+int qcrypto_nettle_hash_accumulate_new_ctx(QCryptoHashAlgorithm alg,
+                                           qcrypto_hash_accumulate_ctx_t **hash_ctx,
+                                           Error **errp)
+{
+    if (!qcrypto_hash_supports(alg)) {
+        error_setg(errp,
+                   "Unknown hash algorithm %d",
+                   alg);
+        return -1;
+    }
+
+    *((union qcrypto_hash_ctx **) hash_ctx) = g_malloc(sizeof(union qcrypto_hash_ctx));
+
+    qcrypto_hash_alg_map[alg].init(*((union qcrypto_hash_ctx **) accumulate_ctx));
+
+    return 0;
+}
+
+static
+int qcrypto_nettle_hash_accumulate_free_ctx(qcrypto_hash_accumulate_ctx_t *hash_ctx,
+                                            Error **errp)
+{
+    g_free((union qcrypto_hash_ctx *) hash_ctx);
+    return 0;
+}
+
+static
+int qcrypto_nettle_hash_accumulate_bytesv(QCryptoHashAlgorithm alg,
+                                          qcrypto_hash_accumulate_ctx_t *hash_ctx,
+                                          const struct iovec *iov,
+                                          size_t niov,
+                                          uint8_t **result,
+                                          size_t *resultlen,
+                                          Error **errp)
+{
+    union qcrypto_hash_ctx *ctx_copy;
+    int i;
+
+    if (!qcrypto_hash_supports(alg)) {
+        error_setg(errp,
+                   "Unknown hash algorithm %d",
+                   alg);
+        return -1;
+    }
+
+    for (i = 0; i < niov; i++) {
+        /* Some versions of nettle have functions
+         * declared with 'int' instead of 'size_t'
+         * so to be safe avoid writing more than
+         * UINT_MAX bytes at a time
+         */
+        size_t len = iov[i].iov_len;
+        uint8_t *base = iov[i].iov_base;
+        while (len) {
+            size_t shortlen = MIN(len, UINT_MAX);
+            qcrypto_hash_alg_map[alg].write((union qcrypto_hash_ctx *) hash_ctx,
+                                            len, base);
+            len -= shortlen;
+            base += len;
+        }
+    }
+
+    if (*resultlen == 0) {
+        *resultlen = qcrypto_hash_alg_map[alg].len;
+        *result = g_new0(uint8_t, *resultlen);
+    } else if (*resultlen != qcrypto_hash_alg_map[alg].len) {
+        error_setg(errp,
+                   "Result buffer size %zu is smaller than hash %zu",
+                   *resultlen, qcrypto_hash_alg_map[alg].len);
+        return -1;
+    }
+
+    /*
+    Make a copy so we don't distort the main context
+    by calculating the intermediate hash
+    */
+    ctx_copy = g_new(union qcrypto_hash_ctx, 1);
+    memcpy(ctx_copy, (union qcrypto_hash_ctx *) hash_ctx,
+           sizeof(union qcrypto_hash_ctx));
+
+    qcrypto_hash_alg_map[alg].result(ctx_copy,
+                                     *resultlen, *result);
+
+    g_free(ctx_copy);
+
+    return 0;
+}
+
 
 QCryptoHashDriver qcrypto_hash_lib_driver = {
     .hash_bytesv = qcrypto_nettle_hash_bytesv,
+    .hash_accumulate_bytesv = qcrypto_nettle_hash_accumulate_bytesv,
+    .accumulate_new_ctx = qcrypto_nettle_hash_accumulate_new_ctx,
+    .accumulate_free_ctx = qcrypto_nettle_hash_accumulate_free_ctx,
 };

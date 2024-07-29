@@ -1,6 +1,7 @@
 /*
  * QEMU Crypto hash algorithms
  *
+ * Copyright (c) 2024 Seagate Technology LLC and/or its Affiliates
  * Copyright (c) 2015 Red Hat, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -24,6 +25,8 @@
 #include "qapi/qapi-types-crypto.h"
 
 /* See also "QCryptoHashAlgorithm" defined in qapi/crypto.json */
+
+typedef void qcrypto_hash_accumulate_ctx_t;
 
 /**
  * qcrypto_hash_supports:
@@ -119,6 +122,68 @@ int qcrypto_hash_digestv(QCryptoHashAlgorithm alg,
                          size_t niov,
                          char **digest,
                          Error **errp);
+
+/**
+ * qcrypto_hash_accumulate_bytesv:
+ * @alg: the hash algorithm
+ * @accumulate_ctx: pointer to the algorithm's context for further hash operations
+ * @iov: the array of memory regions to hash
+ * @niov: the length of @iov
+ * @result: pointer to hold output hash
+ * @resultlen: pointer to hold length of @result
+ * @errp: pointer to a NULL-initialized error object
+ *
+ * Computes the hash across all the memory regions
+ * present in @iov using the existing hash context
+ * given in @accumulate_ctx. The @result pointer will be
+ * filled with raw bytes representing the computed
+ * hash, which will have length @resultlen. The
+ * memory pointer in @result must be released
+ * with a call to g_free() when no longer required.
+ *
+ * Returns: 0 on success, -1 on error
+ */
+int qcrypto_hash_accumulate_bytesv(QCryptoHashAlgorithm alg,
+                                   qcrypto_hash_accumulate_ctx_t *accumulate_ctx,
+                                   const struct iovec *iov,
+                                   size_t niov,
+                                   uint8_t **result,
+                                   size_t *resultlen,
+                                   Error **errp);
+
+/**
+ * qcrypto_hash_accumulate_new_ctx:
+ * @alg: the hash algorithm
+ * @accumulate_ctx: pointer to the pointer holding the algorithm's
+ *                  context for further hash operations. The pointer will
+ *                  be modified to point to the memory this function
+ *                  allocates to hold the context.
+ * @errp: pointer to a NULL-initialized error object
+ *
+ * Creates a new hashing context for the chosen algorithm for
+ * usage with qcrypto_hash_accumulate_bytesv().
+ * This is useful for when one has multiple inputs to compute a hash, but
+ * not all are available at a single point in time, making qcrypto_hash_bytesv()
+ * inadequate. The @accumulate_ctx pointer must be released with a call to
+ * qcrypto_hash_accumulate_free_ctx() once all hash operations are complete.
+ *
+ * Returns: 0 on success, -1 on error
+ */
+int qcrypto_hash_accumulate_new_ctx(QCryptoHashAlgorithm alg,
+                                    qcrypto_hash_accumulate_ctx_t **accumulate_ctx,
+                                    Error **errp);
+
+/**
+ * qcrypto_hash_accumulate_free_ctx:
+ * @accumulate_ctx: pointer to the algorithm's context for further hash operations
+ * @errp: pointer to a NULL-initialized error object
+ *
+ * frees a hashing context for the chosen algorithm.
+ *
+ * Returns: 0 on success, -1 on error
+ */
+int qcrypto_hash_accumulate_free_ctx(qcrypto_hash_accumulate_ctx_t *accumulate_ctx,
+                                     Error **errp);
 
 /**
  * qcrypto_hash_digest:
