@@ -164,6 +164,16 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
     int i;
     void *haddr;
 
+    if (acc_mode) {
+        if (s->qcrypto_hash_context == NULL &&
+            qcrypto_hash_accumulate_new_ctx(algo, &s->qcrypto_hash_context, NULL)) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "%s: qcrypto failed to create hash context\n",
+                          __func__);
+            return;
+        }
+    }
+
     if (sg_mode) {
         uint32_t len = 0;
 
@@ -236,14 +246,6 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
     }
 
     if (acc_mode) {
-        if (s->qcrypto_hash_context == NULL &&
-            qcrypto_hash_accumulate_new_ctx(algo, &s->qcrypto_hash_context, NULL)) {
-            qemu_log_mask(LOG_GUEST_ERROR,
-                          "%s: qcrypto failed to create hash context\n",
-                          __func__);
-            return;
-        }
-
         if (qcrypto_hash_accumulate_bytesv(algo,
                                            s->qcrypto_hash_context, iov, i,
                                            &digest_buf,
