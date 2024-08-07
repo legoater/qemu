@@ -1,6 +1,7 @@
 /*
  * QEMU Crypto hash algorithms
  *
+ * Copyright (c) 2024 Seagate Technology LLC and/or its Affiliates
  * Copyright (c) 2015 Red Hat, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -45,23 +46,20 @@ int qcrypto_hash_bytesv(QCryptoHashAlgorithm alg,
                         size_t *resultlen,
                         Error **errp)
 {
-#ifdef CONFIG_AF_ALG
-    int ret;
-    /*
-     * TODO:
-     * Maybe we should treat some afalg errors as fatal
-     */
-    ret = qcrypto_hash_afalg_driver.hash_bytesv(alg, iov, niov,
-                                                result, resultlen,
-                                                NULL);
-    if (ret == 0) {
-        return ret;
-    }
-#endif
+    int fail;
+    QCryptoHash *ctx = qcrypto_hash_new(alg, errp);
 
-    return qcrypto_hash_lib_driver.hash_bytesv(alg, iov, niov,
-                                               result, resultlen,
-                                               errp);
+    if (ctx) {
+        fail = qcrypto_hash_updatev(ctx, iov, niov, errp) ||
+               qcrypto_hash_finalize_bytes(ctx, result, resultlen, errp);
+
+        /* Ensure context is always freed regardless of error */
+        qcrypto_hash_free(ctx);
+    } else {
+        fail = -1;
+    }
+
+    return fail;
 }
 
 
@@ -77,7 +75,100 @@ int qcrypto_hash_bytes(QCryptoHashAlgorithm alg,
     return qcrypto_hash_bytesv(alg, &iov, 1, result, resultlen, errp);
 }
 
+int qcrypto_hash_updatev(QCryptoHash *hash,
+                         const struct iovec *iov,
+                         size_t niov,
+                         Error **errp)
+{
+#ifdef CONFIG_AF_ALG
+    return qcrypto_hash_afalg_driver.hash_update(hash, iov, niov, errp);
+#else
+    return qcrypto_hash_lib_driver.hash_update(hash, iov, niov, errp);
+#endif /* CONFIG_AF_ALG */
+}
+
+int qcrypto_hash_update(QCryptoHash *hash,
+                        const char *buf,
+                        size_t len,
+                        Error **errp)
+{
+    struct iovec iov = { .iov_base = (char *)buf, .iov_len = len };
+
+    return qcrypto_hash_updatev(hash, &iov, 1, errp);
+}
+
+QCryptoHash *qcrypto_hash_new(QCryptoHashAlgorithm alg, Error **errp)
+{
+#ifdef CONFIG_AF_ALG
+    return qcrypto_hash_afalg_driver.hash_new(alg, errp);
+#else
+    return qcrypto_hash_lib_driver.hash_new(alg, errp);
+#endif /* CONFIG_AF_ALG */
+}
+
+void qcrypto_hash_free(QCryptoHash *hash)
+{
+#ifdef CONFIG_AF_ALG
+    qcrypto_hash_afalg_driver.hash_free(hash);
+#else
+    qcrypto_hash_lib_driver.hash_free(hash);
+#endif /* CONFIG_AF_ALG */
+}
+
+int qcrypto_hash_finalize_bytes(QCryptoHash *hash,
+                                uint8_t **result,
+                                size_t *result_len,
+                                Error **errp)
+{
+#ifdef CONFIG_AF_ALG
+    return qcrypto_hash_afalg_driver.hash_finalize(hash, result, result_len,
+                                                   errp);
+#else
+    return qcrypto_hash_lib_driver.hash_finalize(hash, result, result_len, errp);
+#endif /* CONFIG_AF_ALG */
+}
+
 static const char hex[] = "0123456789abcdef";
+
+int qcrypto_hash_finalize_digest(QCryptoHash *hash,
+                                 char **digest,
+                                 Error **errp)
+{
+    int ret;
+    uint8_t *result = NULL;
+    size_t resultlen = 0;
+    size_t i;
+
+    ret = qcrypto_hash_finalize_bytes(hash, &result, &resultlen, errp);
+    if (ret == 0) {
+        *digest = g_new0(char, (resultlen * 2) + 1);
+        for (i = 0 ; i < resultlen ; i++) {
+            (*digest)[(i * 2)] = hex[(result[i] >> 4) & 0xf];
+            (*digest)[(i * 2) + 1] = hex[result[i] & 0xf];
+        }
+        (*digest)[resultlen * 2] = '\0';
+        g_free(result);
+    }
+
+    return ret;
+}
+
+int qcrypto_hash_finalize_base64(QCryptoHash *hash,
+                                 char **base64,
+                                 Error **errp)
+{
+    int ret;
+    uint8_t *result = NULL;
+    size_t resultlen = 0;
+
+    ret = qcrypto_hash_finalize_bytes(hash, &result, &resultlen, errp);
+    if (ret == 0) {
+        *base64 = g_base64_encode(result, resultlen);
+        g_free(result);
+    }
+
+    return ret;
+}
 
 int qcrypto_hash_digestv(QCryptoHashAlgorithm alg,
                          const struct iovec *iov,
@@ -85,22 +176,20 @@ int qcrypto_hash_digestv(QCryptoHashAlgorithm alg,
                          char **digest,
                          Error **errp)
 {
-    uint8_t *result = NULL;
-    size_t resultlen = 0;
-    size_t i;
+    bool fail;
+    QCryptoHash *ctx = qcrypto_hash_new(alg, errp);
 
-    if (qcrypto_hash_bytesv(alg, iov, niov, &result, &resultlen, errp) < 0) {
-        return -1;
+    if (ctx) {
+        fail = qcrypto_hash_updatev(ctx, iov, niov, errp) ||
+               qcrypto_hash_finalize_digest(ctx, digest, errp);
+
+        /* Ensure context is always freed regardless of error */
+        qcrypto_hash_free(ctx);
+    } else {
+        fail = false;
     }
 
-    *digest = g_new0(char, (resultlen * 2) + 1);
-    for (i = 0 ; i < resultlen ; i++) {
-        (*digest)[(i * 2)] = hex[(result[i] >> 4) & 0xf];
-        (*digest)[(i * 2) + 1] = hex[result[i] & 0xf];
-    }
-    (*digest)[resultlen * 2] = '\0';
-    g_free(result);
-    return 0;
+    return fail;
 }
 
 int qcrypto_hash_digest(QCryptoHashAlgorithm alg,
@@ -120,16 +209,20 @@ int qcrypto_hash_base64v(QCryptoHashAlgorithm alg,
                          char **base64,
                          Error **errp)
 {
-    uint8_t *result = NULL;
-    size_t resultlen = 0;
+    bool fail;
+    QCryptoHash *ctx = qcrypto_hash_new(alg, errp);
 
-    if (qcrypto_hash_bytesv(alg, iov, niov, &result, &resultlen, errp) < 0) {
-        return -1;
+    if (ctx) {
+        fail = qcrypto_hash_updatev(ctx, iov, niov, errp) ||
+               qcrypto_hash_finalize_base64(ctx, base64, errp);
+
+        /* Ensure context is always freed regardless of error */
+        qcrypto_hash_free(ctx);
+    } else {
+        fail = 1;
     }
 
-    *base64 = g_base64_encode(result, resultlen);
-    g_free(result);
-    return 0;
+    return fail;
 }
 
 int qcrypto_hash_base64(QCryptoHashAlgorithm alg,
