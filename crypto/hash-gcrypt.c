@@ -1,6 +1,7 @@
 /*
  * QEMU Crypto hash algorithms
  *
+ * Copyright (c) 2024 Seagate Technology LLC and/or its Affiliates
  * Copyright (c) 2016 Red Hat, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -110,7 +111,85 @@ qcrypto_gcrypt_hash_bytesv(QCryptoHashAlgorithm alg,
     return -1;
 }
 
+static
+QCryptoHash *qcrypto_gcrypt_hash_new(QCryptoHashAlgorithm alg, Error **errp)
+{
+    QCryptoHash *hash = NULL;
+
+    if (!qcrypto_hash_supports(alg)) {
+        error_setg(errp,
+                   "Unknown hash algorithm %d",
+                   alg);
+    } else {
+        hash = g_new(QCryptoHash, 1);
+        hash->alg = alg;
+        hash->opaque = g_new(gcry_md_hd_t, 1);
+
+        gcry_md_open((gcry_md_hd_t *) hash->opaque, qcrypto_hash_alg_map[alg], 0);
+    }
+
+    return hash;
+}
+
+static
+void qcrypto_gcrypt_hash_free(QCryptoHash *hash)
+{
+    gcry_md_hd_t *ctx = hash->opaque;
+
+    if (ctx) {
+        gcry_md_close(*ctx);
+        g_free(ctx);
+    }
+
+    g_free(hash);
+}
+
+
+static
+int qcrypto_gcrypt_hash_update(QCryptoHash *hash,
+                               const struct iovec *iov,
+                               size_t niov,
+                               Error **errp)
+{
+    gcry_md_hd_t *ctx = hash->opaque;
+
+    for (int i = 0; i < niov; i++) {
+        gcry_md_write(*ctx, iov[i].iov_base, iov[i].iov_len);
+    }
+
+    return 0;
+}
+
+static
+int qcrypto_gcrypt_hash_finalize(QCryptoHash *hash,
+                                 uint8_t **result,
+                                 size_t *result_len,
+                                 Error **errp)
+{
+    unsigned char *digest;
+    int ret = 0;
+    gcry_md_hd_t *ctx = hash->opaque;
+
+    *result_len = gcry_md_get_algo_dlen(qcrypto_hash_alg_map[hash->alg]);
+    if (*result_len == 0) {
+        error_setg(errp, "%s",
+                   "Unable to get hash length");
+        ret = -1;
+    } else {
+        *result = g_new(uint8_t, *result_len);
+
+        /* Digest is freed by gcry_md_close(), copy it */
+        digest = gcry_md_read(*ctx, 0);
+        memcpy(*result, digest, *result_len);
+    }
+
+    return ret;
+}
 
 QCryptoHashDriver qcrypto_hash_lib_driver = {
     .hash_bytesv = qcrypto_gcrypt_hash_bytesv,
+    .hash_new      = qcrypto_gcrypt_hash_new,
+    .hash_update   = qcrypto_gcrypt_hash_update,
+    .hash_finalize = qcrypto_gcrypt_hash_finalize,
+    .hash_free     = qcrypto_gcrypt_hash_free,
 };
