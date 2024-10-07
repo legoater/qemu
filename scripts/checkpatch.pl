@@ -1378,6 +1378,8 @@ sub process {
 	my $in_imported_file = 0;
 	my $in_no_imported_file = 0;
 	my $non_utf8_charset = 0;
+	my $expect_spdx = 0;
+	my $expect_spdx_file;
 
 	our @report = ();
 	our $cnt_lines = 0;
@@ -1613,6 +1615,30 @@ sub process {
                         ($realfile eq $acpi_testexpected))) {
 			$reported_maintainer_file = 1;
 			WARN("added, moved or deleted file(s), does MAINTAINERS need updating?\n" . $herecurr);
+		}
+
+# All new files should have a SPDX-License-Identifier tag
+		if ($line =~ /^new file mode\s*\d+\s*$/) {
+		    if ($expect_spdx) {
+			if ($expect_spdx_file =~ /\.(c|h|py|pl|c\.inc)$/) {
+			    # source code files MUST have SPDX license declared
+			    ERROR("expected 'SPDX-License-Identifer' in new file $expect_spdx_file");
+			} else {
+			    # Other files MAY have SPDX license if appropriate
+			    WARNING("Does new file $expect_spdx_file need 'SPDX-License-Identifer'?");
+			}
+		    }
+		    $expect_spdx = 1;
+		    $expect_spdx_file = undef;
+		} elsif ($expect_spdx) {
+		    $expect_spdx_file = $realfile unless defined $expect_spdx_file;
+
+		    # SPDX tagsd may occurr in comments which were
+		    # stripped from '$line', so use '$rawline'
+		    if ($rawline =~ /SPDX-License-Identifier/) {
+			$expect_spdx = 0;
+			$expect_spdx_file = undef;
+		    }
 		}
 
 # Check for wrappage within a valid hunk of the file
