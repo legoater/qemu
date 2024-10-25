@@ -351,9 +351,7 @@ static void sdhci_attach_drive(SDHCIState *sdhci, DriveInfo *dinfo, bool emmc,
         }
         qdev_prop_set_drive_err(card, "drive", blk_by_legacy_dinfo(dinfo),
                                 &error_fatal);
-        qdev_realize_and_unref(card,
-                               qdev_get_child_bus(DEVICE(sdhci), "sd-bus"),
-                               &error_fatal);
+        qdev_realize_and_unref(card, BUS(&sdhci->sdbus), &error_fatal);
 }
 
 static void connect_serial_hds_to_uarts(AspeedMachineState *bmc)
