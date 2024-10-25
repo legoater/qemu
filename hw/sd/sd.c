@@ -2876,7 +2876,7 @@ static void emmc_class_init(ObjectClass *klass, void *data)
     dc->realize = emmc_realize;
     device_class_set_props(dc, emmc_properties);
     /* Reason: Soldered on board */
-    dc->user_creatable = false;
+    dc->user_creatable = true;
 
     sc->proto = &sd_proto_emmc;
 
