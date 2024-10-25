@@ -43,7 +43,7 @@ static void mmc_attach_drive(AwR40State *s, AwSdHostState *mmc, int unit,
     BusState *bus;
     DeviceState *carddev;
 
-    bus = qdev_get_child_bus(DEVICE(mmc), "sd-bus");
+    bus = BUS(&mmc->sdbus);
     if (bus == NULL) {
         error_report("No SD bus found in SOC object");
         exit(1);

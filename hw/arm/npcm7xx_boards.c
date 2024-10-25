@@ -106,7 +106,7 @@ static void sdhci_attach_drive(SDHCIState *sdhci, int unit)
         DriveInfo *di = drive_get(IF_SD, 0, unit);
         BlockBackend *blk = di ? blk_by_legacy_dinfo(di) : NULL;
 
-        BusState *bus = qdev_get_child_bus(DEVICE(sdhci), "sd-bus");
+        BusState *bus = BUS(&sdhci->sdbus);
         if (bus == NULL) {
             error_report("No SD bus found in SOC object");
             exit(1);

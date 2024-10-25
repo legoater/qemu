@@ -636,7 +636,7 @@ static void sd_plugin_card(SDHCIState *sd, DriveInfo *di)
     card = qdev_new(TYPE_SD_CARD);
     object_property_add_child(OBJECT(sd), "card[*]", OBJECT(card));
     qdev_prop_set_drive_err(card, "drive", blk, &error_fatal);
-    qdev_realize_and_unref(card, qdev_get_child_bus(DEVICE(sd), "sd-bus"),
+    qdev_realize_and_unref(card, BUS(&sd->sdbus),
                            &error_fatal);
 }
 

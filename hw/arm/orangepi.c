@@ -81,7 +81,7 @@ static void orangepi_init(MachineState *machine)
     /* Retrieve SD bus */
     di = drive_get(IF_SD, 0, 0);
     blk = di ? blk_by_legacy_dinfo(di) : NULL;
-    bus = qdev_get_child_bus(DEVICE(h3), "sd-bus");
+    bus = BUS(&h3->mmc0.sdbus);
 
     /* Plug in SD card */
     carddev = qdev_new(TYPE_SD_CARD);
