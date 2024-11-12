@@ -11,6 +11,10 @@ config USB_UHCI_PCI
     depends on PCI
     select USB_UHCI
 
+config USB_UHCI_SYSBUS
+    bool
+    select USB_UHCI
+
 config USB_OHCI
     bool
     select USB
