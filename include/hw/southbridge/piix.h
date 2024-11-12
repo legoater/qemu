@@ -16,7 +16,7 @@
 #include "hw/acpi/piix4.h"
 #include "hw/ide/pci.h"
 #include "hw/rtc/mc146818rtc.h"
-#include "hw/usb/hcd-uhci.h"
+#include "hw/usb/hcd-uhci-pci.h"
 
 /* PIRQRC[A:D]: PIRQx Route Control Registers */
 #define PIIX_PIRQCA 0x60
@@ -57,7 +57,7 @@ struct PIIXState {
 
     MC146818RtcState rtc;
     PCIIDEState ide;
-    UHCIState uhci;
+    UHCIPCIState uhci;
     PIIX4PMState pm;
 
     uint32_t smb_io_base;
