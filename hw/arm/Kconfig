@@ -567,6 +567,7 @@ config ASPEED_SOC
     select AT24C
     select PCI_EXPRESS
     select PCI_EXPRESS_ASPEED
+    select USB_UHCI_SYSBUS
 
 config MPS2
     bool
