@@ -46,6 +46,7 @@ struct USBHubState {
     USBDevice dev;
     USBEndpoint *intr;
     uint32_t num_ports;
+    uint32_t usb_version;
     bool port_power;
     QEMUTimer *port_timer;
     USBHubPort ports[MAX_PORTS];
@@ -100,12 +101,14 @@ OBJECT_DECLARE_SIMPLE_TYPE(USBHubState, USB_HUB)
 enum {
     STR_MANUFACTURER = 1,
     STR_PRODUCT,
+    STR_PRODUCT_V2,
     STR_SERIALNUMBER,
 };
 
 static const USBDescStrings desc_strings = {
     [STR_MANUFACTURER] = "QEMU",
     [STR_PRODUCT]      = "QEMU USB Hub",
+    [STR_PRODUCT_V2]   = "QEMU USB v2.0 Hub",
     [STR_SERIALNUMBER] = "314159",
 };
 
@@ -119,6 +122,20 @@ static const USBDescIface desc_iface_hub = {
             .bmAttributes          = USB_ENDPOINT_XFER_INT,
             .wMaxPacketSize        = 1 + DIV_ROUND_UP(MAX_PORTS, 8),
             .bInterval             = 0xff,
+        },
+    }
+};
+
+static const USBDescIface desc_iface_hub_v2 = {
+    .bInterfaceNumber              = 0,
+    .bNumEndpoints                 = 1,
+    .bInterfaceClass               = USB_CLASS_HUB,
+    .eps = (USBDescEndpoint[]) {
+        {
+            .bEndpointAddress      = USB_DIR_IN | 0x01,
+            .bmAttributes          = USB_ENDPOINT_XFER_INT,
+            .wMaxPacketSize        = 512,
+            .bInterval             = 10,
         },
     }
 };
@@ -140,6 +157,23 @@ static const USBDescDevice desc_device_hub = {
     },
 };
 
+static const USBDescDevice desc_device_hub_v2 = {
+    .bcdUSB                        = 0x0200,
+    .bDeviceClass                  = USB_CLASS_HUB,
+    .bMaxPacketSize0               = 64,
+    .bNumConfigurations            = 1,
+    .confs = (USBDescConfig[]) {
+        {
+            .bNumInterfaces        = 1,
+            .bConfigurationValue   = 1,
+            .bmAttributes          = USB_CFG_ATT_ONE | USB_CFG_ATT_SELFPOWER |
+                                     USB_CFG_ATT_WAKEUP,
+            .nif = 1,
+            .ifs = &desc_iface_hub_v2,
+        },
+    },
+};
+
 static const USBDesc desc_hub = {
     .id = {
         .idVendor          = 0x0409,
@@ -150,6 +184,20 @@ static const USBDesc desc_hub = {
         .iSerialNumber     = STR_SERIALNUMBER,
     },
     .full = &desc_device_hub,
+    .str  = desc_strings,
+};
+
+static const USBDesc desc_hub_v2 = {
+    .id = {
+        .idVendor          = 0x0409,
+        .idProduct         = 0x55aa,
+        .bcdDevice         = 0x0201,
+        .iManufacturer     = STR_MANUFACTURER,
+        .iProduct          = STR_PRODUCT_V2,
+        .iSerialNumber     = STR_SERIALNUMBER,
+    },
+    .full = &desc_device_hub,
+    .high = &desc_device_hub_v2,
     .str  = desc_strings,
 };
 
@@ -195,15 +243,20 @@ static bool usb_hub_port_clear(USBHubPort *port, uint16_t status)
     return usb_hub_port_change(port, status);
 }
 
-static bool usb_hub_port_update(USBHubPort *port)
+static bool usb_hub_port_update(USBHubState *s, USBHubPort *port)
 {
     bool notify = false;
 
     if (port->port.dev && port->port.dev->attached) {
         notify = usb_hub_port_set(port, PORT_STAT_CONNECTION);
-        if (port->port.dev->speed == USB_SPEED_LOW) {
+        if (s->usb_version == 2 && port->port.dev->speed == USB_SPEED_HIGH) {
+            usb_hub_port_clear(port, PORT_STAT_LOW_SPEED);
+            usb_hub_port_set(port, PORT_STAT_HIGH_SPEED);
+        } else if (port->port.dev->speed == USB_SPEED_LOW) {
+            usb_hub_port_clear(port, PORT_STAT_HIGH_SPEED);
             usb_hub_port_set(port, PORT_STAT_LOW_SPEED);
         } else {
+            usb_hub_port_clear(port, PORT_STAT_HIGH_SPEED);
             usb_hub_port_clear(port, PORT_STAT_LOW_SPEED);
         }
     }
@@ -217,7 +270,7 @@ static void usb_hub_port_update_timer(void *opaque)
     int i;
 
     for (i = 0; i < s->num_ports; i++) {
-        notify |= usb_hub_port_update(&s->ports[i]);
+        notify |= usb_hub_port_update(s, &s->ports[i]);
     }
     if (notify) {
         usb_wakeup(s->intr, 0);
@@ -230,7 +283,7 @@ static void usb_hub_attach(USBPort *port1)
     USBHubPort *port = &s->ports[port1->index];
 
     trace_usb_hub_attach(s->dev.addr, port1->index + 1);
-    usb_hub_port_update(port);
+    usb_hub_port_update(s, port);
     usb_wakeup(s->intr, 0);
 }
 
@@ -318,7 +371,7 @@ static void usb_hub_handle_reset(USBDevice *dev)
         port->wPortStatus = 0;
         port->wPortChange = 0;
         usb_hub_port_set(port, PORT_STAT_POWER);
-        usb_hub_port_update(port);
+        usb_hub_port_update(s, port);
     }
 }
 
@@ -594,6 +647,19 @@ static void usb_hub_realize(USBDevice *dev, Error **errp)
     USBHubPort *port;
     int i;
 
+    switch (s->usb_version) {
+    case 1:
+        dev->usb_desc = &desc_hub;
+        break;
+    case 2:
+        dev->usb_desc = &desc_hub_v2;
+        break;
+    default:
+        error_setg(errp, "Unsupported usb version %d for usb hub",
+                   s->usb_version);
+        return;
+    }
+
     if (s->num_ports < 1 || s->num_ports > MAX_PORTS) {
         error_setg(errp, "num_ports (%d) out of range (1..%d)",
                    s->num_ports, MAX_PORTS);
@@ -614,7 +680,8 @@ static void usb_hub_realize(USBDevice *dev, Error **errp)
         port = &s->ports[i];
         usb_register_port(usb_bus_from_device(dev),
                           &port->port, s, i, &usb_hub_port_ops,
-                          USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL);
+                          USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL |
+                          ((s->usb_version == 2) ? USB_SPEED_MASK_HIGH : 0));
         usb_port_location(&port->port, dev->port, i+1);
     }
     usb_hub_handle_reset(dev);
@@ -651,7 +718,7 @@ static const VMStateDescription vmstate_usb_hub_port_timer = {
 
 static const VMStateDescription vmstate_usb_hub = {
     .name = "usb-hub",
-    .version_id = 1,
+    .version_id = 2,
     .minimum_version_id = 1,
     .fields = (const VMStateField[]) {
         VMSTATE_USB_DEVICE(dev, USBHubState),
@@ -668,6 +735,7 @@ static const VMStateDescription vmstate_usb_hub = {
 static const Property usb_hub_properties[] = {
     DEFINE_PROP_UINT32("ports", USBHubState, num_ports, 8),
     DEFINE_PROP_BOOL("port-power", USBHubState, port_power, false),
+    DEFINE_PROP_UINT32("usb_version", USBHubState, usb_version, 1),
 };
 
 static void usb_hub_class_initfn(ObjectClass *klass, void *data)
@@ -677,12 +745,12 @@ static void usb_hub_class_initfn(ObjectClass *klass, void *data)
 
     uc->realize        = usb_hub_realize;
     uc->product_desc   = "QEMU USB Hub";
-    uc->usb_desc       = &desc_hub;
     uc->find_device    = usb_hub_find_device;
     uc->handle_reset   = usb_hub_handle_reset;
     uc->handle_control = usb_hub_handle_control;
     uc->handle_data    = usb_hub_handle_data;
     uc->unrealize      = usb_hub_unrealize;
+    uc->handle_attach  = usb_desc_attach;
     set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
     dc->fw_name = "hub";
     dc->vmsd = &vmstate_usb_hub;
