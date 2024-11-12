@@ -31,6 +31,7 @@ static const hwaddr aspeed_soc_ast2400_memmap[] = {
     [ASPEED_DEV_FMC]    = 0x1E620000,
     [ASPEED_DEV_SPI1]   = 0x1E630000,
     [ASPEED_DEV_EHCI1]  = 0x1E6A1000,
+    [ASPEED_DEV_UHCI]   = 0x1E6B0000,
     [ASPEED_DEV_VIC]    = 0x1E6C0000,
     [ASPEED_DEV_SDMC]   = 0x1E6E0000,
     [ASPEED_DEV_SCU]    = 0x1E6E2000,
@@ -68,6 +69,7 @@ static const hwaddr aspeed_soc_ast2500_memmap[] = {
     [ASPEED_DEV_SPI2]   = 0x1E631000,
     [ASPEED_DEV_EHCI1]  = 0x1E6A1000,
     [ASPEED_DEV_EHCI2]  = 0x1E6A3000,
+    [ASPEED_DEV_UHCI]   = 0x1E6B0000,
     [ASPEED_DEV_VIC]    = 0x1E6C0000,
     [ASPEED_DEV_SDMC]   = 0x1E6E0000,
     [ASPEED_DEV_SCU]    = 0x1E6E2000,
@@ -107,6 +109,7 @@ static const int aspeed_soc_ast2400_irqmap[] = {
     [ASPEED_DEV_FMC]    = 19,
     [ASPEED_DEV_EHCI1]  = 5,
     [ASPEED_DEV_EHCI2]  = 13,
+    [ASPEED_DEV_UHCI]   = 14,
     [ASPEED_DEV_SDMC]   = 0,
     [ASPEED_DEV_SCU]    = 21,
     [ASPEED_DEV_ADC]    = 31,
@@ -198,6 +201,8 @@ static void aspeed_ast2400_soc_init(Object *obj)
         object_initialize_child(obj, "ehci[*]", &s->ehci[i],
                                 TYPE_PLATFORM_EHCI);
     }
+
+    object_initialize_child(obj, "uhci", &s->uhci, TYPE_ASPEED_UHCI);
 
     snprintf(typename, sizeof(typename), "aspeed.sdmc-%s", socname);
     object_initialize_child(obj, "sdmc", &s->sdmc, typename);
@@ -392,6 +397,15 @@ static void aspeed_ast2400_soc_realize(DeviceState *dev, Error **errp)
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->ehci[i]), 0,
                            aspeed_soc_get_irq(s, ASPEED_DEV_EHCI1 + i));
     }
+
+    /* UHCI */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->uhci), errp)) {
+        return;
+    }
+    aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->uhci), 0,
+                    sc->memmap[ASPEED_DEV_UHCI]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->uhci), 0,
+                       aspeed_soc_get_irq(s, ASPEED_DEV_UHCI));
 
     /* SDMC - SDRAM Memory Controller */
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->sdmc), errp)) {
