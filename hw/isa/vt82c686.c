@@ -26,7 +26,7 @@
 #include "hw/intc/i8259.h"
 #include "hw/irq.h"
 #include "hw/dma/i8257.h"
-#include "hw/usb/hcd-uhci.h"
+#include "hw/usb/hcd-uhci-pci.h"
 #include "hw/timer/i8254.h"
 #include "hw/rtc/mc146818rtc.h"
 #include "migration/vmstate.h"
@@ -600,7 +600,7 @@ struct ViaISAState {
     ViaSuperIOState via_sio;
     MC146818RtcState rtc;
     PCIIDEState ide;
-    UHCIState uhci[2];
+    UHCIPCIState uhci[2];
     ViaPMState pm;
     ViaAC97State ac97;
     PCIDevice mc97;
