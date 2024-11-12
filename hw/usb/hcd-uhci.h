@@ -32,6 +32,7 @@
 #include "qemu/timer.h"
 #include "hw/pci/pci_device.h"
 #include "hw/usb.h"
+#include "hw/sysbus.h"
 
 typedef struct UHCIQueue UHCIQueue;
 
@@ -42,9 +43,12 @@ typedef struct UHCIPort {
     uint16_t ctrl;
 } UHCIPort;
 
-typedef struct UHCIState {
-    PCIDevice dev;
-    MemoryRegion io_bar;
+typedef struct UHCIState UHCIState;
+
+struct UHCIState {
+    MemoryRegion mem;
+    AddressSpace *as;
+    void (*uhci_reset)(UHCIState *);
     USBBus bus; /* Note unused when we're a companion controller */
     uint16_t cmd; /* cmd register */
     uint16_t status;
@@ -72,24 +76,18 @@ typedef struct UHCIState {
     char *masterbus;
     uint32_t firstport;
     uint32_t maxframes;
-} UHCIState;
+};
 
-#define TYPE_UHCI "pci-uhci-usb"
-OBJECT_DECLARE_TYPE(UHCIState, UHCIPCIDeviceClass, UHCI)
+#define TYPE_UHCI "uhci-usb"
+OBJECT_DECLARE_TYPE(UHCIState, UHCIDeviceClass, UHCI)
 
-typedef struct UHCIInfo {
-    const char *name;
-    uint16_t   vendor_id;
-    uint16_t   device_id;
-    uint8_t    revision;
-    uint8_t    irq_pin;
-    void       (*realize)(PCIDevice *dev, Error **errp);
-    bool       unplug;
-    bool       notuser; /* disallow user_creatable */
-} UHCIInfo;
+extern const VMStateDescription vmstate_uhci_state;
 
 void uhci_data_class_init(ObjectClass *klass, void *data);
 void usb_uhci_common_realize(PCIDevice *dev, Error **errp);
+void usb_uhci_init(UHCIState *s, DeviceState *dev, Error **errp);
+void uhci_state_reset(UHCIState *s);
+void usb_uhci_exit(UHCIState *s);
 
 #define TYPE_PIIX3_USB_UHCI "piix3-usb-uhci"
 #define TYPE_PIIX4_USB_UHCI "piix4-usb-uhci"
