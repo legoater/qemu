@@ -1418,7 +1418,7 @@ static const MemoryRegionOps aspeed_gpio_ops = {
     .read       = aspeed_gpio_read,
     .write      = aspeed_gpio_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid.min_access_size = 4,
+    .valid.min_access_size = 1,
     .valid.max_access_size = 4,
 };
 
@@ -1426,7 +1426,7 @@ static const MemoryRegionOps aspeed_gpio_2700_ops = {
     .read       = aspeed_gpio_2700_read,
     .write      = aspeed_gpio_2700_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid.min_access_size = 4,
+    .valid.min_access_size = 1,
     .valid.max_access_size = 4,
 };
 
