@@ -242,7 +242,7 @@ static const MemoryRegionOps aspeed_wdt_ops = {
     .read = aspeed_wdt_read,
     .write = aspeed_wdt_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid.min_access_size = 4,
+    .valid.min_access_size = 1,
     .valid.max_access_size = 4,
     .valid.unaligned = false,
 };
