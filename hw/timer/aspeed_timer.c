@@ -606,6 +606,7 @@ static void aspeed_timer_realize(DeviceState *dev, Error **errp)
     int i;
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
     AspeedTimerCtrlState *s = ASPEED_TIMER(dev);
+    AspeedTimerClass *atc = ASPEED_TIMER_GET_CLASS(s);
 
     assert(s->scu);
 
@@ -613,7 +614,7 @@ static void aspeed_timer_realize(DeviceState *dev, Error **errp)
         aspeed_init_one_timer(s, i);
         sysbus_init_irq(sbd, &s->timers[i].irq);
     }
-    memory_region_init_io(&s->iomem, OBJECT(s), &aspeed_timer_ops, s,
+    memory_region_init_io(&s->iomem, OBJECT(s), atc->reg_ops, s,
                           TYPE_ASPEED_TIMER, 0x1000);
     sysbus_init_mmio(sbd, &s->iomem);
 }
@@ -707,6 +708,7 @@ static void aspeed_2400_timer_class_init(ObjectClass *klass, void *data)
     dc->desc = "ASPEED 2400 Timer";
     awc->read = aspeed_2400_timer_read;
     awc->write = aspeed_2400_timer_write;
+    awc->reg_ops = &aspeed_timer_ops;
 }
 
 static const TypeInfo aspeed_2400_timer_info = {
@@ -723,6 +725,7 @@ static void aspeed_2500_timer_class_init(ObjectClass *klass, void *data)
     dc->desc = "ASPEED 2500 Timer";
     awc->read = aspeed_2500_timer_read;
     awc->write = aspeed_2500_timer_write;
+    awc->reg_ops = &aspeed_timer_ops;
 }
 
 static const TypeInfo aspeed_2500_timer_info = {
@@ -739,6 +742,7 @@ static void aspeed_2600_timer_class_init(ObjectClass *klass, void *data)
     dc->desc = "ASPEED 2600 Timer";
     awc->read = aspeed_2600_timer_read;
     awc->write = aspeed_2600_timer_write;
+    awc->reg_ops = &aspeed_timer_ops;
 }
 
 static const TypeInfo aspeed_2600_timer_info = {
@@ -755,6 +759,7 @@ static void aspeed_1030_timer_class_init(ObjectClass *klass, void *data)
     dc->desc = "ASPEED 1030 Timer";
     awc->read = aspeed_2600_timer_read;
     awc->write = aspeed_2600_timer_write;
+    awc->reg_ops = &aspeed_timer_ops;
 }
 
 static const TypeInfo aspeed_1030_timer_info = {

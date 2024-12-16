@@ -73,6 +73,7 @@ struct AspeedTimerClass {
 
     uint64_t (*read)(AspeedTimerCtrlState *s, hwaddr offset);
     void (*write)(AspeedTimerCtrlState *s, hwaddr offset, uint64_t value);
+    const MemoryRegionOps *reg_ops;
 };
 
 #endif /* ASPEED_TIMER_H */
