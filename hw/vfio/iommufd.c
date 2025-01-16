@@ -28,14 +28,14 @@
 #include "exec/ram_addr.h"
 
 static int iommufd_cdev_map(const VFIOContainerBase *bcontainer, hwaddr iova,
-                            ram_addr_t size, void *vaddr, bool readonly)
+                            ram_addr_t size, void *vaddr, uint32_t flag)
 {
     const VFIOIOMMUFDContainer *container =
         container_of(bcontainer, VFIOIOMMUFDContainer, bcontainer);
 
     return iommufd_backend_map_dma(container->be,
                                    container->ioas_id,
-                                   iova, size, vaddr, readonly);
+                                   iova, size, vaddr, flag & VFIO_MRF_READONLY);
 }
 
 static int iommufd_cdev_unmap(const VFIOContainerBase *bcontainer,

@@ -176,7 +176,7 @@ static int vfio_legacy_dma_unmap(const VFIOContainerBase *bcontainer,
 }
 
 static int vfio_legacy_dma_map(const VFIOContainerBase *bcontainer, hwaddr iova,
-                               ram_addr_t size, void *vaddr, bool readonly)
+                               ram_addr_t size, void *vaddr, uint32_t flag)
 {
     const VFIOContainer *container = container_of(bcontainer, VFIOContainer,
                                                   bcontainer);
@@ -188,9 +188,11 @@ static int vfio_legacy_dma_map(const VFIOContainerBase *bcontainer, hwaddr iova,
         .size = size,
     };
 
-    if (!readonly) {
+    if (!(flag & VFIO_MRF_READONLY)) {
         map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
     }
+    if (flag & VFIO_MRF_RAMDEV)
+        map.flags |= VFIO_DMA_MAP_FLAG_MMIO;
 
     /*
      * Try the mapping, if it fails with EBUSY, unmap the region and try

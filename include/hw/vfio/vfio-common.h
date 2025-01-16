@@ -43,6 +43,10 @@ enum {
     VFIO_DEVICE_TYPE_AP = 3,
 };
 
+/* vfio memory region flag */
+#define VFIO_MRF_READONLY 0x1
+#define VFIO_MRF_RAMDEV   0x2
+
 typedef struct VFIOMmap {
     MemoryRegion mem;
     void *mmap;

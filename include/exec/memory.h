@@ -96,6 +96,7 @@ struct ReservedRegion {
  * @readonly: writes to this section are ignored
  * @nonvolatile: this section is non-volatile
  * @unmergeable: this section should not get merged with adjacent sections
+ * @ram_device: todo
  */
 struct MemoryRegionSection {
     Int128 size;
@@ -104,9 +105,14 @@ struct MemoryRegionSection {
     hwaddr offset_within_region;
     hwaddr offset_within_address_space;
     bool readonly;
+    bool ram_device;
     bool nonvolatile;
     bool unmergeable;
 };
+
+/* memory region flag */
+#define MRF_READONLY 0x1
+#define MRF_RAMDEV   0x2
 
 typedef struct IOMMUTLBEntry IOMMUTLBEntry;
 
@@ -734,7 +740,7 @@ void ram_discard_manager_unregister_listener(RamDiscardManager *rdm,
  * @iotlb: pointer to an #IOMMUTLBEntry
  * @vaddr: virtual address
  * @ram_addr: RAM address
- * @read_only: indicates if writes are allowed
+ * @flag: indicates if writes are allowed
  * @mr_has_discard_manager: indicates memory is controlled by a
  *                          RamDiscardManager
  * @errp: pointer to Error*, to store an error if it happens.
@@ -742,7 +748,7 @@ void ram_discard_manager_unregister_listener(RamDiscardManager *rdm,
  * Return: true on success, else false setting @errp with error.
  */
 bool memory_get_xlat_addr(IOMMUTLBEntry *iotlb, void **vaddr,
-                          ram_addr_t *ram_addr, bool *read_only,
+                          ram_addr_t *ram_addr, uint32_t *flag,
                           bool *mr_has_discard_manager, Error **errp);
 
 typedef struct CoalescedMemoryRange CoalescedMemoryRange;

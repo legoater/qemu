@@ -247,31 +247,42 @@ static bool vfio_listener_skipped_section(MemoryRegionSection *section)
 
 /* Called with rcu_read_lock held.  */
 static bool vfio_get_xlat_addr(IOMMUTLBEntry *iotlb, void **vaddr,
-                               ram_addr_t *ram_addr, bool *read_only,
+                               ram_addr_t *ram_addr, uint32_t *flag,
                                Error **errp)
 {
     bool ret, mr_has_discard_manager;
+    uint32_t mr_flag = 0;
 
-    ret = memory_get_xlat_addr(iotlb, vaddr, ram_addr, read_only,
+    ret = memory_get_xlat_addr(iotlb, vaddr, ram_addr, &mr_flag,
                                &mr_has_discard_manager, errp);
-    if (ret && mr_has_discard_manager) {
-        /*
-         * Malicious VMs might trigger discarding of IOMMU-mapped memory. The
-         * pages will remain pinned inside vfio until unmapped, resulting in a
-         * higher memory consumption than expected. If memory would get
-         * populated again later, there would be an inconsistency between pages
-         * pinned by vfio and pages seen by QEMU. This is the case until
-         * unmapped from the IOMMU (e.g., during device reset).
-         *
-         * With malicious guests, we really only care about pinning more memory
-         * than expected. RLIMIT_MEMLOCK set for the user/process can never be
-         * exceeded and can be used to mitigate this problem.
-         */
-        warn_report_once("Using vfio with vIOMMUs and coordinated discarding of"
-                         " RAM (e.g., virtio-mem) works, however, malicious"
-                         " guests can trigger pinning of more memory than"
-                         " intended via an IOMMU. It's possible to mitigate "
-                         " by setting/adjusting RLIMIT_MEMLOCK.");
+    if (ret) {
+        if (flag) {
+            if (mr_flag & MRF_READONLY)
+                *flag |= VFIO_MRF_READONLY;
+
+            if (mr_flag & MRF_RAMDEV)
+                *flag |= VFIO_MRF_RAMDEV;
+        }
+
+        if (mr_has_discard_manager) {
+            /*
+             * Malicious VMs might trigger discarding of IOMMU-mapped memory. The
+             * pages will remain pinned inside vfio until unmapped, resulting in a
+             * higher memory consumption than expected. If memory would get
+             * populated again later, there would be an inconsistency between pages
+             * pinned by vfio and pages seen by QEMU. This is the case until
+             * unmapped from the IOMMU (e.g., during device reset).
+             *
+             * With malicious guests, we really only care about pinning more memory
+             * than expected. RLIMIT_MEMLOCK set for the user/process can never be
+             * exceeded and can be used to mitigate this problem.
+             */
+            warn_report_once("Using vfio with vIOMMUs and coordinated discarding of"
+                             " RAM (e.g., virtio-mem) works, however, malicious"
+                             " guests can trigger pinning of more memory than"
+                             " intended via an IOMMU. It's possible to mitigate "
+                             " by setting/adjusting RLIMIT_MEMLOCK.");
+        }
     }
     return ret;
 }
@@ -298,9 +309,9 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
     rcu_read_lock();
 
     if ((iotlb->perm & IOMMU_RW) != IOMMU_NONE) {
-        bool read_only;
+        uint32_t flag = 0;
 
-        if (!vfio_get_xlat_addr(iotlb, &vaddr, NULL, &read_only, &local_err)) {
+        if (!vfio_get_xlat_addr(iotlb, &vaddr, NULL, &flag, &local_err)) {
             error_report_err(local_err);
             goto out;
         }
@@ -313,7 +324,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
          */
         ret = vfio_container_dma_map(bcontainer, iova,
                                      iotlb->addr_mask + 1, vaddr,
-                                     read_only);
+                                     flag);
         if (ret) {
             error_report("vfio_container_dma_map(%p, 0x%"HWADDR_PRIx", "
                          "0x%"HWADDR_PRIx", %p) = %d (%s)",
@@ -363,6 +374,7 @@ static int vfio_ram_discard_notify_populate(RamDiscardListener *rdl,
                        int128_get64(section->size);
     hwaddr start, next, iova;
     void *vaddr;
+    uint32_t flag = 0;
     int ret;
 
     /*
@@ -377,8 +389,10 @@ static int vfio_ram_discard_notify_populate(RamDiscardListener *rdl,
                section->offset_within_address_space;
         vaddr = memory_region_get_ram_ptr(section->mr) + start;
 
+        flag |= section->readonly? VFIO_MRF_READONLY: 0;
+        flag |= section->ram_device? VFIO_MRF_RAMDEV: 0;
         ret = vfio_container_dma_map(bcontainer, iova, next - start,
-                                     vaddr, section->readonly);
+                                     vaddr, flag);
         if (ret) {
             /* Rollback */
             vfio_ram_discard_notify_discard(rdl, section);
@@ -563,6 +577,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
     hwaddr iova, end;
     Int128 llend, llsize;
     void *vaddr;
+    uint32_t flag = 0;
     int ret;
     Error *err = NULL;
 
@@ -661,8 +676,10 @@ static void vfio_listener_region_add(MemoryListener *listener,
         }
     }
 
+    flag |= section->readonly? VFIO_MRF_READONLY: 0;
+    flag |= section->ram_device? VFIO_MRF_RAMDEV: 0;
     ret = vfio_container_dma_map(bcontainer, iova, int128_get64(llsize),
-                                 vaddr, section->readonly);
+                                 vaddr, flag);
     if (ret) {
         error_setg(&err, "vfio_container_dma_map(%p, 0x%"HWADDR_PRIx", "
                    "0x%"HWADDR_PRIx", %p) = %d (%s)",

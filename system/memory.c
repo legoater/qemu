@@ -223,6 +223,7 @@ struct FlatRange {
     uint8_t dirty_log_mask;
     bool romd_mode;
     bool readonly;
+    bool ram_device;
     bool nonvolatile;
     bool unmergeable;
 };
@@ -240,6 +241,7 @@ section_from_flat_range(FlatRange *fr, FlatView *fv)
         .size = fr->addr.size,
         .offset_within_address_space = int128_get64(fr->addr.start),
         .readonly = fr->readonly,
+        .ram_device = fr->ram_device,
         .nonvolatile = fr->nonvolatile,
         .unmergeable = fr->unmergeable,
     };
@@ -252,6 +254,7 @@ static bool flatrange_equal(FlatRange *a, FlatRange *b)
         && a->offset_in_region == b->offset_in_region
         && a->romd_mode == b->romd_mode
         && a->readonly == b->readonly
+        && a->ram_device == b->ram_device
         && a->nonvolatile == b->nonvolatile
         && a->unmergeable == b->unmergeable;
 }
@@ -657,6 +660,7 @@ static void render_memory_region(FlatView *view,
     fr.dirty_log_mask = memory_region_get_dirty_log_mask(mr);
     fr.romd_mode = mr->romd_mode;
     fr.readonly = readonly;
+    fr.ram_device = mr->ram_device;
     fr.nonvolatile = nonvolatile;
     fr.unmergeable = unmergeable;
 
@@ -2184,7 +2188,7 @@ void ram_discard_manager_unregister_listener(RamDiscardManager *rdm,
 
 /* Called with rcu_read_lock held.  */
 bool memory_get_xlat_addr(IOMMUTLBEntry *iotlb, void **vaddr,
-                          ram_addr_t *ram_addr, bool *read_only,
+                          ram_addr_t *ram_addr, uint32_t *flag,
                           bool *mr_has_discard_manager, Error **errp)
 {
     MemoryRegion *mr;
@@ -2246,8 +2250,9 @@ bool memory_get_xlat_addr(IOMMUTLBEntry *iotlb, void **vaddr,
         *ram_addr = memory_region_get_ram_addr(mr) + xlat;
     }
 
-    if (read_only) {
-        *read_only = !writable || mr->readonly;
+    if (flag) {
+        *flag |= (!writable || mr->readonly)? MRF_READONLY: 0;
+        *flag |= mr->ram_device? MRF_RAMDEV: 0;
     }
 
     return true;

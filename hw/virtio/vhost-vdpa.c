@@ -226,15 +226,15 @@ static void vhost_vdpa_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
     }
 
     if ((iotlb->perm & IOMMU_RW) != IOMMU_NONE) {
-        bool read_only;
+        uint32_t flag;
 
-        if (!memory_get_xlat_addr(iotlb, &vaddr, NULL, &read_only, NULL,
+        if (!memory_get_xlat_addr(iotlb, &vaddr, NULL, &flag, NULL,
                                   &local_err)) {
             error_report_err(local_err);
             return;
         }
         ret = vhost_vdpa_dma_map(s, VHOST_VDPA_GUEST_PA_ASID, iova,
-                                 iotlb->addr_mask + 1, vaddr, read_only);
+                                 iotlb->addr_mask + 1, vaddr, flag & MRF_READONLY);
         if (ret) {
             error_report("vhost_vdpa_dma_map(%p, 0x%" HWADDR_PRIx ", "
                          "0x%" HWADDR_PRIx ", %p) = %d (%m)",
