@@ -2965,6 +2965,7 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     int i, ret;
     char uuid[UUID_STR_LEN];
     g_autofree char *name = NULL;
+    uint16_t cmd;
 
     if (vbasedev->fd < 0 && !vbasedev->sysfsdev) {
         if (!(~vdev->host.domain || ~vdev->host.bus ||
@@ -3016,6 +3017,20 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     }
 
     if (!vfio_populate_device(vdev, errp)) {
+        goto error;
+    }
+
+    /* Clear decode and bus master for initial handoff */
+    ret = pread(vbasedev->fd, &cmd, 2, vdev->config_offset + PCI_COMMAND);
+    if (ret != 2) {
+        error_setg_errno(errp, errno, "failed to read PCI COMMAND");
+        goto error;
+    }
+
+    cmd &= ~(PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
+    ret = pwrite(vbasedev->fd, &cmd, 2, vdev->config_offset + PCI_COMMAND);
+    if (ret != 2) {
+        error_setg_errno(errp, errno, "failed to write PCI COMMAND");
         goto error;
     }
 
