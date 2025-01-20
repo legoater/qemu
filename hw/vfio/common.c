@@ -44,6 +44,8 @@
 #include "migration/qemu-file.h"
 #include "system/tpm.h"
 
+#include "hw/core/cpu.h"
+
 VFIODeviceList vfio_device_list =
     QLIST_HEAD_INITIALIZER(vfio_device_list);
 static QLIST_HEAD(, VFIOAddressSpace) vfio_address_spaces =
@@ -1543,6 +1545,17 @@ retry:
     return info;
 }
 
+static void vfio_check_address_space(VFIODevice *vbasedev)
+{
+    uint32_t iommu_aw_bits = vfio_device_get_aw_bits(vbasedev);
+    uint32_t cpu_aw_bits = cpu_get_phys_bits(first_cpu);
+
+    if (cpu_aw_bits && cpu_aw_bits > iommu_aw_bits) {
+        warn_report_once("Host physical bits (%u) larger than host IOMMU "
+                         "address width (%u) ", cpu_aw_bits, iommu_aw_bits);
+    }
+}
+
 bool vfio_attach_device(char *name, VFIODevice *vbasedev,
                         AddressSpace *as, Error **errp)
 {
@@ -1568,6 +1581,7 @@ bool vfio_attach_device(char *name, VFIODevice *vbasedev,
         return false;
     }
 
+    vfio_check_address_space(vbasedev);
     return true;
 }
 
