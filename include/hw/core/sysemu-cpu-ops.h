@@ -82,6 +82,12 @@ typedef struct SysemuCPUOps {
     bool (*virtio_is_big_endian)(CPUState *cpu);
 
     /**
+     * @get_phys_bits: Callback to return the physical address space
+     * width of a CPU.
+     */
+    uint32_t (*get_phys_bits)(const CPUState *cpu);
+
+    /**
      * @legacy_vmsd: Legacy state for migration.
      *               Do not use in new targets, use #DeviceClass::vmsd instead.
      */

@@ -60,6 +60,17 @@ hwaddr cpu_get_phys_page_attrs_debug(CPUState *cpu, vaddr addr,
     return cc->sysemu_ops->get_phys_page_debug(cpu, addr);
 }
 
+uint32_t cpu_get_phys_bits(const CPUState *cpu)
+{
+    CPUClass *cc = CPU_GET_CLASS(cpu);
+
+    if (cc->sysemu_ops->get_phys_bits) {
+        return cc->sysemu_ops->get_phys_bits(cpu);
+    }
+
+    return 0 /* TODO: use TARGET_PHYS_ADDR_SPACE_BITS ? */ ;
+}
+
 hwaddr cpu_get_phys_page_debug(CPUState *cpu, vaddr addr)
 {
     MemTxAttrs attrs = {};
