@@ -17,8 +17,8 @@
 OBJECT_DECLARE_TYPE(AspeedINTCState, AspeedINTCClass, ASPEED_INTC)
 
 #define ASPEED_INTC_NR_REGS (0x2000 >> 2)
-#define ASPEED_INTC_MAX_INPINS 9
-#define ASPEED_INTC_MAX_OUTPINS 9
+#define ASPEED_INTC_MAX_INPINS 10
+#define ASPEED_INTC_MAX_OUTPINS 19
 
 typedef struct AspeedINTCIRQ {
     int inpin_idx;
