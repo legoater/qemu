@@ -96,6 +96,13 @@ class AST2x00MachineSDK(QemuSystemTest):
             'cfbbd1cce72f2a3b73b9080c41eecdadebb7077fba4f7806d72ac99f3e84b74a')
         self.start_ast2700_test('ast2700-a0-default')
 
+    def test_aarch64_ast2700a1_evb_sdk_v09_05(self):
+        self.set_machine('ast2700a1-evb')
+
+        self.extra_aspeed_archive('v09.05', 'ast2700-default-obmc.tar.gz',
+            'c1f4496aec06743c812a6e9a1a18d032f34d62f3ddb6956e924fef62aa2046a5')
+        self.start_ast2700_test('ast2700-default')
+
 
 if __name__ == '__main__':
     QemuSystemTest.main()
