@@ -38,14 +38,14 @@ class AST2500Machine(AspeedTest):
 
         self.do_test_arm_aspeed_buildroot_poweroff()
 
-    ASSET_SDK_V806_AST2500 = Asset(
-        'https://github.com/AspeedTech-BMC/openbmc/releases/download/v08.06/ast2500-default-obmc.tar.gz',
-        'e1755f3cadff69190438c688d52dd0f0d399b70a1e14b1d3d5540fc4851d38ca')
+    ASSET_SDK_V905_AST2500 = Asset(
+        'https://github.com/AspeedTech-BMC/openbmc/releases/download/v09.05/ast2500-default-obmc.tar.gz',
+        '3838651dbb6ec2dfb4d021edbc1dc993ce9db51ed382ea748b3b7d6a13e2ff2f')
 
     def test_arm_ast2500_evb_sdk(self):
         self.set_machine('ast2500-evb')
 
-        self.archive_extract(self.ASSET_SDK_V806_AST2500)
+        self.archive_extract(self.ASSET_SDK_V905_AST2500)
 
         self.do_test_arm_aspeed_sdk_start(
             self.scratch_file("ast2500-default", "image-bmc"))
