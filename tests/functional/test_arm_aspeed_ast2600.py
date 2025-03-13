@@ -135,5 +135,20 @@ class AST2600Machine(AspeedTest):
         exec_command_and_wait_for_pattern(self,
              '/sbin/hwclock -f /dev/rtc1', year);
 
+    ASSET_SDK_V905_AST2600_515 = Asset(
+        'https://github.com/AspeedTech-BMC/openbmc/releases/download/v09.05/ast2600-default-515-obmc.tar.gz',
+        '5501a032f79e217aeb351302da338e5d3faec45315b46e4aae9661583669ceaa')
+
+    def test_arm_ast2600_evb_sdk_515(self):
+        self.set_machine('ast2600-evb')
+
+        self.archive_extract(self.ASSET_SDK_V905_AST2600_515)
+
+        self.do_test_arm_aspeed_sdk_start(
+            self.scratch_file("ast2600-default-515", "image-bmc"))
+
+        self.wait_for_console_pattern('ast2600-default-515 login:')
+
+
 if __name__ == '__main__':
     AspeedTest.main()
