@@ -60,6 +60,24 @@ static const int aspeed_soc_ast27x0a0ssp_irqmap[] = {
     [ASPEED_DEV_TIMER1]    = 16,
 };
 
+static const int aspeed_soc_ast27x0a1ssp_irqmap[] = {
+    [ASPEED_DEV_SCU]       = 12,
+    [ASPEED_DEV_UART0]     = 164,
+    [ASPEED_DEV_UART1]     = 164,
+    [ASPEED_DEV_UART2]     = 164,
+    [ASPEED_DEV_UART3]     = 164,
+    [ASPEED_DEV_UART4]     = 8,
+    [ASPEED_DEV_UART5]     = 164,
+    [ASPEED_DEV_UART6]     = 164,
+    [ASPEED_DEV_UART7]     = 164,
+    [ASPEED_DEV_UART8]     = 164,
+    [ASPEED_DEV_UART9]     = 164,
+    [ASPEED_DEV_UART10]    = 164,
+    [ASPEED_DEV_UART11]    = 164,
+    [ASPEED_DEV_UART12]    = 164,
+    [ASPEED_DEV_TIMER1]    = 16,
+};
+
 /* SSPINT 164 */
 static const int ast2700_ssp132_ssp164_intcmap[] = {
     [ASPEED_DEV_UART0]     = 7,
@@ -128,6 +146,46 @@ static qemu_irq aspeed_soc_ast27x0ssp_get_irq(AspeedSoCState *s, int dev)
 }
 
 static void aspeed_soc_ast27x0a0ssp_init(Object *obj)
+{
+    Aspeed27x0SSPSoCState *a = ASPEED27X0SSP_SOC(obj);
+    AspeedSoCState *s = ASPEED_SOC(obj);
+    AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
+    char socname[8];
+    char typename[64];
+    int i;
+
+    if (sscanf(object_get_typename(obj), "%7s", socname) != 1) {
+        g_assert_not_reached();
+    }
+
+    object_initialize_child(obj, "armv7m", &a->armv7m, TYPE_ARMV7M);
+
+    s->sysclk = qdev_init_clock_in(DEVICE(s), "sysclk", NULL, NULL, 0);
+
+    snprintf(typename, sizeof(typename), "aspeed.scu-%s", socname);
+    object_initialize_child(obj, "scu", &s->scu, typename);
+    qdev_prop_set_uint32(DEVICE(&s->scu), "silicon-rev", sc->silicon_rev);
+
+    for (i = 0; i < sc->uarts_num; i++) {
+        object_initialize_child(obj, "uart[*]", &s->uart[i], TYPE_SERIAL_MM);
+    }
+
+    object_initialize_child(obj, "intc0", &a->intc[0],
+                            TYPE_ASPEED_2700SSP_INTC);
+    object_initialize_child(obj, "intc1", &a->intc[1],
+                            TYPE_ASPEED_2700SSP_INTCIO);
+
+    object_initialize_child(obj, "timerctrl", &s->timerctrl,
+                            TYPE_UNIMPLEMENTED_DEVICE);
+    object_initialize_child(obj, "ipc0", &a->ipc[0],
+                            TYPE_UNIMPLEMENTED_DEVICE);
+    object_initialize_child(obj, "ipc1", &a->ipc[1],
+                            TYPE_UNIMPLEMENTED_DEVICE);
+    object_initialize_child(obj, "scuio", &a->scuio,
+                            TYPE_UNIMPLEMENTED_DEVICE);
+}
+
+static void aspeed_soc_ast27x0a1ssp_init(Object *obj)
 {
     Aspeed27x0SSPSoCState *a = ASPEED27X0SSP_SOC(obj);
     AspeedSoCState *s = ASPEED_SOC(obj);
@@ -292,6 +350,34 @@ static void aspeed_soc_ast27x0a0ssp_class_init(ObjectClass *klass, void *data)
     sc->get_irq = aspeed_soc_ast27x0ssp_get_irq;
 }
 
+static void aspeed_soc_ast27x0a1ssp_class_init(ObjectClass *klass, void *data)
+{
+    static const char * const valid_cpu_types[] = {
+        ARM_CPU_TYPE_NAME("cortex-m4"), /* TODO: cortex-m4f */
+        NULL
+    };
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    AspeedSoCClass *sc = ASPEED_SOC_CLASS(dc);
+
+    /* Reason: The Aspeed SoC can only be instantiated from a board */
+    dc->user_creatable = false;
+    dc->realize = aspeed_soc_ast27x0ssp_realize;
+
+    sc->valid_cpu_types = valid_cpu_types;
+    sc->silicon_rev = AST2700_A1_SILICON_REV;
+    sc->sram_size = AST2700_SSP_RAM_SIZE;
+    sc->spis_num = 0;
+    sc->ehcis_num = 0;
+    sc->wdts_num = 0;
+    sc->macs_num = 0;
+    sc->uarts_num = 13;
+    sc->uarts_base = ASPEED_DEV_UART0;
+    sc->irqmap = aspeed_soc_ast27x0a1ssp_irqmap;
+    sc->memmap = aspeed_soc_ast27x0ssp_memmap;
+    sc->num_cpus = 1;
+    sc->get_irq = aspeed_soc_ast27x0ssp_get_irq;
+}
+
 static const TypeInfo aspeed_soc_ast27x0ssp_types[] = {
     {
         .name           = TYPE_ASPEED27X0SSP_SOC,
@@ -303,6 +389,11 @@ static const TypeInfo aspeed_soc_ast27x0ssp_types[] = {
         .parent         = TYPE_ASPEED27X0SSP_SOC,
         .instance_init  = aspeed_soc_ast27x0a0ssp_init,
         .class_init     = aspeed_soc_ast27x0a0ssp_class_init,
+    }, {
+        .name           = "ast2700ssp-a1",
+        .parent         = TYPE_ASPEED27X0SSP_SOC,
+        .instance_init  = aspeed_soc_ast27x0a1ssp_init,
+        .class_init     = aspeed_soc_ast27x0a1ssp_class_init,
     },
 };
 
