@@ -65,12 +65,6 @@ int vfio_kvm_device_fd = -1;
  * Device state interfaces
  */
 
-
-bool vfio_viommu_preset(VFIODevice *vbasedev)
-{
-    return vbasedev->bcontainer->space->as != &address_space_memory;
-}
-
 static void vfio_set_migration_error(int ret)
 {
     if (migration_is_running()) {
