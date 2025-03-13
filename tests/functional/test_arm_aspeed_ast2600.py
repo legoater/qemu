@@ -150,5 +150,20 @@ class AST2600Machine(AspeedTest):
             'lspci -s 0001:81:00.0',
             '0001:81:00.0 Ethernet controller: Intel Corporation 82574L Gigabit Network Connection')
 
+    ASSET_SDK_V906_AST2600_515 = Asset(
+        'https://github.com/AspeedTech-BMC/openbmc/releases/download/v09.06/ast2600-default-515-obmc.tar.gz',
+        '5501a032f79e217aeb351302da338e5d3faec45315b46e4aae9661583669ceaa')
+
+    def test_arm_ast2600_evb_sdk_515(self):
+        self.set_machine('ast2600-evb')
+
+        self.archive_extract(self.ASSET_SDK_V906_AST2600_515)
+
+        self.do_test_arm_aspeed_sdk_start(
+            self.scratch_file("ast2600-default-515", "image-bmc"))
+
+        self.wait_for_console_pattern('ast2600-default-515 login:')
+
+
 if __name__ == '__main__':
     AspeedTest.main()
