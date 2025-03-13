@@ -14,6 +14,9 @@ from qemu_test import exec_command_and_wait_for_pattern
 
 
 class AST2700fcMachineSDK(QemuSystemTest):
+    ASSET_SDK_V905_AST2700 = Asset(
+            'https://github.com/AspeedTech-BMC/openbmc/releases/download/v09.05/ast2700-default-obmc.tar.gz',
+            'c1f4496aec06743c812a6e9a1a18d032f34d62f3ddb6956e924fef62aa2046a5')
     ASSET_SDK_V905_AST2700_A0 = Asset(
             'https://github.com/AspeedTech-BMC/openbmc/releases/download/v09.05/ast2700-a0-default-obmc.tar.gz',
             'cfbbd1cce72f2a3b73b9080c41eecdadebb7077fba4f7806d72ac99f3e84b74a')
@@ -81,10 +84,16 @@ class AST2700fcMachineSDK(QemuSystemTest):
             self.vm.add_args('-device',
                              f'loader,addr=0x430000000,cpu-num={i}')
 
-        load_elf_list = {
-            'ssp': self.scratch_file('ast2700-a0-ssp-tsp', 'ast2700-ssp.elf'),
-            'tsp': self.scratch_file('ast2700-a0-ssp-tsp', 'ast2700-tsp.elf')
-        }
+        if name == 'ast2700-a0-default':
+            load_elf_list = {
+                'ssp': self.scratch_file('ast2700-a0-ssp-tsp', 'ast2700-ssp.elf'),
+                'tsp': self.scratch_file('ast2700-a0-ssp-tsp', 'ast2700-tsp.elf')
+            }
+        else:
+            load_elf_list = {
+                'ssp': self.scratch_file(name, 'ast2700-ssp.elf'),
+                'tsp': self.scratch_file(name, 'ast2700-tsp.elf')
+            }
 
         for cpu_num, key in enumerate(load_elf_list, start=4):
             file = load_elf_list[key]
@@ -119,14 +128,27 @@ class AST2700fcMachineSDK(QemuSystemTest):
         exec_command_and_wait_for_pattern(self, '\012', 'ssp:~$')
         exec_command_and_wait_for_pattern(self, 'version',
                                           'Zephyr version 3.7.1')
-        exec_command_and_wait_for_pattern(self, 'md 72c02000 1',
-                                          '[72c02000] 06000103')
+        if name == 'ast2700-a0-default':
+            exec_command_and_wait_for_pattern(self, 'md 72c02000 1',
+                                              '[72c02000] 06000103')
+        else:
+            exec_command_and_wait_for_pattern(self, 'md 72c02000 1',
+                                              '[72c02000] 06010103')
         self.do_test_aarch64_ast2700fc_tsp_start()
         exec_command_and_wait_for_pattern(self, '\012', 'tsp:~$')
         exec_command_and_wait_for_pattern(self, 'version',
                                           'Zephyr version 3.7.1')
-        exec_command_and_wait_for_pattern(self, 'md 72c02000 1',
-                                          '[72c02000] 06000103')
+        if name == 'ast2700-a0-default':
+            exec_command_and_wait_for_pattern(self, 'md 72c02000 1',
+                                              '[72c02000] 06000103')
+        else:
+            exec_command_and_wait_for_pattern(self, 'md 72c02000 1',
+                                              '[72c02000] 06010103')
+
+    def test_aarch64_ast2700fc_sdk_v09_05(self):
+        self.set_machine('ast2700fc-a1')
+        self.archive_extract(self.ASSET_SDK_V905_AST2700)
+        self.start_ast2700fc_test('ast2700-default')
 
     def test_aarch64_ast2700fc_a0_sdk_v09_05(self):
         self.set_machine('ast2700fc-a0')
