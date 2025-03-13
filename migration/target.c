@@ -11,7 +11,7 @@
 #include CONFIG_DEVICES
 
 #ifdef CONFIG_VFIO
-#include "hw/vfio/vfio-common.h"
+#include "hw/vfio/vfio-migration.h"
 #endif
 
 #ifdef CONFIG_VFIO
