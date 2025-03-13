@@ -31,6 +31,7 @@
 #include "pci.h"
 #include "trace.h"
 #include "hw/hw.h"
+#include "migration.h"
 
 /*
  * This is an arbitrary size based on migration of mlx5 devices, where typically
@@ -1221,4 +1222,20 @@ void vfio_migration_exit(VFIODevice *vbasedev)
     }
 
     migrate_del_blocker(&vbasedev->migration_blocker);
+}
+
+bool vfio_device_state_is_running(VFIODevice *vbasedev)
+{
+    VFIOMigration *migration = vbasedev->migration;
+
+    return migration->device_state == VFIO_DEVICE_STATE_RUNNING ||
+           migration->device_state == VFIO_DEVICE_STATE_RUNNING_P2P;
+}
+
+bool vfio_device_state_is_precopy(VFIODevice *vbasedev)
+{
+    VFIOMigration *migration = vbasedev->migration;
+
+    return migration->device_state == VFIO_DEVICE_STATE_PRE_COPY ||
+           migration->device_state == VFIO_DEVICE_STATE_PRE_COPY_P2P;
 }

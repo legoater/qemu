@@ -44,6 +44,7 @@
 #include "migration/qemu-file.h"
 #include "system/tcg.h"
 #include "system/tpm.h"
+#include "migration.h"
 
 VFIODeviceList vfio_device_list =
     QLIST_HEAD_INITIALIZER(vfio_device_list);
@@ -70,22 +71,6 @@ static void vfio_set_migration_error(int ret)
     if (migration_is_running()) {
         migration_file_set_error(ret, NULL);
     }
-}
-
-bool vfio_device_state_is_running(VFIODevice *vbasedev)
-{
-    VFIOMigration *migration = vbasedev->migration;
-
-    return migration->device_state == VFIO_DEVICE_STATE_RUNNING ||
-           migration->device_state == VFIO_DEVICE_STATE_RUNNING_P2P;
-}
-
-bool vfio_device_state_is_precopy(VFIODevice *vbasedev)
-{
-    VFIOMigration *migration = vbasedev->migration;
-
-    return migration->device_state == VFIO_DEVICE_STATE_PRE_COPY ||
-           migration->device_state == VFIO_DEVICE_STATE_PRE_COPY_P2P;
 }
 
 static bool vfio_devices_all_device_dirty_tracking_started(

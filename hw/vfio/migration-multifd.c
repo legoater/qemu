@@ -22,6 +22,7 @@
 #include "io/channel-buffer.h"
 #include "migration/qemu-file.h"
 #include "migration-multifd.h"
+#include "migration.h"
 #include "trace.h"
 
 #define VFIO_DEVICE_STATE_CONFIG_STATE (1)
