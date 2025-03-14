@@ -130,7 +130,7 @@ static bool vfio_display_edid_init(VFIOPCIDevice *vdev, Error **errp)
     int fd = vdev->vbasedev.fd;
     int ret;
 
-    ret = vfio_get_dev_region_info(&vdev->vbasedev,
+    ret = vfio_device_get_region_info_type(&vdev->vbasedev,
                                    VFIO_REGION_TYPE_GFX,
                                    VFIO_REGION_SUBTYPE_GFX_EDID,
                                    &dpy->edid_info);
