@@ -45,6 +45,7 @@
 #include "migration/qemu-file.h"
 #include "system/iommufd.h"
 #include "migration.h"
+#include "hw/vfio/vfio-region.h"
 
 #define TYPE_VFIO_PCI_NOHOTPLUG "vfio-pci-nohotplug"
 

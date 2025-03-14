@@ -26,6 +26,7 @@
 #include "hw/qdev-properties.h"
 #include "pci.h"
 #include "pci-quirks.h"
+#include "hw/vfio/vfio-region.h"
 #include "trace.h"
 
 /*
