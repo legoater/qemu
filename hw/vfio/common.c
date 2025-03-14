@@ -36,7 +36,6 @@
 #include "qemu/main-loop.h"
 #include "qemu/range.h"
 #include "system/kvm.h"
-#include "system/reset.h"
 #include "system/runstate.h"
 #include "trace.h"
 #include "qapi/error.h"
@@ -48,8 +47,6 @@
 
 VFIODeviceList vfio_device_list =
     QLIST_HEAD_INITIALIZER(vfio_device_list);
-static QLIST_HEAD(, VFIOAddressSpace) vfio_address_spaces =
-    QLIST_HEAD_INITIALIZER(vfio_address_spaces);
 
 #ifdef CONFIG_KVM
 /*
@@ -1304,24 +1301,6 @@ const MemoryListener vfio_memory_listener = {
     .log_sync = vfio_listener_log_sync,
 };
 
-void vfio_reset_handler(void *opaque)
-{
-    VFIODevice *vbasedev;
-
-    trace_vfio_reset_handler();
-    QLIST_FOREACH(vbasedev, &vfio_device_list, global_next) {
-        if (vbasedev->dev->realized) {
-            vbasedev->ops->vfio_compute_needs_reset(vbasedev);
-        }
-    }
-
-    QLIST_FOREACH(vbasedev, &vfio_device_list, global_next) {
-        if (vbasedev->dev->realized && vbasedev->needs_reset) {
-            vbasedev->ops->vfio_hot_reset_multi(vbasedev);
-        }
-    }
-}
-
 int vfio_kvm_device_add_fd(int fd, Error **errp)
 {
 #ifdef CONFIG_KVM
@@ -1378,51 +1357,6 @@ int vfio_kvm_device_del_fd(int fd, Error **errp)
     }
 #endif
     return 0;
-}
-
-VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
-{
-    VFIOAddressSpace *space;
-
-    QLIST_FOREACH(space, &vfio_address_spaces, list) {
-        if (space->as == as) {
-            return space;
-        }
-    }
-
-    /* No suitable VFIOAddressSpace, create a new one */
-    space = g_malloc0(sizeof(*space));
-    space->as = as;
-    QLIST_INIT(&space->containers);
-
-    if (QLIST_EMPTY(&vfio_address_spaces)) {
-        qemu_register_reset(vfio_reset_handler, NULL);
-    }
-
-    QLIST_INSERT_HEAD(&vfio_address_spaces, space, list);
-
-    return space;
-}
-
-void vfio_put_address_space(VFIOAddressSpace *space)
-{
-    if (!QLIST_EMPTY(&space->containers)) {
-        return;
-    }
-
-    QLIST_REMOVE(space, list);
-    g_free(space);
-
-    if (QLIST_EMPTY(&vfio_address_spaces)) {
-        qemu_unregister_reset(vfio_reset_handler, NULL);
-    }
-}
-
-void vfio_address_space_insert(VFIOAddressSpace *space,
-                               VFIOContainerBase *bcontainer)
-{
-    QLIST_INSERT_HEAD(&space->containers, bcontainer, next);
-    bcontainer->space = space;
 }
 
 struct vfio_device_info *vfio_get_device_info(int fd)
