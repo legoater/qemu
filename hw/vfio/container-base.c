@@ -15,7 +15,7 @@
 #include "qemu/error-report.h"
 #include "system/reset.h"
 #include "hw/vfio/vfio-container-base.h"
-#include "hw/vfio/vfio-common.h" /* for vfio_device_list */
+#include "hw/vfio/vfio-device.h" /* for vfio_device_list */
 #include "trace.h"
 
 static QLIST_HEAD(, VFIOAddressSpace) vfio_address_spaces =
