@@ -34,6 +34,7 @@
 #include "pci.h"
 #include "hw/vfio/vfio-container.h"
 #include "helpers.h"
+#include "cpr.h"
 
 #define TYPE_HOST_IOMMU_DEVICE_LEGACY_VFIO TYPE_HOST_IOMMU_DEVICE "-legacy-vfio"
 
