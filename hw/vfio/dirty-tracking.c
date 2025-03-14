@@ -20,14 +20,10 @@
 
 #include "qemu/osdep.h"
 #include <sys/ioctl.h>
-#ifdef CONFIG_KVM
-#include <linux/kvm.h>
-#endif
 #include <linux/vfio.h>
 
 #include "hw/vfio/vfio-common.h"
 #include "hw/vfio/pci.h"
-#include "exec/address-spaces.h"
 #include "exec/memory.h"
 #include "exec/ram_addr.h"
 #include "exec/target_page.h"
@@ -45,6 +41,7 @@
 #include "system/tpm.h"
 #include "migration.h"
 #include "helpers.h"
+#include "dirty-tracking.h"
 
 /*
  * Device state interfaces

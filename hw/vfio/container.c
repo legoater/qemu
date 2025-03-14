@@ -35,6 +35,7 @@
 #include "hw/vfio/vfio-container.h"
 #include "helpers.h"
 #include "cpr.h"
+#include "dirty-tracking.h"
 
 #define TYPE_HOST_IOMMU_DEVICE_LEGACY_VFIO TYPE_HOST_IOMMU_DEVICE "-legacy-vfio"
 

@@ -29,6 +29,7 @@
 #include "iommufd.h"
 #include "helpers.h"
 #include "cpr.h"
+#include "dirty-tracking.h"
 
 #define TYPE_HOST_IOMMU_DEVICE_IOMMUFD_VFIO             \
             TYPE_HOST_IOMMU_DEVICE_IOMMUFD "-vfio"
