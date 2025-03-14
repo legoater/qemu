@@ -1239,3 +1239,10 @@ bool vfio_device_state_is_precopy(VFIODevice *vbasedev)
     return migration->device_state == VFIO_DEVICE_STATE_PRE_COPY ||
            migration->device_state == VFIO_DEVICE_STATE_PRE_COPY_P2P;
 }
+
+void vfio_migration_set_error(int ret)
+{
+    if (migration_is_running()) {
+        migration_file_set_error(ret, NULL);
+    }
+}

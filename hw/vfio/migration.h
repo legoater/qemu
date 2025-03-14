@@ -68,5 +68,6 @@ int vfio_migration_set_state(VFIODevice *vbasedev,
                              enum vfio_device_mig_state recover_state,
                              Error **errp);
 #endif
+void vfio_migration_set_error(int ret);
 
 #endif /* HW_VFIO_MIGRATION_H */

@@ -35,8 +35,6 @@
 #include "system/runstate.h"
 #include "trace.h"
 #include "qapi/error.h"
-#include "migration/misc.h"
-#include "migration/qemu-file.h"
 #include "system/tcg.h"
 #include "system/tpm.h"
 #include "migration.h"
@@ -46,13 +44,6 @@
 /*
  * Device state interfaces
  */
-
-static void vfio_set_migration_error(int ret)
-{
-    if (migration_is_running()) {
-        migration_file_set_error(ret, NULL);
-    }
-}
 
 static bool vfio_devices_all_device_dirty_tracking_started(
     const VFIOContainerBase *bcontainer)
@@ -175,7 +166,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
     if (iotlb->target_as != &address_space_memory) {
         error_report("Wrong target AS \"%s\", only system memory is allowed",
                      iotlb->target_as->name ? iotlb->target_as->name : "none");
-        vfio_set_migration_error(-EINVAL);
+        vfio_migration_set_error(-EINVAL);
         return;
     }
 
@@ -212,7 +203,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
                          "0x%"HWADDR_PRIx") = %d (%s)",
                          bcontainer, iova,
                          iotlb->addr_mask + 1, ret, strerror(-ret));
-            vfio_set_migration_error(ret);
+            vfio_migration_set_error(ret);
         }
     }
 out:
@@ -995,7 +986,7 @@ static void vfio_listener_log_global_stop(MemoryListener *listener)
         error_prepend(&local_err,
                       "vfio: Could not stop dirty page tracking - ");
         error_report_err(local_err);
-        vfio_set_migration_error(ret);
+        vfio_migration_set_error(ret);
     }
 }
 
@@ -1137,7 +1128,7 @@ out_unlock:
 
 out:
     if (ret) {
-        vfio_set_migration_error(ret);
+        vfio_migration_set_error(ret);
     }
 }
 
@@ -1271,7 +1262,7 @@ static void vfio_listener_log_sync(MemoryListener *listener,
         ret = vfio_sync_dirty_bitmap(bcontainer, section, &local_err);
         if (ret) {
             error_report_err(local_err);
-            vfio_set_migration_error(ret);
+            vfio_migration_set_error(ret);
         }
     }
 }
