@@ -16,9 +16,9 @@
 
 #include "qemu/error-report.h"
 #include "hw/display/edid.h"
-#include "ui/console.h"
 #include "qapi/error.h"
 #include "pci.h"
+#include "display.h"
 #include "trace.h"
 
 #ifndef DRM_PLANE_TYPE_PRIMARY
