@@ -45,7 +45,7 @@
  * Device state interfaces
  */
 
-static bool vfio_devices_all_device_dirty_tracking_started(
+static bool vfio_dirty_tracking_devices_is_started_all(
     const VFIOContainerBase *bcontainer)
 {
     VFIODevice *vbasedev;
@@ -59,10 +59,9 @@ static bool vfio_devices_all_device_dirty_tracking_started(
     return true;
 }
 
-bool vfio_devices_all_dirty_tracking_started(
-    const VFIOContainerBase *bcontainer)
+bool vfio_dirty_tracking_devices_is_started(const VFIOContainerBase *bcontainer)
 {
-    return vfio_devices_all_device_dirty_tracking_started(bcontainer) ||
+    return vfio_dirty_tracking_devices_is_started_all(bcontainer) ||
            bcontainer->dirty_pages_started;
 }
 
@@ -70,7 +69,7 @@ static bool vfio_log_sync_needed(const VFIOContainerBase *bcontainer)
 {
     VFIODevice *vbasedev;
 
-    if (!vfio_devices_all_dirty_tracking_started(bcontainer)) {
+    if (!vfio_dirty_tracking_devices_is_started(bcontainer)) {
         return false;
     }
 
@@ -90,7 +89,7 @@ static bool vfio_log_sync_needed(const VFIOContainerBase *bcontainer)
     return true;
 }
 
-bool vfio_devices_all_device_dirty_tracking(const VFIOContainerBase *bcontainer)
+bool vfio_dirty_tracking_devices_is_supported(const VFIOContainerBase *bcontainer)
 {
     VFIODevice *vbasedev;
 
@@ -809,7 +808,7 @@ static void vfio_dirty_tracking_init(VFIOContainerBase *bcontainer,
     memory_listener_unregister(&dirty.listener);
 }
 
-static void vfio_devices_dma_logging_stop(VFIOContainerBase *bcontainer)
+static void vfio_dirty_tracking_devices_dma_logging_stop(VFIOContainerBase *bcontainer)
 {
     uint64_t buf[DIV_ROUND_UP(sizeof(struct vfio_device_feature),
                               sizeof(uint64_t))] = {};
@@ -907,7 +906,7 @@ static void vfio_device_feature_dma_logging_start_destroy(
     g_free(feature);
 }
 
-static bool vfio_devices_dma_logging_start(VFIOContainerBase *bcontainer,
+static bool vfio_dirty_tracking_devices_dma_logging_start(VFIOContainerBase *bcontainer,
                                           Error **errp)
 {
     struct vfio_device_feature *feature;
@@ -940,7 +939,7 @@ static bool vfio_devices_dma_logging_start(VFIOContainerBase *bcontainer,
 
 out:
     if (ret) {
-        vfio_devices_dma_logging_stop(bcontainer);
+        vfio_dirty_tracking_devices_dma_logging_stop(bcontainer);
     }
 
     vfio_device_feature_dma_logging_start_destroy(feature);
@@ -956,8 +955,8 @@ static bool vfio_listener_log_global_start(MemoryListener *listener,
                                                  listener);
     bool ret;
 
-    if (vfio_devices_all_device_dirty_tracking(bcontainer)) {
-        ret = vfio_devices_dma_logging_start(bcontainer, errp);
+    if (vfio_dirty_tracking_devices_is_supported(bcontainer)) {
+        ret = vfio_dirty_tracking_devices_dma_logging_start(bcontainer, errp);
     } else {
         ret = vfio_container_set_dirty_page_tracking(bcontainer, true, errp) == 0;
     }
@@ -975,8 +974,8 @@ static void vfio_listener_log_global_stop(MemoryListener *listener)
     Error *local_err = NULL;
     int ret = 0;
 
-    if (vfio_devices_all_device_dirty_tracking(bcontainer)) {
-        vfio_devices_dma_logging_stop(bcontainer);
+    if (vfio_dirty_tracking_devices_is_supported(bcontainer)) {
+        vfio_dirty_tracking_devices_dma_logging_stop(bcontainer);
     } else {
         ret = vfio_container_set_dirty_page_tracking(bcontainer, false,
                                                      &local_err);
@@ -1016,7 +1015,7 @@ static int vfio_device_dma_logging_report(VFIODevice *vbasedev, hwaddr iova,
     return 0;
 }
 
-static int vfio_devices_query_dirty_bitmap(const VFIOContainerBase *bcontainer,
+static int vfio_dirty_tracking_devices_query_dirty_bitmap(const VFIOContainerBase *bcontainer,
                  VFIOBitmap *vbmap, hwaddr iova, hwaddr size, Error **errp)
 {
     VFIODevice *vbasedev;
@@ -1038,11 +1037,11 @@ static int vfio_devices_query_dirty_bitmap(const VFIOContainerBase *bcontainer,
     return 0;
 }
 
-int vfio_get_dirty_bitmap(const VFIOContainerBase *bcontainer, uint64_t iova,
+int vfio_dirty_tracking_query_dirty_bitmap(const VFIOContainerBase *bcontainer, uint64_t iova,
                           uint64_t size, ram_addr_t ram_addr, Error **errp)
 {
     bool all_device_dirty_tracking =
-        vfio_devices_all_device_dirty_tracking(bcontainer);
+        vfio_dirty_tracking_devices_is_supported(bcontainer);
     uint64_t dirty_pages;
     VFIOBitmap vbmap;
     int ret;
@@ -1062,8 +1061,8 @@ int vfio_get_dirty_bitmap(const VFIOContainerBase *bcontainer, uint64_t iova,
     }
 
     if (all_device_dirty_tracking) {
-        ret = vfio_devices_query_dirty_bitmap(bcontainer, &vbmap, iova, size,
-                                              errp);
+        ret = vfio_dirty_tracking_devices_query_dirty_bitmap(bcontainer, &vbmap,
+                                                             iova, size, errp);
     } else {
         ret = vfio_container_query_dirty_bitmap(bcontainer, &vbmap, iova, size,
                                                 errp);
@@ -1076,7 +1075,8 @@ int vfio_get_dirty_bitmap(const VFIOContainerBase *bcontainer, uint64_t iova,
     dirty_pages = cpu_physical_memory_set_dirty_lebitmap(vbmap.bitmap, ram_addr,
                                                          vbmap.pages);
 
-    trace_vfio_get_dirty_bitmap(iova, size, vbmap.size, ram_addr, dirty_pages);
+    trace_vfio_dirty_tracking_query_dirty_bitmap(iova, size, vbmap.size, ram_addr,
+                                                 dirty_pages);
 out:
     g_free(vbmap.bitmap);
 
@@ -1113,7 +1113,7 @@ static void vfio_iommu_map_dirty_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
         goto out_unlock;
     }
 
-    ret = vfio_get_dirty_bitmap(bcontainer, iova, iotlb->addr_mask + 1,
+    ret = vfio_dirty_tracking_query_dirty_bitmap(bcontainer, iova, iotlb->addr_mask + 1,
                                 translated_addr, &local_err);
     if (ret) {
         error_prepend(&local_err,
@@ -1147,7 +1147,7 @@ static int vfio_ram_discard_get_dirty_bitmap(MemoryRegionSection *section,
      * Sync the whole mapped region (spanning multiple individual mappings)
      * in one go.
      */
-    ret = vfio_get_dirty_bitmap(vrdl->bcontainer, iova, size, ram_addr,
+    ret = vfio_dirty_tracking_query_dirty_bitmap(vrdl->bcontainer, iova, size, ram_addr,
                                 &local_err);
     if (ret) {
         error_report_err(local_err);
@@ -1241,7 +1241,7 @@ static int vfio_sync_dirty_bitmap(VFIOContainerBase *bcontainer,
     ram_addr = memory_region_get_ram_addr(section->mr) +
                section->offset_within_region;
 
-    return vfio_get_dirty_bitmap(bcontainer,
+    return vfio_dirty_tracking_query_dirty_bitmap(bcontainer,
                    REAL_HOST_PAGE_ALIGN(section->offset_within_address_space),
                                  int128_get64(section->size), ram_addr, errp);
 }
