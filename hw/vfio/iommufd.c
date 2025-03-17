@@ -27,6 +27,7 @@
 #include "pci.h"
 #include "migration.h"
 #include "iommufd.h"
+#include "helpers.h"
 
 #define TYPE_HOST_IOMMU_DEVICE_IOMMUFD_VFIO             \
             TYPE_HOST_IOMMU_DEVICE_IOMMUFD "-vfio"
