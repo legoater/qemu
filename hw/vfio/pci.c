@@ -46,6 +46,7 @@
 #include "system/iommufd.h"
 #include "vfio-migration-internal.h"
 #include "hw/vfio/vfio-region.h"
+#include "vfio-helpers.h"
 
 #define TYPE_VFIO_PCI_NOHOTPLUG "vfio-pci-nohotplug"
 
