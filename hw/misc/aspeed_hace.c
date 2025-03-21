@@ -223,8 +223,21 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
             return;
         }
         iov[0].iov_base = haddr;
-        iov[0].iov_len = plen;
         i = 1;
+        if (acc_mode) {
+            s->total_req_len += plen;
+
+            if (has_padding(s, &iov[0], plen, &total_msg_len,
+                            &pad_offset)) {
+                /* Padding being present indicates the final request */
+                sg_acc_mode_final_request = true;
+                iov[0].iov_len = pad_offset;
+            } else {
+                iov[0].iov_len = plen;
+            }
+        } else {
+            iov[0].iov_len = plen;
+        }
     }
 
     if (acc_mode) {
