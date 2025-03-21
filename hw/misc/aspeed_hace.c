@@ -148,6 +148,7 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
     bool sg_acc_mode_final_request = false;
     g_autofree uint8_t *digest_buf = NULL;
     struct iovec iov[ASPEED_HACE_MAX_SG];
+    uint64_t digest_addr = 0;
     Error *local_err = NULL;
     uint32_t total_msg_len;
     size_t digest_len = 0;
@@ -257,7 +258,8 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
         return;
     }
 
-    if (address_space_write(&s->dram_as, s->regs[R_HASH_DEST],
+    digest_addr = deposit64(digest_addr, 0, 32, s->regs[R_HASH_DEST]);
+    if (address_space_write(&s->dram_as, digest_addr,
                             MEMTXATTRS_UNSPECIFIED,
                             digest_buf, digest_len)) {
         qemu_log_mask(LOG_GUEST_ERROR,
