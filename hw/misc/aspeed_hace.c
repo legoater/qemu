@@ -463,11 +463,12 @@ static void aspeed_hace_realize(DeviceState *dev, Error **errp)
 {
     AspeedHACEState *s = ASPEED_HACE(dev);
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
+    AspeedHACEClass *ahc = ASPEED_HACE_GET_CLASS(s);
 
     sysbus_init_irq(sbd, &s->irq);
 
     memory_region_init_io(&s->iomem, OBJECT(s), &aspeed_hace_ops, s,
-            TYPE_ASPEED_HACE, 0x1000);
+            TYPE_ASPEED_HACE, ahc->mem_size);
 
     if (!s->dram_mr) {
         error_setg(errp, TYPE_ASPEED_HACE ": 'dram' link not set");
@@ -521,6 +522,7 @@ static void aspeed_ast2400_hace_class_init(ObjectClass *klass, void *data)
 
     dc->desc = "AST2400 Hash and Crypto Engine";
 
+    ahc->mem_size = 0x1000;
     ahc->src_mask = 0x0FFFFFFF;
     ahc->dest_mask = 0x0FFFFFF8;
     ahc->key_mask = 0x0FFFFFC0;
@@ -540,6 +542,7 @@ static void aspeed_ast2500_hace_class_init(ObjectClass *klass, void *data)
 
     dc->desc = "AST2500 Hash and Crypto Engine";
 
+    ahc->mem_size = 0x1000;
     ahc->src_mask = 0x3fffffff;
     ahc->dest_mask = 0x3ffffff8;
     ahc->key_mask = 0x3FFFFFC0;
@@ -559,6 +562,7 @@ static void aspeed_ast2600_hace_class_init(ObjectClass *klass, void *data)
 
     dc->desc = "AST2600 Hash and Crypto Engine";
 
+    ahc->mem_size = 0x10000;
     ahc->src_mask = 0x7FFFFFFF;
     ahc->dest_mask = 0x7FFFFFF8;
     ahc->key_mask = 0x7FFFFFF8;
@@ -578,6 +582,7 @@ static void aspeed_ast1030_hace_class_init(ObjectClass *klass, void *data)
 
     dc->desc = "AST1030 Hash and Crypto Engine";
 
+    ahc->mem_size = 0x10000;
     ahc->src_mask = 0x7FFFFFFF;
     ahc->dest_mask = 0x7FFFFFF8;
     ahc->key_mask = 0x7FFFFFF8;
@@ -597,6 +602,7 @@ static void aspeed_ast2700_hace_class_init(ObjectClass *klass, void *data)
 
     dc->desc = "AST2700 Hash and Crypto Engine";
 
+    ahc->mem_size = 0x100;
     ahc->src_mask = 0x7FFFFFFF;
     ahc->dest_mask = 0x7FFFFFF8;
     ahc->key_mask = 0x7FFFFFF8;
