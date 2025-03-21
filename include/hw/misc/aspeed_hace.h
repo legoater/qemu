@@ -22,7 +22,7 @@
 
 OBJECT_DECLARE_TYPE(AspeedHACEState, AspeedHACEClass, ASPEED_HACE)
 
-#define ASPEED_HACE_NR_REGS (0x64 >> 2)
+#define ASPEED_HACE_NR_REGS (0x9C >> 2)
 #define ASPEED_HACE_MAX_SG  256 /* max number of entries */
 
 struct AspeedHACEState {
@@ -49,6 +49,9 @@ struct AspeedHACEClass {
     uint32_t key_mask;
     uint32_t hash_mask;
     bool raise_crypt_interrupt_workaround;
+    uint32_t src_hi_mask;
+    uint32_t dest_hi_mask;
+    uint32_t key_hi_mask;
 };
 
 #endif /* ASPEED_HACE_H */
