@@ -10,8 +10,10 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/cutils.h"
 #include "qemu/log.h"
 #include "qemu/error-report.h"
+#include "qemu/iov.h"
 #include "hw/misc/aspeed_hace.h"
 #include "qapi/error.h"
 #include "migration/vmstate.h"
@@ -19,6 +21,8 @@
 #include "hw/qdev-properties.h"
 #include "hw/irq.h"
 #include "trace.h"
+
+/* #define DEBUG_HACE 1 */
 
 #define R_CRYPT_CMD     (0x10 / 4)
 
@@ -268,6 +272,10 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
         }
     }
 
+#ifdef DEBUG_HACE
+    iov_hexdump(iov, i, stdout, "plaintext", 0xa000);
+#endif
+
     if (acc_mode) {
         if (qcrypto_hash_updatev(s->hash_ctx, iov, i, &local_err) < 0) {
             qemu_log_mask(LOG_GUEST_ERROR, "qcrypto hash update failed : %s",
@@ -310,6 +318,10 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
         qemu_log_mask(LOG_GUEST_ERROR,
                       "aspeed_hace: address space write failed\n");
     }
+
+#ifdef DEBUG_HACE
+    qemu_hexdump(stdout, "digest", digest_buf, digest_len);
+#endif
 
     for (; i > 0; i--) {
         address_space_unmap(&s->dram_as, iov[i - 1].iov_base,
