@@ -18,6 +18,7 @@
 #include "crypto/hash.h"
 #include "hw/qdev-properties.h"
 #include "hw/irq.h"
+#include "trace.h"
 
 #define R_CRYPT_CMD     (0x10 / 4)
 
@@ -186,6 +187,7 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
             if (ahc->has_dma64) {
                 src = deposit64(src, 32, 32, s->regs[R_HASH_SRC_HI]);
             }
+            trace_aspeed_hace_addr("src", src);
             src += i * SG_LIST_ENTRY_SIZE;
 
             len = address_space_ldl_le(&s->dram_as, src,
@@ -194,6 +196,7 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
             sg_addr = address_space_ldl_le(&s->dram_as, src + SG_LIST_LEN_SIZE,
                                            MEMTXATTRS_UNSPECIFIED, NULL);
             sg_addr &= SG_LIST_ADDR_MASK;
+            trace_aspeed_hace_sg(i, sg_addr, len);
             /*
              * Ideally, sg_addr should be 64-bit for the AST2700, using the
              * following program to obtain the 64-bit sg_addr and convert it
@@ -237,6 +240,7 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
     } else {
         plen = s->regs[R_HASH_SRC_LEN];
         src = deposit64(src, 0, 32, s->regs[R_HASH_SRC]);
+        trace_aspeed_hace_addr("src", src);
         if (ahc->has_dma64) {
             src = deposit64(src, 32, 32, s->regs[R_HASH_SRC_HI]);
         }
@@ -299,6 +303,7 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
     if (ahc->has_dma64) {
         digest_addr = deposit64(digest_addr, 32, 32, s->regs[R_HASH_DEST_HI]);
     }
+    trace_aspeed_hace_addr("digest", digest_addr);
     if (address_space_write(&s->dram_as, digest_addr,
                             MEMTXATTRS_UNSPECIFIED,
                             digest_buf, digest_len)) {
@@ -326,6 +331,7 @@ static uint64_t aspeed_hace_read(void *opaque, hwaddr addr, unsigned int size)
         return 0;
     }
 
+    trace_aspeed_hace_read(addr << 2, s->regs[addr]);
     return s->regs[addr];
 }
 
@@ -343,6 +349,8 @@ static void aspeed_hace_write(void *opaque, hwaddr addr, uint64_t data,
                       __func__, addr << 2);
         return;
     }
+
+    trace_aspeed_hace_write(addr << 2, data);
 
     switch (addr) {
     case R_STATUS:
