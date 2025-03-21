@@ -154,7 +154,7 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
     uint32_t sg_addr = 0;
     uint32_t pad_offset;
     uint32_t len = 0;
-    uint32_t src = 0;
+    uint64_t src = 0;
     void *haddr;
     hwaddr plen;
     int i;
@@ -177,7 +177,8 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
                 break;
             }
 
-            src = s->regs[R_HASH_SRC] + (i * SG_LIST_ENTRY_SIZE);
+            src = deposit64(src, 0, 32, s->regs[R_HASH_SRC]);
+            src += i * SG_LIST_ENTRY_SIZE;
 
             len = address_space_ldl_le(&s->dram_as, src,
                                        MEMTXATTRS_UNSPECIFIED, NULL);
@@ -212,8 +213,9 @@ static void do_hash_operation(AspeedHACEState *s, int algo, bool sg_mode,
         }
     } else {
         plen = s->regs[R_HASH_SRC_LEN];
+        src = deposit64(src, 0, 32, s->regs[R_HASH_SRC]);
 
-        haddr = address_space_map(&s->dram_as, s->regs[R_HASH_SRC],
+        haddr = address_space_map(&s->dram_as, src,
                                   &plen, false, MEMTXATTRS_UNSPECIFIED);
         if (haddr == NULL) {
             qemu_log_mask(LOG_GUEST_ERROR, "%s: qcrypto failed\n", __func__);
