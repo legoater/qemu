@@ -217,7 +217,8 @@ qtests_aspeed = \
    'aspeed_gpio-test']
 qtests_aspeed64 = \
   ['ast2700-gpio-test',
-   'ast2700-smc-test']
+   'ast2700-smc-test',
+   'ast2700-hace-test']
 
 qtests_stm32l4x5 = \
   ['stm32l4x5_exti-test',
@@ -385,6 +386,7 @@ qtests = {
   'aspeed_smc-test': files('aspeed-smc-utils.c', 'aspeed_smc-test.c'),
   'ast2700-smc-test': files('aspeed-smc-utils.c', 'ast2700-smc-test.c'),
   'aspeed_hace-test': files('aspeed-hace-utils.c', 'aspeed_hace-test.c'),
+  'ast2700-hace-test': files('aspeed-hace-utils.c', 'ast2700-hace-test.c'),
 }
 
 if vnc.found()
