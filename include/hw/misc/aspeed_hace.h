@@ -53,6 +53,7 @@ struct AspeedHACEClass {
     uint32_t dest_hi_mask;
     uint32_t key_hi_mask;
     bool has_dma64;
+    uint64_t mem_size;
 };
 
 #endif /* ASPEED_HACE_H */
