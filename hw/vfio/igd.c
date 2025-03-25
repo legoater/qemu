@@ -53,6 +53,13 @@
  * headless setup is desired, the OpRegion gets in the way of that.
  */
 
+static bool vfio_is_igd(VFIOPCIDevice *vdev)
+{
+    return vfio_pci_is(vdev, PCI_VENDOR_ID_INTEL, PCI_ANY_ID) &&
+           vfio_is_vga(vdev) &&
+           vfio_pci_host_match(&vdev->host, "0000:00:02.0");
+}
+
 /*
  * This presumes the device is already known to be an Intel VGA device, so we
  * take liberties in which device ID bits match which generation.  This should
@@ -427,13 +434,7 @@ void vfio_probe_igd_bar0_quirk(VFIOPCIDevice *vdev, int nr)
     VFIOConfigMirrorQuirk *ggc_mirror, *bdsm_mirror;
     int gen;
 
-    /*
-     * This must be an Intel VGA device at address 00:02.0 for us to even
-     * consider enabling legacy mode. Some driver have dependencies on the PCI
-     * bus address.
-     */
-    if (!vfio_pci_is(vdev, PCI_VENDOR_ID_INTEL, PCI_ANY_ID) ||
-        !vfio_is_vga(vdev) || nr != 0) {
+    if (nr != 0 || !vfio_is_igd(vdev)) {
         return;
     }
 
@@ -490,13 +491,7 @@ static bool vfio_pci_igd_config_quirk(VFIOPCIDevice *vdev, Error **errp)
     bool legacy_mode_enabled = false;
     Error *err = NULL;
 
-    /*
-     * This must be an Intel VGA device at address 00:02.0 for us to even
-     * consider enabling legacy mode.  The vBIOS has dependencies on the
-     * PCI bus address.
-     */
-    if (!vfio_pci_is(vdev, PCI_VENDOR_ID_INTEL, PCI_ANY_ID) ||
-        !vfio_is_vga(vdev)) {
+    if (!vfio_is_igd(vdev)) {
         return true;
     }
 
