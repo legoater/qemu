@@ -46,6 +46,7 @@
 #include "system/tpm.h"
 #include "vfio-migration-internal.h"
 #include "vfio-helpers.h"
+#include "vfio-listener.h"
 
 /*
  * Device state interfaces
@@ -1163,7 +1164,7 @@ static void vfio_listener_log_sync(MemoryListener *listener,
     }
 }
 
-const MemoryListener vfio_memory_listener = {
+static const MemoryListener vfio_memory_listener = {
     .name = "vfio",
     .region_add = vfio_listener_region_add,
     .region_del = vfio_listener_region_del,
@@ -1171,3 +1172,22 @@ const MemoryListener vfio_memory_listener = {
     .log_global_stop = vfio_listener_log_global_stop,
     .log_sync = vfio_listener_log_sync,
 };
+
+bool vfio_listener_register(VFIOContainerBase *bcontainer, Error **errp)
+{
+    bcontainer->listener = vfio_memory_listener;
+    memory_listener_register(&bcontainer->listener, bcontainer->space->as);
+
+    if (bcontainer->error) {
+        error_propagate_prepend(errp, bcontainer->error,
+                                "memory listener initialization failed: ");
+        return false;
+    }
+
+    return true;
+}
+
+void vfio_listener_unregister(VFIOContainerBase *bcontainer)
+{
+    memory_listener_unregister(&bcontainer->listener);
+}
