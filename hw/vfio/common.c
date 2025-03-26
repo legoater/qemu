@@ -56,7 +56,7 @@ static bool vfio_log_sync_needed(const VFIOContainerBase *bcontainer)
 {
     VFIODevice *vbasedev;
 
-    if (!vfio_devices_all_dirty_tracking_started(bcontainer)) {
+    if (!vfio_container_dirty_tracking_is_started(bcontainer)) {
         return false;
     }
 
