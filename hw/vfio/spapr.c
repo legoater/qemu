@@ -15,13 +15,13 @@
 #include "system/hostmem.h"
 #include "exec/address-spaces.h"
 
-#include "hw/vfio/vfio-common.h"
 #include "hw/vfio/vfio-container.h"
 #include "hw/hw.h"
 #include "exec/ram_addr.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
 #include "trace.h"
+#include "vfio-helpers.h"
 
 typedef struct VFIOHostDMAWindow {
     hwaddr min_iova;
