@@ -41,6 +41,7 @@ struct AspeedMachineClass {
     uint32_t uart_default;
     bool sdhci_wp_inverted;
     bool vbootrom;
+    const char *vbootrom_name;
 };
 
 
