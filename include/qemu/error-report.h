@@ -70,6 +70,20 @@ void error_init(const char *argv0);
                               fmt, ##__VA_ARGS__);      \
     })
 
+/*
+ * Given a return value of either a short number of bytes read or -errno,
+ * construct a meaningful error message.
+ */
+#define strreaderror(ret) \
+    (ret < 0 ? strerror(-ret) : "short read")
+
+/*
+ * Given a return value of either a short number of bytes written or -errno,
+ * construct a meaningful error message.
+ */
+#define strwriteerror(ret) \
+    (ret < 0 ? strerror(-ret) : "short write")
+
 extern bool message_with_timestamp;
 extern bool error_with_guestname;
 extern const char *error_guest_name;
