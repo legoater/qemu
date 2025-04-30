@@ -130,6 +130,9 @@ bool vfio_device_attach(char *name, VFIODevice *vbasedev,
 void vfio_device_detach(VFIODevice *vbasedev);
 VFIODevice *vfio_get_vfio_device(Object *obj);
 
+void vfio_device_prepare(VFIODevice *vbasedev, VFIOContainerBase *bcontainer,
+                         struct vfio_device_info *info);
+
 typedef QLIST_HEAD(VFIODeviceList, VFIODevice) VFIODeviceList;
 extern VFIODeviceList vfio_device_list;
 
