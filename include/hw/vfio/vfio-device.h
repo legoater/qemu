@@ -132,6 +132,7 @@ VFIODevice *vfio_get_vfio_device(Object *obj);
 
 void vfio_device_prepare(VFIODevice *vbasedev, VFIOContainerBase *bcontainer,
                          struct vfio_device_info *info);
+void vfio_device_unprepare(VFIODevice *vbasedev);
 
 typedef QLIST_HEAD(VFIODeviceList, VFIODevice) VFIODeviceList;
 extern VFIODeviceList vfio_device_list;
