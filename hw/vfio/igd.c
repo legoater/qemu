@@ -186,6 +186,11 @@ static bool vfio_pci_igd_opregion_init(VFIOPCIDevice *vdev,
     return true;
 }
 
+/**
+ * @brief Detects the presence of the Intel IGD OpRegion on a VFIO PCI device.
+ *
+ * Checks if the device supports the IGD OpRegion feature and is not hotplugged. Returns true if the OpRegion is available; otherwise, sets an error and returns false.
+ */
 static bool vfio_pci_igd_opregion_detect(VFIOPCIDevice *vdev,
                                          struct vfio_region_info **opregion,
                                          Error **errp)

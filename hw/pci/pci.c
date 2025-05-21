@@ -531,6 +531,16 @@ static void pci_reset_regions(PCIDevice *dev)
     }
 }
 
+/**
+ * @brief Resets a PCI device to its default state unless resuming from CPR.
+ *
+ * Skips the reset if the system is in an incoming CPR (Checkpoint/Restore) state,
+ * as device state will be restored by vmstate load. Otherwise, deasserts interrupts,
+ * clears writable configuration registers, resets power management state, BAR regions,
+ * MSI/MSI-X, and SR-IOV PF state, and updates memory mappings.
+ *
+ * @param dev The PCI device to reset.
+ */
 static void pci_do_device_reset(PCIDevice *dev)
 {
     /*

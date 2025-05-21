@@ -13,6 +13,13 @@
 #include "qapi/error.h"
 #include "system/runstate.h"
 
+/**
+ * @brief Notifier callback for CPR reboot mode during migration events.
+ *
+ * Checks if the migration event is a precopy setup and verifies that the system is in a suspended runstate or the VM is suspended. If not, sets an error indicating that VFIO devices only support CPR reboot when suspended and returns -1; otherwise, returns 0.
+ *
+ * @return 0 on success, -1 if the required suspended state is not met.
+ */
 int vfio_cpr_reboot_notifier(NotifierWithReturn *notifier,
                              MigrationEvent *e, Error **errp)
 {
@@ -35,14 +42,23 @@ bool vfio_cpr_register_container(VFIOContainerBase *bcontainer, Error **errp)
     return true;
 }
 
+/**
+ * @brief Unregisters the CPR reboot notifier for a VFIO container.
+ *
+ * Removes the VFIO container's checkpoint/restart (CPR) reboot notifier from the migration framework, disabling CPR reboot event notifications for the container.
+ */
 void vfio_cpr_unregister_container(VFIOContainerBase *bcontainer)
 {
     migration_remove_notifier(&bcontainer->cpr_reboot_notifier);
 }
 
-/*
- * The kernel may change non-emulated config bits.  Exclude them from the
- * changed-bits check in get_pci_config_device.
+/**
+ * @brief Masks PCI device changed-bits to exclude non-emulated config bits before CPR restore.
+ *
+ * During checkpoint/restart (CPR) restore, updates the PCI device's changed-bits mask to ignore kernel-modified, non-emulated configuration bits. This ensures that only emulated config bits are considered for change detection.
+ *
+ * @param opaque Pointer to a VFIOPCIDevice.
+ * @return 0 on success.
  */
 static int vfio_cpr_pci_pre_load(void *opaque)
 {

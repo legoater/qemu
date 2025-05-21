@@ -67,11 +67,25 @@ static uint8_t msix_pending_mask(int vector)
     return 1 << (vector % 8);
 }
 
+/**
+ * @brief Returns a pointer to the byte in the MSI-X Pending Bit Array for a given vector.
+ *
+ * @param vector The MSI-X vector number.
+ * @return Pointer to the byte in the Pending Bit Array corresponding to the specified vector.
+ */
 static uint8_t *msix_pending_byte(PCIDevice *dev, int vector)
 {
     return dev->msix_pba + vector / 8;
 }
 
+/**
+ * @brief Checks if the MSI-X interrupt for a given vector is pending.
+ *
+ * Determines whether the pending bit is set for the specified MSI-X vector in the device's Pending Bit Array (PBA).
+ *
+ * @param vector The MSI-X vector index to check.
+ * @return Nonzero if the interrupt is pending; zero otherwise.
+ */
 int msix_is_pending(PCIDevice *dev, unsigned int vector)
 {
     return *msix_pending_byte(dev, vector) & msix_pending_mask(vector);

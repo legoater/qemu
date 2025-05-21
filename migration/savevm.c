@@ -735,6 +735,15 @@ static int calculate_compat_instance_id(const char *idstr)
     return instance_id;
 }
 
+/**
+ * @brief Returns the migration priority for a save state entry.
+ *
+ * If the entry has a VMStateDescription with a non-zero priority, that value is returned;
+ * otherwise, the default migration priority is used.
+ *
+ * @param se The save state entry to query.
+ * @return MigrationPriority The migration priority for the entry.
+ */
 static inline MigrationPriority save_state_priority(SaveStateEntry *se)
 {
     if (se->vmsd && se->vmsd->priority) {

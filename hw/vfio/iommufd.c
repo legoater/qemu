@@ -489,6 +489,21 @@ error:
     return false;
 }
 
+/**
+ * @brief Attaches a VFIO device to an IOMMUFD container in the given address space.
+ *
+ * Attempts to attach the specified VFIO device to an existing compatible IOMMUFD container
+ * within the provided address space. If no suitable container exists, allocates a new
+ * container and IOAS, attaches the device, disables RAM block discard, queries IOVA ranges,
+ * registers listeners, and realizes the HostIOMMUDevice. Handles all necessary setup for
+ * device operation with IOMMUFD, including error handling and cleanup on failure.
+ *
+ * @param name Name of the device (unused in function logic).
+ * @param vbasedev Pointer to the VFIODevice to attach.
+ * @param as AddressSpace to which the device should be attached.
+ * @param errp Pointer to an Error* for reporting errors.
+ * @return true on successful attachment, false on failure.
+ */
 static bool iommufd_cdev_attach(const char *name, VFIODevice *vbasedev,
                                 AddressSpace *as, Error **errp)
 {

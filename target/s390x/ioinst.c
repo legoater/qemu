@@ -20,7 +20,15 @@
 #include "target/s390x/kvm/pv.h"
 #include "hw/s390x/ap-bridge.h"
 
-/* All I/O instructions but chsc use the s format */
+/**
+ * @brief Computes the effective address for S-format I/O instructions.
+ *
+ * For protected guests, returns 0 and sets the access register to 0. Otherwise, decodes the address using the instruction parameters.
+ *
+ * @param ipb The instruction parameter block containing address information.
+ * @param ar Pointer to store the access register value.
+ * @return The effective address for the I/O instruction.
+ */
 static uint64_t get_address_from_regs(CPUS390XState *env, uint32_t ipb,
                                       uint8_t *ar)
 {
@@ -573,6 +581,15 @@ out:
     res->param = 0;
 }
 
+/**
+ * @brief Retrieves the next pending NT0 event for CHSC SEI, if available.
+ *
+ * If the AP feature is present, delegates to the AP-specific event retrieval function.
+ * Otherwise, indicates that no NT0 event is available.
+ *
+ * @param res Pointer to the buffer where event data will be stored if an event is present.
+ * @return 0 if an event was retrieved and stored in res, 1 if no event is available.
+ */
 static int chsc_sei_nt0_get_event(void *res)
 {
     if (s390_has_feat(S390_FEAT_AP)) {
@@ -582,6 +599,13 @@ static int chsc_sei_nt0_get_event(void *res)
     return 1;
 }
 
+/**
+ * @brief Checks for pending NT0 notification events for CHSC SEI.
+ *
+ * If the AP feature is available, delegates to the AP-specific event check.
+ *
+ * @return 1 if an NT0 event is pending, 0 otherwise.
+ */
 static int chsc_sei_nt0_have_event(void)
 {
     if (s390_has_feat(S390_FEAT_AP)) {

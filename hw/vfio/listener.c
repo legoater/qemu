@@ -76,6 +76,14 @@ static bool vfio_log_sync_needed(const VFIOContainerBase *bcontainer)
     return true;
 }
 
+/**
+ * @brief Determines if a memory region section should be skipped by the VFIO listener.
+ *
+ * Returns true if the section is neither RAM nor IOMMU, is protected, or represents a spurious 64-bit BAR mapping in the upper address space.
+ *
+ * @param section The memory region section to evaluate.
+ * @return true if the section should be skipped; false otherwise.
+ */
 static bool vfio_listener_skipped_section(MemoryRegionSection *section)
 {
     return (!memory_region_is_ram(section->mr) &&
@@ -90,9 +98,18 @@ static bool vfio_listener_skipped_section(MemoryRegionSection *section)
            section->offset_within_address_space & (1ULL << 63);
 }
 
-/*
- * Called with rcu_read_lock held.
- * The returned MemoryRegion must not be accessed after calling rcu_read_unlock.
+/**
+ * @brief Translates an IOMMU TLB entry to a MemoryRegion and offset.
+ *
+ * Looks up the MemoryRegion and translated offset corresponding to the given IOMMU TLB entry.
+ * If the region supports coordinated RAM discarding, emits a warning about potential memory pinning risks with malicious guests.
+ *
+ * @param iotlb The IOMMU TLB entry to translate.
+ * @param xlat_p Pointer to store the translated offset within the MemoryRegion.
+ * @param errp Pointer to an Error object for reporting translation failures.
+ * @return MemoryRegion* The resolved MemoryRegion, or NULL on error.
+ *
+ * @note The returned MemoryRegion must not be accessed after releasing the RCU read lock.
  */
 static MemoryRegion *vfio_translate_iotlb(IOMMUTLBEntry *iotlb, hwaddr *xlat_p,
                                           Error **errp)
@@ -122,6 +139,11 @@ static MemoryRegion *vfio_translate_iotlb(IOMMUTLBEntry *iotlb, hwaddr *xlat_p,
     return mr;
 }
 
+/**
+ * @brief Handles IOMMU map and unmap notifications for a VFIO container.
+ *
+ * Processes IOMMU TLB entry notifications by mapping or unmapping the corresponding IOVA range in the VFIO container. On a map event, translates the IOTLB entry to a memory region and sets up the DMA mapping; on an unmap event, removes the DMA mapping. Reports errors and integrates with migration error handling if necessary.
+ */
 static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
 {
     VFIOGuestIOMMU *giommu = container_of(n, VFIOGuestIOMMU, n);
@@ -444,6 +466,12 @@ static void vfio_listener_commit(MemoryListener *listener)
     }
 }
 
+/**
+ * @brief Appends a hint to the error indicating unsupported PCI peer-to-peer transactions.
+ *
+ * If the device is a PCI VFIO device, adds a message to the error noting that
+ * PCI peer-to-peer transactions on BARs are not supported.
+ */
 static void vfio_device_error_append(VFIODevice *vbasedev, Error **errp)
 {
     /*
@@ -456,6 +484,16 @@ static void vfio_device_error_append(VFIODevice *vbasedev, Error **errp)
     }
 }
 
+/**
+ * @brief Finds the RAM discard listener for a given memory region section in the VFIO container.
+ *
+ * Searches the container's list of RAM discard listeners for one matching the specified memory region and offset.
+ * Aborts with a hardware error if no matching listener is found.
+ *
+ * @param bcontainer The VFIO container to search.
+ * @param section The memory region section to match.
+ * @return Pointer to the matching VFIORamDiscardListener.
+ */
 VFIORamDiscardListener *vfio_find_ram_discard_listener(
     VFIOContainerBase *bcontainer, MemoryRegionSection *section)
 {
@@ -476,6 +514,11 @@ VFIORamDiscardListener *vfio_find_ram_discard_listener(
     return vrdl;
 }
 
+/**
+ * @brief Adds a memory region section to the VFIO container.
+ *
+ * Calls the container-specific region addition logic for the given memory region section without CPR remapping.
+ */
 static void vfio_listener_region_add(MemoryListener *listener,
                                      MemoryRegionSection *section)
 {
@@ -484,6 +527,15 @@ static void vfio_listener_region_add(MemoryListener *listener,
     vfio_container_region_add(bcontainer, section, false);
 }
 
+/**
+ * @brief Adds a memory region section to the VFIO container for DMA mapping or IOMMU notification.
+ *
+ * Handles registration and mapping of a memory region section within a VFIO container, supporting RAM, RAM discard, and IOMMU regions. For IOMMU regions, registers notifiers and replays mappings; for RAM discard regions, registers discard listeners or remaps as needed; for standard RAM, performs DMA mapping if alignment requirements are met. On error, stores or reports the error depending on container initialization state.
+ *
+ * @param bcontainer The VFIO container to which the region is added.
+ * @param section The memory region section to be mapped or registered.
+ * @param cpr_remap If true, performs CPR-specific remapping or registration.
+ */
 void vfio_container_region_add(VFIOContainerBase *bcontainer,
                                MemoryRegionSection *section,
                                bool cpr_remap)
@@ -1044,6 +1096,16 @@ typedef struct {
     VFIOGuestIOMMU *giommu;
 } vfio_giommu_dirty_notifier;
 
+/**
+ * @brief Handles IOMMU dirty map notifications by querying the dirty bitmap for a mapped region.
+ *
+ * When an IOMMU map dirty event occurs, this function translates the IOTLB entry to a memory region,
+ * verifies the target address space is system memory, and queries the dirty bitmap for the specified IOVA range.
+ * Errors are reported or propagated to migration as appropriate.
+ *
+ * @param n IOMMU notifier structure.
+ * @param iotlb IOMMU TLB entry describing the mapping.
+ */
 static void vfio_iommu_map_dirty_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
 {
     vfio_giommu_dirty_notifier *gdn = container_of(n,
@@ -1118,6 +1180,16 @@ static int vfio_ram_discard_query_dirty_bitmap(MemoryRegionSection *section,
     return ret;
 }
 
+/**
+ * @brief Synchronizes the dirty bitmap for a RAM discard listener's populated regions.
+ *
+ * Replays all populated parts of the given memory region section to update the dirty bitmap
+ * via the associated RAM discard listener.
+ *
+ * @param bcontainer The VFIO container base.
+ * @param section The memory region section to synchronize.
+ * @return 0 on success, or a negative error code on failure.
+ */
 static int
 vfio_sync_ram_discard_listener_dirty_bitmap(VFIOContainerBase *bcontainer,
                                             MemoryRegionSection *section)

@@ -19,6 +19,15 @@
 #include "qapi/error.h"
 #include "qemu/error-report.h"
 
+/**
+ * @brief Unmaps all DMA mappings with virtual addresses in the VFIO container.
+ *
+ * Issues a VFIO_IOMMU_UNMAP_DMA ioctl with flags to unmap all DMA regions associated with virtual addresses in the specified container. On success, marks the container's vaddr_unmapped flag as true.
+ *
+ * @param container The VFIO container whose DMA mappings will be unmapped.
+ * @param errp Pointer to an Error pointer for reporting errors.
+ * @return true if all DMA mappings were successfully unmapped; false otherwise.
+ */
 static bool vfio_dma_unmap_vaddr_all(VFIOContainer *container, Error **errp)
 {
     struct vfio_iommu_type1_dma_unmap unmap = {
@@ -35,9 +44,17 @@ static bool vfio_dma_unmap_vaddr_all(VFIOContainer *container, Error **errp)
     return true;
 }
 
-/*
- * Set the new @vaddr for any mappings registered during cpr load.
- * Reused is cleared thereafter.
+/**
+ * @brief Maps a DMA region with a specified virtual address during CPR load.
+ *
+ * Updates the virtual address for a DMA mapping in the VFIO container when restoring state after checkpoint/restore (CPR). Requires that the container's CPR state is marked as reused.
+ *
+ * @param bcontainer Pointer to the base VFIO container.
+ * @param iova The IO virtual address to map.
+ * @param size The size of the region to map.
+ * @param vaddr The virtual address to associate with the mapping.
+ * @param readonly Indicates if the mapping should be read-only.
+ * @return 0 on success, or a negative errno value on failure.
  */
 static int vfio_legacy_cpr_dma_map(const VFIOContainerBase *bcontainer,
                                    hwaddr iova, ram_addr_t size, void *vaddr,
@@ -62,6 +79,14 @@ static int vfio_legacy_cpr_dma_map(const VFIOContainerBase *bcontainer,
     return 0;
 }
 
+/**
+ * @brief Remaps a memory region section for a VFIO container during CPR.
+ *
+ * Invoked as a memory listener callback to re-add a memory region section to the VFIO container's base container with remapping enabled, typically during checkpoint/restore operations.
+ *
+ * @param listener The memory listener triggering the callback.
+ * @param section The memory region section to be remapped.
+ */
 static void vfio_region_remap(MemoryListener *listener,
                               MemoryRegionSection *section)
 {
@@ -70,6 +95,15 @@ static void vfio_region_remap(MemoryListener *listener,
     vfio_container_region_add(&container->bcontainer, section, true);
 }
 
+/**
+ * @brief Checks if the VFIO container supports required CPR extensions.
+ *
+ * Verifies that the container supports both the VFIO_UPDATE_VADDR and VFIO_UNMAP_ALL extensions needed for legacy checkpoint/restore functionality.
+ *
+ * @param container The VFIO container to check.
+ * @param errp Pointer to an Error object for reporting unsupported features.
+ * @return true if both extensions are supported, false otherwise.
+ */
 static bool vfio_cpr_supported(VFIOContainer *container, Error **errp)
 {
     if (!ioctl(container->fd, VFIO_CHECK_EXTENSION, VFIO_UPDATE_VADDR)) {
@@ -85,6 +119,14 @@ static bool vfio_cpr_supported(VFIOContainer *container, Error **errp)
     }
 }
 
+/**
+ * @brief Prepares the VFIO container for VM state saving by unmapping all DMA virtual addresses.
+ *
+ * Unmaps all DMA mappings with virtual addresses in the container before VM state is saved.
+ * Reports errors and returns -1 on failure, 0 on success.
+ *
+ * @return 0 on success, -1 on failure.
+ */
 static int vfio_container_pre_save(void *opaque)
 {
     VFIOContainer *container = opaque;
@@ -97,6 +139,16 @@ static int vfio_container_pre_save(void *opaque)
     return 0;
 }
 
+/**
+ * @brief Post-load callback to restore VFIO container state after VM migration.
+ *
+ * Re-registers the VFIO memory listener, resets the CPR reused flags for the container and all devices,
+ * and restores the original DMA map function for the IOMMU class after VM state has been loaded.
+ *
+ * @param opaque Pointer to the VFIOContainer.
+ * @param version_id VM state version identifier.
+ * @return 0 on success, -1 on failure.
+ */
 static int vfio_container_post_load(void *opaque, int version_id)
 {
     VFIOContainer *container = opaque;
@@ -138,6 +190,15 @@ static const VMStateDescription vfio_container_vmstate = {
     }
 };
 
+/**
+ * @brief Handles recovery of DMA virtual address mappings after migration precopy failure.
+ *
+ * If a migration precopy failure occurs and DMA virtual addresses were previously unmapped,
+ * temporarily registers a memory listener and redirects DMA mapping to restore lost virtual
+ * address mappings for the VFIO container. After remapping, restores the original DMA map function.
+ *
+ * @return 0 Always returns 0.
+ */
 static int vfio_cpr_fail_notifier(NotifierWithReturn *notifier,
                                   MigrationEvent *e, Error **errp)
 {
@@ -172,6 +233,15 @@ static int vfio_cpr_fail_notifier(NotifierWithReturn *notifier,
     return 0;
 }
 
+/**
+ * @brief Registers legacy CPR support for a VFIO container.
+ *
+ * Adds migration notifiers and VM state registration for checkpoint/restore (CPR) support. If the container does not support required CPR features, adds a migration blocker for CPR transfer mode. During incoming CPR, diverts DMA mapping calls to the legacy CPR DMA map function.
+ *
+ * @param container The VFIO container to register for CPR support.
+ * @param errp Pointer to an Error pointer for reporting errors.
+ * @return true if registration succeeds or is blocked due to unsupported features; false if migration blocker registration fails.
+ */
 bool vfio_legacy_cpr_register_container(VFIOContainer *container, Error **errp)
 {
     VFIOContainerBase *bcontainer = &container->bcontainer;
@@ -200,6 +270,11 @@ bool vfio_legacy_cpr_register_container(VFIOContainer *container, Error **errp)
     return true;
 }
 
+/**
+ * @brief Unregisters legacy CPR support for a VFIO container.
+ *
+ * Removes migration notifiers, deletes migration blockers, and unregisters VM state associated with the container's legacy checkpoint/restore functionality.
+ */
 void vfio_legacy_cpr_unregister_container(VFIOContainer *container)
 {
     VFIOContainerBase *bcontainer = &container->bcontainer;
@@ -210,13 +285,10 @@ void vfio_legacy_cpr_unregister_container(VFIOContainer *container)
     migration_remove_notifier(&container->cpr.transfer_notifier);
 }
 
-/*
- * In old QEMU, VFIO_DMA_UNMAP_FLAG_VADDR may fail on some mapping after
- * succeeding for others, so the latter have lost their vaddr.  Call this
- * to restore vaddr for a section with a giommu.
+/**
+ * @brief Restores DMA virtual address mappings for a memory region section backed by a guest IOMMU.
  *
- * The giommu already exists.  Find it and replay it, which calls
- * vfio_legacy_cpr_dma_map further down the stack.
+ * Finds the corresponding VFIOGuestIOMMU for the given memory region section and replays its IOMMU mappings to restore lost virtual address mappings, typically after a failed unmap during migration.
  */
 void vfio_cpr_giommu_remap(VFIOContainerBase *bcontainer,
                            MemoryRegionSection *section)
@@ -235,13 +307,15 @@ void vfio_cpr_giommu_remap(VFIOContainerBase *bcontainer,
     memory_region_iommu_replay(giommu->iommu_mr, &giommu->n);
 }
 
-/*
- * In old QEMU, VFIO_DMA_UNMAP_FLAG_VADDR may fail on some mapping after
- * succeeding for others, so the latter have lost their vaddr.  Call this
- * to restore vaddr for a section with a RamDiscardManager.
+/**
+ * @brief Restores DMA virtual address mappings for a memory region section managed by a RAM discard listener.
  *
- * The ram discard listener already exists.  Call its populate function
- * directly, which calls vfio_legacy_cpr_dma_map.
+ * Finds the RAM discard listener associated with the given container and memory region section,
+ * and invokes its populate notification to replay DMA mappings using the legacy CPR mechanism.
+ *
+ * @param bcontainer The VFIO container base.
+ * @param section The memory region section to restore mappings for.
+ * @return true if mappings were successfully restored, false otherwise.
  */
 bool vfio_cpr_ram_discard_register_listener(VFIOContainerBase *bcontainer,
                                             MemoryRegionSection *section)
@@ -253,6 +327,15 @@ bool vfio_cpr_ram_discard_register_listener(VFIOContainerBase *bcontainer,
     return vrdl->listener.notify_populate(&vrdl->listener, section) == 0;
 }
 
+/**
+ * @brief Checks if two file descriptors refer to the same device.
+ *
+ * Compares the device IDs of the provided file descriptors using fstat.
+ *
+ * @param fd1 First file descriptor.
+ * @param fd2 Second file descriptor.
+ * @return true if both file descriptors refer to the same device, false otherwise.
+ */
 static bool same_device(int fd1, int fd2)
 {
     struct stat st1, st2;
@@ -260,6 +343,14 @@ static bool same_device(int fd1, int fd2)
     return !fstat(fd1, &st1) && !fstat(fd2, &st2) && st1.st_dev == st2.st_dev;
 }
 
+/**
+ * @brief Checks if a VFIO container's file descriptor matches or refers to the same device as a group's saved fd, deduplicating if necessary.
+ *
+ * If the container's fd and the provided fd are identical, returns true. If they refer to the same device but are different fds (due to duplication during CPR save), closes the duplicate, updates the saved fd to the container's fd, and returns true. Returns false if the fds refer to different devices.
+ *
+ * @param pfd Pointer to the group's saved file descriptor; updated if deduplication occurs.
+ * @return true if the container matches or is deduplicated successfully; false otherwise.
+ */
 bool vfio_cpr_container_match(VFIOContainer *container, VFIOGroup *group,
                               int *pfd)
 {

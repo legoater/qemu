@@ -56,6 +56,17 @@ static void vfio_disable_interrupts(VFIOPCIDevice *vdev);
 static void vfio_mmap_set_enabled(VFIOPCIDevice *vdev, bool enabled);
 static void vfio_msi_disable_common(VFIOPCIDevice *vdev);
 
+/**
+ * @brief Initializes an event notifier for a VFIO PCI device interrupt or event.
+ *
+ * Attempts to initialize the given event notifier for the specified device and event type.
+ * On failure, sets an error with the provided name and returns false.
+ *
+ * @param name Descriptive name for the notifier, used in error reporting.
+ * @param nr Index or identifier for the notifier instance.
+ * @param errp Pointer to an Error object for reporting initialization failures.
+ * @return true if initialization succeeds, false otherwise.
+ */
 static bool vfio_notifier_init(VFIOPCIDevice *vdev, EventNotifier *e,
                                const char *name, int nr, Error **errp)
 {
@@ -67,6 +78,13 @@ static bool vfio_notifier_init(VFIOPCIDevice *vdev, EventNotifier *e,
     return !ret;
 }
 
+/**
+ * @brief Cleans up an event notifier associated with a VFIO PCI device.
+ *
+ * Releases resources for the specified event notifier used for interrupt or event handling.
+ *
+ * @param e Pointer to the EventNotifier to be cleaned up.
+ */
 static void vfio_notifier_cleanup(VFIOPCIDevice *vdev, EventNotifier *e,
                                   const char *name, int nr)
 {
@@ -135,6 +153,16 @@ static void vfio_intx_eoi(VFIODevice *vbasedev)
     vfio_device_irq_unmask(vbasedev, VFIO_PCI_INTX_IRQ_INDEX);
 }
 
+/**
+ * @brief Enables KVM acceleration for INTx interrupt handling on a VFIO PCI device.
+ *
+ * Attempts to set up KVM irqfd and resamplefd support for INTx interrupts, allowing
+ * efficient interrupt delivery via KVM acceleration. Falls back to userspace handling
+ * if KVM support is unavailable or setup fails.
+ *
+ * @param errp Pointer to an Error pointer for reporting setup failures.
+ * @return true if KVM acceleration is enabled or not required, false on failure.
+ */
 static bool vfio_intx_enable_kvm(VFIOPCIDevice *vdev, Error **errp)
 {
 #ifdef CONFIG_KVM
@@ -195,6 +223,13 @@ fail:
 #endif
 }
 
+/**
+ * @brief Disables KVM acceleration for INTx interrupts on a VFIO PCI device.
+ *
+ * Transitions INTx interrupt handling from KVM back to QEMU by removing the KVM irqfd notifier,
+ * cleaning up the unmask event notifier, and re-enabling QEMU's event handler for INTx interrupts.
+ * Ensures the device is in a known masked state and handles any missed interrupts.
+ */
 static void vfio_intx_disable_kvm(VFIOPCIDevice *vdev)
 {
 #ifdef CONFIG_KVM
@@ -279,6 +314,15 @@ static void vfio_irqchip_change(Notifier *notify, void *data)
     vfio_intx_update(vdev, &vdev->intx.route);
 }
 
+/**
+ * @brief Enables INTx interrupt handling for a VFIO PCI device.
+ *
+ * Configures and enables legacy INTx interrupt support for the specified VFIO PCI device, including event notifier setup, IRQ routing, and integration with KVM if available. Returns true on success or false if initialization fails.
+ *
+ * @param vdev The VFIO PCI device to configure.
+ * @param errp Pointer to an Error object for reporting failures.
+ * @return true if INTx interrupt handling was successfully enabled, false otherwise.
+ */
 static bool vfio_intx_enable(VFIOPCIDevice *vdev, Error **errp)
 {
     uint8_t pin = vfio_pci_read_config(&vdev->pdev, PCI_INTERRUPT_PIN, 1);
@@ -330,6 +374,11 @@ static bool vfio_intx_enable(VFIOPCIDevice *vdev, Error **errp)
     return true;
 }
 
+/**
+ * @brief Disables INTx interrupt handling for the VFIO PCI device.
+ *
+ * Stops INTx event monitoring, disables KVM and VFIO INTx IRQs, clears pending state, deasserts the PCI IRQ, re-enables BAR mmaps, and cleans up the INTx event notifier.
+ */
 static void vfio_intx_disable(VFIOPCIDevice *vdev)
 {
     int fd;
@@ -474,6 +523,14 @@ static int vfio_enable_vectors(VFIOPCIDevice *vdev, bool msix)
     return ret;
 }
 
+/**
+ * @brief Adds a KVM MSI or MSI-X virtual IRQ route for a given vector.
+ *
+ * Sets up a KVM IRQ routing entry for the specified MSI or MSI-X vector unless KVM routing is disabled for the vector type.
+ *
+ * @param vector_n Index of the MSI/MSI-X vector.
+ * @param msix True for MSI-X, false for MSI.
+ */
 static void vfio_add_kvm_msi_virq(VFIOPCIDevice *vdev, VFIOMSIVector *vector,
                                   int vector_n, bool msix)
 {
@@ -485,6 +542,14 @@ static void vfio_add_kvm_msi_virq(VFIOPCIDevice *vdev, VFIOMSIVector *vector,
                                              vector_n, &vdev->pdev);
 }
 
+/**
+ * @brief Connects a KVM MSI virtual IRQ to an event notifier for a specific vector.
+ *
+ * Initializes the event notifier for the given MSI/MSI-X vector and registers it with KVM for interrupt delivery. Cleans up and releases the virtual IRQ if initialization or registration fails.
+ *
+ * @param vector Pointer to the MSI/MSI-X vector structure.
+ * @param nr Index of the vector being connected.
+ */
 static void vfio_connect_kvm_msi_virq(VFIOMSIVector *vector, int nr)
 {
     const char *name = "kvm_interrupt";
@@ -512,6 +577,17 @@ fail_notifier:
     vector->virq = -1;
 }
 
+/**
+ * @brief Removes a KVM MSI virtual IRQ route and cleans up associated resources.
+ *
+ * Disconnects the specified MSI/MSI-X vector from the KVM virtual IRQ routing,
+ * releases the assigned virtual IRQ, resets the vector's virq field, and
+ * cleans up the event notifier for the given vector index.
+ *
+ * @param vdev The VFIO PCI device containing the vector.
+ * @param vector The MSI/MSI-X vector to disconnect.
+ * @param nr The index of the vector being removed.
+ */
 static void vfio_remove_kvm_msi_virq(VFIOPCIDevice *vdev, VFIOMSIVector *vector,
                                      int nr)
 {
@@ -522,6 +598,15 @@ static void vfio_remove_kvm_msi_virq(VFIOPCIDevice *vdev, VFIOMSIVector *vector,
     vfio_notifier_cleanup(vdev, &vector->kvm_interrupt, "kvm_interrupt", nr);
 }
 
+/**
+ * @brief Updates the KVM MSI route for a given MSI/MSI-X vector.
+ *
+ * Updates the KVM virtual IRQ routing for the specified MSI or MSI-X vector with a new MSI message and commits the routing changes.
+ *
+ * @param vector Pointer to the MSI/MSI-X vector to update.
+ * @param msg The new MSI message to route.
+ * @param pdev The PCI device associated with the vector.
+ */
 static void vfio_update_kvm_msi_virq(VFIOMSIVector *vector, MSIMessage msg,
                                      PCIDevice *pdev)
 {
@@ -529,6 +614,14 @@ static void vfio_update_kvm_msi_virq(VFIOMSIVector *vector, MSIMessage msg,
     kvm_irqchip_commit_routes(kvm_state);
 }
 
+/**
+ * @brief Initializes a single MSI or MSI-X vector for a VFIO PCI device.
+ *
+ * Sets up the vector's event notifier, marks it as in use, and enables the vector in the PCI device if MSI-X is active.
+ *
+ * @param vdev The VFIO PCI device.
+ * @param nr The index of the vector to initialize.
+ */
 static void vfio_vector_init(VFIOPCIDevice *vdev, int nr)
 {
     VFIOMSIVector *vector = &vdev->msi_vectors[nr];
@@ -546,6 +639,17 @@ static void vfio_vector_init(VFIOPCIDevice *vdev, int nr)
     }
 }
 
+/**
+ * @brief Sets IRQ signaling for a specific MSI or MSI-X vector.
+ *
+ * Configures the eventfd used to signal an interrupt for the given MSI or MSI-X vector
+ * on the VFIO device. Selects the appropriate event notifier based on whether the vector
+ * is routed through KVM or not, and updates the VFIO device's IRQ signaling accordingly.
+ *
+ * @param vbasedev The VFIO device to configure.
+ * @param vector The MSI or MSI-X vector to update.
+ * @param nr The vector number to set signaling for.
+ */
 static void set_irq_signalling(VFIODevice *vbasedev, VFIOMSIVector *vector,
                                unsigned int nr)
 {
@@ -565,6 +669,17 @@ static void set_irq_signalling(VFIODevice *vbasedev, VFIOMSIVector *vector,
     }
 }
 
+/**
+ * @brief Enables and configures a specific MSI-X vector for a VFIO PCI device.
+ *
+ * Sets up the specified MSI-X vector, including event notifier initialization, KVM IRQ routing, and guest handler registration. Handles dynamic allocation or resizing of vectors as needed, updates interrupt signaling, and manages Pending Bit Array (PBA) emulation state.
+ *
+ * @param pdev The PCI device to configure.
+ * @param nr The MSI-X vector number to enable.
+ * @param msg Optional MSI message for KVM routing; if NULL, disables KVM routing for this vector.
+ * @param handler The I/O handler to invoke when the vector is triggered.
+ * @return 0 on success, or a negative error code on failure to enable vectors.
+ */
 static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
                                    MSIMessage *msg, IOHandler *handler)
 {
@@ -686,6 +801,11 @@ static void vfio_prepare_kvm_msi_virq_batch(VFIOPCIDevice *vdev)
     vfio_route_change = kvm_irqchip_begin_route_changes(kvm_state);
 }
 
+/**
+ * @brief Commits deferred KVM MSI IRQ routing changes for all enabled vectors.
+ *
+ * Applies any pending KVM IRQ routing updates and connects each MSI/MSI-X vector to its corresponding KVM virtual IRQ.
+ */
 static void vfio_commit_kvm_msi_virq_batch(VFIOPCIDevice *vdev)
 {
     int i;
@@ -754,6 +874,11 @@ static void vfio_msix_enable(VFIOPCIDevice *vdev)
     trace_vfio_msix_enable(vdev->vbasedev.name);
 }
 
+/**
+ * @brief Enables MSI interrupts for a VFIO PCI device.
+ *
+ * Allocates and initializes MSI vectors, sets up event notifiers and KVM routing for each vector, and enables MSI interrupt delivery. If enabling all requested vectors fails, retries with the number of supported vectors or disables MSI and leaves interrupts disabled if unsuccessful.
+ */
 static void vfio_msi_enable(VFIOPCIDevice *vdev)
 {
     int ret, i;
@@ -829,6 +954,13 @@ retry:
     trace_vfio_msi_enable(vdev->vbasedev.name, vdev->nr_vectors);
 }
 
+/**
+ * @brief Disables all MSI and MSI-X interrupts for the VFIO PCI device.
+ *
+ * Releases all resources associated with MSI and MSI-X vectors, including
+ * KVM virtual IRQ routing, event notifiers, and vector state. Resets the
+ * device's interrupt mode to none.
+ */
 static void vfio_msi_disable_common(VFIOPCIDevice *vdev)
 {
     int i;
@@ -2888,6 +3020,11 @@ static bool vfio_populate_device(VFIOPCIDevice *vdev, Error **errp)
     return true;
 }
 
+/**
+ * @brief Releases resources and detaches the specified VFIO PCI device.
+ *
+ * Finalizes display and BAR resources, frees allocated buffers, detaches the underlying VFIO device, and releases associated memory for the device name and MSI-X structures.
+ */
 static void vfio_pci_put_device(VFIOPCIDevice *vdev)
 {
     vfio_display_finalize(vdev);
@@ -2930,11 +3067,12 @@ static void vfio_err_notifier_handler(void *opaque)
     vm_stop(RUN_STATE_INTERNAL_ERROR);
 }
 
-/*
- * Registers error notifier for devices supporting error recovery.
- * If we encounter a failure in this function, we report an error
- * and continue after disabling error recovery support for the
- * device.
+/**
+ * @brief Registers an error notifier for PCI devices with error recovery support.
+ *
+ * Sets up an event notifier and file descriptor handler to receive PCIe error
+ * recovery notifications for the given device. If initialization fails, error
+ * recovery support is disabled for the device and an error is reported.
  */
 static void vfio_register_err_notifier(VFIOPCIDevice *vdev)
 {
@@ -2964,6 +3102,12 @@ static void vfio_register_err_notifier(VFIOPCIDevice *vdev)
     }
 }
 
+/**
+ * @brief Unregisters the PCIe error notifier for a VFIO PCI device.
+ *
+ * Disables error interrupt signaling, removes the file descriptor handler,
+ * and cleans up the associated event notifier if PCIe AER support is present.
+ */
 static void vfio_unregister_err_notifier(VFIOPCIDevice *vdev)
 {
     Error *err = NULL;
@@ -2981,6 +3125,11 @@ static void vfio_unregister_err_notifier(VFIOPCIDevice *vdev)
     vfio_notifier_cleanup(vdev, &vdev->err_notifier, "err_notifier", 0);
 }
 
+/**
+ * @brief Handles VFIO PCI device request notifications.
+ *
+ * Invoked when a request event is signaled by the device, this handler initiates device unplug and logs a warning if the unplug operation fails.
+ */
 static void vfio_req_notifier_handler(void *opaque)
 {
     VFIOPCIDevice *vdev = opaque;
@@ -2996,6 +3145,13 @@ static void vfio_req_notifier_handler(void *opaque)
     }
 }
 
+/**
+ * @brief Registers a request notifier for the VFIO PCI device.
+ *
+ * Sets up event notification and IRQ signaling for the device's request (REQ) interrupt,
+ * enabling the device to notify QEMU of requests such as device state transitions.
+ * If the device or host does not support request interrupts, the function returns without action.
+ */
 static void vfio_register_req_notifier(VFIOPCIDevice *vdev)
 {
     struct vfio_irq_info irq_info;
@@ -3032,6 +3188,13 @@ static void vfio_register_req_notifier(VFIOPCIDevice *vdev)
     }
 }
 
+/**
+ * @brief Unregisters the request notifier for a VFIO PCI device.
+ *
+ * Disables and cleans up the request (REQ) event notifier if it is currently enabled,
+ * removing the associated file descriptor handler and disabling IRQ signaling for the
+ * request interrupt.
+ */
 static void vfio_unregister_req_notifier(VFIOPCIDevice *vdev)
 {
     Error *err = NULL;
@@ -3051,6 +3214,15 @@ static void vfio_unregister_req_notifier(VFIOPCIDevice *vdev)
     vdev->req_enabled = false;
 }
 
+/**
+ * @brief Initializes and prepares the VFIO PCI device's configuration space for emulation.
+ *
+ * Reads the device's PCI configuration space, allocates and sets up emulated configuration bits,
+ * applies vendor and device ID overrides if specified, configures BARs and ROM, and performs early MSI-X setup.
+ * Returns false and sets an error if any step fails.
+ *
+ * @return true on successful setup, false on failure.
+ */
 static bool vfio_pci_config_setup(VFIOPCIDevice *vdev, Error **errp)
 {
     PCIDevice *pdev = &vdev->pdev;
@@ -3157,6 +3329,15 @@ static bool vfio_pci_config_setup(VFIOPCIDevice *vdev, Error **errp)
     return true;
 }
 
+/**
+ * @brief Sets up interrupt handling for a VFIO PCI device.
+ *
+ * Initializes emulated MSI and MSI-X capability bits and configures INTx interrupt routing and notifiers if the device supports legacy interrupts. Returns true on success, or false and sets an error on failure to enable INTx.
+ *
+ * @param vdev The VFIO PCI device to configure.
+ * @param errp Pointer to an Error object for reporting failures.
+ * @return true if interrupt setup succeeds, false otherwise.
+ */
 static bool vfio_interrupt_setup(VFIOPCIDevice *vdev, Error **errp)
 {
     PCIDevice *pdev = &vdev->pdev;
@@ -3189,6 +3370,14 @@ static bool vfio_interrupt_setup(VFIOPCIDevice *vdev, Error **errp)
     return true;
 }
 
+/**
+ * @brief Realizes and initializes a VFIO PCI device for passthrough.
+ *
+ * Attaches the QEMU PCI device to a host VFIO device, sets up configuration space, BARs, interrupts, capabilities, display, and migration support. Handles mediated device checks, error and request notifier registration, and applies device-specific quirks. Cleans up and reports errors if initialization fails at any stage.
+ *
+ * @param pdev The QEMU PCI device to realize as a VFIO passthrough device.
+ * @param errp Pointer to an Error object for reporting initialization failures.
+ */
 static void vfio_pci_realize(PCIDevice *pdev, Error **errp)
 {
     ERRP_GUARD();
@@ -3349,6 +3538,13 @@ error:
     error_prepend(errp, VFIO_MSG_PREFIX, vbasedev->name);
 }
 
+/**
+ * @brief Finalizes and cleans up resources for a VFIO PCI device instance.
+ *
+ * This function is called when the VFIO PCI device object is being destroyed.
+ * It releases all resources associated with the device, including display state,
+ * BARs, emulated configuration bits, and ROM buffers.
+ */
 static void vfio_instance_finalize(Object *obj)
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(obj);
@@ -3380,6 +3576,15 @@ static void vfio_exitfn(PCIDevice *pdev)
     }
 }
 
+/**
+ * @brief Resets the VFIO PCI device, selecting the most appropriate reset method.
+ *
+ * Skips reset if the device is being reused for CPR (Checkpoint/Restore). Otherwise,
+ * attempts device reset in the following order: device-specific reset function, FLR (Function Level Reset),
+ * hot reset, or power management reset if supported. Performs pre- and post-reset handling as needed.
+ *
+ * @param dev The DeviceState representing the VFIO PCI device to reset.
+ */
 static void vfio_pci_reset(DeviceState *dev)
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(dev);
@@ -3548,6 +3753,11 @@ static void vfio_pci_set_fd(Object *obj, const char *str, Error **errp)
 }
 #endif
 
+/**
+ * @brief Initializes the VFIO PCI device class with properties and behaviors.
+ *
+ * Sets up the device and PCI class structures for VFIO-based PCI device assignment, including legacy reset, property registration, VM state, and realization function. Registers detailed property descriptions for all supported device options and features.
+ */
 static void vfio_pci_dev_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);

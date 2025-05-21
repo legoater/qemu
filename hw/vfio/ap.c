@@ -50,6 +50,11 @@ QTAILQ_HEAD(, APConfigChgEvent) cfg_chg_events =
 
 OBJECT_DECLARE_SIMPLE_TYPE(VFIOAPDevice, VFIO_AP_DEVICE)
 
+/**
+ * @brief Marks the VFIO device as not requiring a reset.
+ *
+ * Sets the device's needs_reset flag to false, indicating that a reset is not needed.
+ */
 static void vfio_ap_compute_needs_reset(VFIODevice *vdev)
 {
     vdev->needs_reset = false;
@@ -63,6 +68,11 @@ struct VFIODeviceOps vfio_ap_ops = {
     .vfio_compute_needs_reset = vfio_ap_compute_needs_reset,
 };
 
+/**
+ * @brief Handles the request IRQ event for a VFIO AP device.
+ *
+ * If a request interrupt is signaled, initiates device unplug and reports any errors encountered.
+ */
 static void vfio_ap_req_notifier_handler(void *opaque)
 {
     VFIOAPDevice *vapdev = opaque;
@@ -79,6 +89,13 @@ static void vfio_ap_req_notifier_handler(void *opaque)
     }
 }
 
+/**
+ * @brief Handles the AP configuration change IRQ event for a VFIO AP device.
+ *
+ * Allocates and queues a new AP configuration change event, then triggers a CSS configuration reload.
+ *
+ * This function is invoked when the configuration change event notifier is signaled.
+ */
 static void vfio_ap_cfg_chg_notifier_handler(void *opaque)
 {
     APConfigChgEvent *cfg_chg_event;
@@ -96,6 +113,14 @@ static void vfio_ap_cfg_chg_notifier_handler(void *opaque)
 
 }
 
+/**
+ * @brief Retrieves and removes the next pending AP configuration change event.
+ *
+ * Fills the provided response structure with details of the next AP configuration change event, if available. If additional events remain in the queue, sets a flag in the response to indicate more pending events.
+ *
+ * @param res Pointer to a ChscSeiNt0Res structure to be populated with event information.
+ * @return 0 if an event was retrieved and the response was filled; 1 if no events are pending.
+ */
 int ap_chsc_sei_nt0_get_event(void *res)
 {
     ChscSeiNt0Res *nt0_res  = (ChscSeiNt0Res *)res;
@@ -130,11 +155,29 @@ int ap_chsc_sei_nt0_get_event(void *res)
 
 }
 
+/**
+ * @brief Checks if there are pending AP configuration change events.
+ *
+ * @return int Nonzero if at least one AP configuration change event is queued; zero otherwise.
+ */
 int ap_chsc_sei_nt0_have_event(void)
 {
     return !QTAILQ_EMPTY(&cfg_chg_events);
 }
 
+/**
+ * @brief Registers an event notifier for a specified VFIO AP device IRQ.
+ *
+ * Sets up an event notifier and file descriptor handler for the given IRQ
+ * (either request or configuration change) on the VFIO AP device. Enables
+ * VFIO IRQ signaling for the IRQ. On failure, sets an appropriate error
+ * message in @p errp and cleans up any allocated resources.
+ *
+ * @param vapdev The VFIO AP device instance.
+ * @param irq The IRQ index to register (request or configuration change).
+ * @param errp Pointer to an Error* for reporting errors.
+ * @return true on successful registration, false on failure.
+ */
 static bool vfio_ap_register_irq_notifier(VFIOAPDevice *vapdev,
                                           unsigned int irq, Error **errp)
 {
@@ -196,6 +239,14 @@ static bool vfio_ap_register_irq_notifier(VFIOAPDevice *vapdev,
     return true;
 }
 
+/**
+ * @brief Unregisters the event notifier for a specified VFIO AP device IRQ.
+ *
+ * Disables IRQ signaling for the given IRQ index, removes the associated file descriptor handler, and cleans up the event notifier. Logs a warning if disabling IRQ signaling fails. No action is taken for unsupported IRQ indices.
+ *
+ * @param vapdev The VFIO AP device instance.
+ * @param irq The IRQ index to unregister (request or configuration change).
+ */
 static void vfio_ap_unregister_irq_notifier(VFIOAPDevice *vapdev,
                                             unsigned int irq)
 {
@@ -224,6 +275,17 @@ static void vfio_ap_unregister_irq_notifier(VFIOAPDevice *vapdev,
     event_notifier_cleanup(notifier);
 }
 
+/**
+ * @brief Initializes and attaches a VFIO AP device, registering IRQ notifiers.
+ *
+ * Attempts to realize the VFIO AP device by obtaining its name, attaching it to the address space,
+ * and registering IRQ notifiers for request and configuration change events. Errors during IRQ
+ * notifier registration are reported as warnings but do not prevent device initialization.
+ * If device attachment fails, the error is reported and the device name is freed.
+ *
+ * @param dev The device state to realize as a VFIO AP device.
+ * @param errp Pointer to an Error pointer for reporting fatal errors.
+ */
 static void vfio_ap_realize(DeviceState *dev, Error **errp)
 {
     ERRP_GUARD();
@@ -264,6 +326,11 @@ error:
     g_free(vbasedev->name);
 }
 
+/**
+ * @brief Cleans up the VFIO AP device during unrealization.
+ *
+ * Unregisters IRQ notifiers, detaches the VFIO device, and frees the device name when the device is being removed.
+ */
 static void vfio_ap_unrealize(DeviceState *dev)
 {
     VFIOAPDevice *vapdev = VFIO_AP_DEVICE(dev);

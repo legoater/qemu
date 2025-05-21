@@ -87,6 +87,13 @@ void cpr_delete_fd(const char *name, int id)
     trace_cpr_delete_fd(name, id);
 }
 
+/**
+ * @brief Retrieves the file descriptor associated with a given name and id from the CPR state.
+ *
+ * @param name The identifier name of the file descriptor.
+ * @param id The numeric identifier for the file descriptor.
+ * @return The file descriptor if found, or -1 if not present in the CPR state.
+ */
 int cpr_find_fd(const char *name, int id)
 {
     CprFd *elem = find_fd(&cpr_state.fds, name, id);
@@ -96,6 +103,20 @@ int cpr_find_fd(const char *name, int id)
     return fd;
 }
 
+/**
+ * @brief Opens or reuses a file descriptor for CPR state management.
+ *
+ * Attempts to find an existing file descriptor associated with the given name and id.
+ * If found, sets *reused to true and returns the descriptor. If not found, opens the file at the specified path with the given flags, saves the new descriptor in the CPR state, and returns it. On failure, returns a negative error code and sets *errp.
+ *
+ * @param path Path to the file to open if no existing descriptor is found.
+ * @param flags Flags to use when opening the file.
+ * @param name Identifier name for the CPR file descriptor.
+ * @param id Identifier value for the CPR file descriptor.
+ * @param reused Pointer set to true if an existing descriptor was reused, false otherwise.
+ * @param errp Pointer to an Error object set on failure.
+ * @return File descriptor on success, or negative error code on failure.
+ */
 int cpr_open_fd(const char *path, int flags, const char *name, int id,
                 bool *reused, Error **errp)
 {
@@ -239,6 +260,11 @@ int cpr_state_load(MigrationChannel *channel, Error **errp)
     return ret;
 }
 
+/**
+ * @brief Closes the current CPR state file if open.
+ *
+ * Releases resources associated with the CPR state file and resets its reference.
+ */
 void cpr_state_close(void)
 {
     if (cpr_state_file) {
@@ -247,6 +273,13 @@ void cpr_state_close(void)
     }
 }
 
+/**
+ * @brief Determines if CPR state reuse is required for migration.
+ *
+ * Returns true if the current migration mode is CPR transfer, indicating that checkpoint/restore state should be reused.
+ *
+ * @return true if CPR reuse is needed; false otherwise.
+ */
 bool cpr_needed_for_reuse(void *opaque)
 {
     MigMode mode = migrate_mode();

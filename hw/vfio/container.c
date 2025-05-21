@@ -121,6 +121,17 @@ unmap_exit:
     return ret;
 }
 
+/**
+ * @brief Unmaps a DMA region for a legacy VFIO container, handling kernel bugs and dirty page tracking.
+ *
+ * Attempts to unmap a DMA region in a legacy VFIO container. If dirty page tracking is enabled and supported, synchronizes the dirty bitmap after unmapping. Implements a workaround for a known kernel off-by-one bug in VFIO_TYPE1v2_IOMMU by retrying the unmap with a reduced size if necessary. Returns an error code on failure.
+ *
+ * @param bcontainer Pointer to the base VFIO container.
+ * @param iova I/O virtual address to unmap.
+ * @param size Size of the region to unmap.
+ * @param iotlb Optional pointer to IOMMU TLB entry for dirty tracking.
+ * @return 0 on success, or a negative error code on failure.
+ */
 static int vfio_legacy_dma_unmap_one(const VFIOContainerBase *bcontainer,
                                      hwaddr iova, ram_addr_t size,
                                      IOMMUTLBEntry *iotlb)
@@ -182,8 +193,16 @@ static int vfio_legacy_dma_unmap_one(const VFIOContainerBase *bcontainer,
     return 0;
 }
 
-/*
- * DMA - Mapping and unmapping for the "type1" IOMMU interface used on x86
+/**
+ * @brief Unmaps a DMA region for a legacy VFIO container.
+ *
+ * Unmaps a DMA region from the IOMMU address space. If @p unmap_all is true, splits the unmap operation into two halves to avoid kernel limitations on 64-bit spans. Otherwise, unmaps the specified region directly.
+ *
+ * @param iova The starting IOVA address to unmap.
+ * @param size The size of the region to unmap.
+ * @param iotlb Optional pointer to IOMMU TLB entry for dirty tracking.
+ * @param unmap_all If true, unmaps the entire 64-bit address space in two parts.
+ * @return 0 on success, or a negative error code on failure.
  */
 static int vfio_legacy_dma_unmap(const VFIOContainerBase *bcontainer,
                                  hwaddr iova, ram_addr_t size,
@@ -210,6 +229,19 @@ static int vfio_legacy_dma_unmap(const VFIOContainerBase *bcontainer,
     return ret;
 }
 
+/**
+ * @brief Maps a memory region for DMA access in a legacy VFIO container.
+ *
+ * Attempts to map a host virtual memory region to an IOVA for DMA, with read or read/write permissions.
+ * If the mapping fails due to the region being busy (EBUSY), it unmaps the region and retries the mapping once.
+ *
+ * @param bcontainer Pointer to the base VFIO container structure.
+ * @param iova The IO virtual address to map.
+ * @param size The size of the region to map.
+ * @param vaddr Host virtual address of the memory to map.
+ * @param readonly If true, maps the region as read-only; otherwise, maps as read/write.
+ * @return 0 on success, or a negative errno value on failure.
+ */
 int vfio_legacy_dma_map(const VFIOContainerBase *bcontainer, hwaddr iova,
                         ram_addr_t size, void *vaddr, bool readonly)
 {
@@ -391,6 +423,18 @@ static const char *vfio_get_iommu_class_name(int iommu_type)
     };
 }
 
+/**
+ * @brief Sets the IOMMU type for a VFIO container and associates a group with it.
+ *
+ * Attempts to set the specified IOMMU type for the given VFIO container and group file descriptors.
+ * If setting the sPAPR TCE v2 IOMMU type fails, it automatically falls back to v1.
+ *
+ * @param container_fd File descriptor for the VFIO container.
+ * @param group_fd File descriptor for the VFIO group.
+ * @param iommu_type Pointer to the desired IOMMU type; may be updated if fallback occurs.
+ * @param errp Pointer to an Error object for reporting failures.
+ * @return true on success, false on failure (with error set in errp).
+ */
 static bool vfio_set_iommu(int container_fd, int group_fd,
                            int *iommu_type, Error **errp)
 {
@@ -417,6 +461,17 @@ static bool vfio_set_iommu(int container_fd, int group_fd,
     return true;
 }
 
+/**
+ * @brief Creates and initializes a VFIO container object.
+ *
+ * Determines the IOMMU type for the given file descriptor, sets up the container and group in the kernel if not reused, and returns a new VFIOContainer instance with the appropriate configuration.
+ *
+ * @param fd File descriptor for the VFIO container.
+ * @param group Pointer to the VFIO group to associate with the container.
+ * @param cpr_reused Indicates if the container is being reused for checkpoint/restore and should skip kernel configuration.
+ * @param errp Pointer to an Error pointer for reporting errors.
+ * @return Pointer to the initialized VFIOContainer, or NULL on failure.
+ */
 static VFIOContainer *vfio_create_container(int fd, VFIOGroup *group,
                                             bool cpr_reused, Error **errp)
 {
@@ -545,6 +600,16 @@ static bool vfio_legacy_setup(VFIOContainerBase *bcontainer, Error **errp)
     return true;
 }
 
+/**
+ * @brief Disables RAM discard for a VFIO container when attaching a group.
+ *
+ * Attempts to disable RAM discard for the container based on its IOMMU type when a group is attached. If disabling fails, reports an error and detaches the group from the container.
+ *
+ * @param container The VFIO container to update.
+ * @param group The VFIO group being attached.
+ * @param errp Pointer to an Error object for reporting failures.
+ * @return true if RAM discard was successfully disabled; false otherwise.
+ */
 static bool vfio_container_attach_discard_disable(VFIOContainer *container,
                                             VFIOGroup *group, Error **errp)
 {
@@ -592,6 +657,14 @@ static bool vfio_container_attach_discard_disable(VFIOContainer *container,
     return !ret;
 }
 
+/**
+ * @brief Adds a VFIO group to a container and manages associated resources.
+ *
+ * Disables RAM discard for the container, links the group to the container, adds the group's KVM device, and saves the container file descriptor unless CPR reuse is active.
+ *
+ * @param cpr_reused Indicates whether the container file descriptor is being reused for checkpoint/restore.
+ * @return true on success, false if attaching the group fails.
+ */
 static bool vfio_container_group_add(VFIOContainer *container, VFIOGroup *group,
                                      bool cpr_reused, Error **errp)
 {
@@ -607,6 +680,11 @@ static bool vfio_container_group_add(VFIOContainer *container, VFIOGroup *group,
     return true;
 }
 
+/**
+ * @brief Removes a VFIO group from its container and performs cleanup.
+ *
+ * Unlinks the group from the container, removes its KVM device, re-enables RAM discard, and deletes the saved file descriptor for the group.
+ */
 static void vfio_container_group_del(VFIOContainer *container, VFIOGroup *group)
 {
     QLIST_REMOVE(group, container_next);
@@ -616,6 +694,19 @@ static void vfio_container_group_del(VFIOContainer *container, VFIOGroup *group)
     cpr_delete_fd("vfio_container_for_group", group->groupid);
 }
 
+/**
+ * @brief Connects a VFIO group to an address space, creating or reusing a container as needed.
+ *
+ * Attempts to associate the given VFIO group with a suitable VFIO container for the specified address space.
+ * If a container file descriptor is found via CPR (Checkpoint/Restore), it reuses the container and updates
+ * the group list; otherwise, it creates a new container, sets up the IOMMU, and registers the container.
+ * Handles listener registration, CPR state, and error cleanup. Returns true on success, false on failure.
+ *
+ * @param group The VFIO group to connect.
+ * @param as The address space to associate with the group.
+ * @param errp Pointer to an Error object for reporting failures.
+ * @return true if the group was successfully connected; false otherwise.
+ */
 static bool vfio_container_connect(VFIOGroup *group, AddressSpace *as,
                                    Error **errp)
 {
@@ -731,6 +822,11 @@ fail:
     return false;
 }
 
+/**
+ * @brief Disconnects a VFIO group from its container and releases associated resources.
+ *
+ * Removes the group from its container, unregisters listeners if it was the last group, unsets the container association, closes file descriptors, and releases container and address space resources as needed.
+ */
 static void vfio_container_disconnect(VFIOGroup *group)
 {
     VFIOContainer *container = group->container;
@@ -770,6 +866,18 @@ static void vfio_container_disconnect(VFIOGroup *group)
     }
 }
 
+/**
+ * @brief Retrieves or creates a VFIO group for a given group ID and address space.
+ *
+ * Searches for an existing VFIO group matching the specified group ID and address space.
+ * If not found, opens the corresponding VFIO group device, checks its viability, connects it to a container,
+ * and inserts it into the global group list. Returns the group on success or sets an error on failure.
+ *
+ * @param groupid The VFIO IOMMU group ID.
+ * @param as The address space to associate with the group.
+ * @param errp Pointer to an Error object for reporting failures.
+ * @return Pointer to the VFIOGroup on success, or NULL on failure.
+ */
 static VFIOGroup *vfio_group_get(int groupid, AddressSpace *as, Error **errp)
 {
     ERRP_GUARD();
@@ -834,6 +942,11 @@ free_group_exit:
     return NULL;
 }
 
+/**
+ * @brief Releases a VFIO group and its associated resources if no devices remain.
+ *
+ * If the group's device list is empty, this function re-enables RAM discard if previously disabled, removes the KVM device, disconnects the group from its container, deletes the group from the global list, removes its CPR file descriptor, closes the group file descriptor, and frees the group structure.
+ */
 static void vfio_group_put(VFIOGroup *group)
 {
     if (!group || !QLIST_EMPTY(&group->device_list)) {
@@ -852,6 +965,16 @@ static void vfio_group_put(VFIOGroup *group)
     g_free(group);
 }
 
+/**
+ * @brief Obtains and prepares a VFIO device from a group by name.
+ *
+ * Retrieves a device file descriptor from the specified VFIO group, either by reusing a CPR-saved descriptor or by issuing a VFIO ioctl. Validates device info, ensures RAM discard compatibility within the group, prepares the device, and inserts it into the group's device list. On success, updates CPR reuse state and saves the file descriptor if newly acquired.
+ *
+ * @param name The device name to retrieve from the group.
+ * @param vbasedev The VFIODevice structure to initialize and insert into the group.
+ * @param errp Pointer to an Error object for reporting failures.
+ * @return true on success, false on failure (with errp set).
+ */
 static bool vfio_device_get(VFIOGroup *group, const char *name,
                             VFIODevice *vbasedev, Error **errp)
 {
@@ -917,6 +1040,11 @@ static bool vfio_device_get(VFIOGroup *group, const char *name,
     return true;
 }
 
+/**
+ * @brief Releases a VFIO device and its associated resources.
+ *
+ * Removes the device from its group, deletes any saved file descriptor, closes the device file descriptor, and clears the group association.
+ */
 static void vfio_device_put(VFIODevice *vbasedev)
 {
     if (!vbasedev->group) {
@@ -956,10 +1084,16 @@ static int vfio_device_get_groupid(VFIODevice *vbasedev, Error **errp)
     return groupid;
 }
 
-/*
- * vfio_device_attach: attach a device to a security context
- * @name and @vbasedev->name are likely to be different depending
- * on the type of the device, hence the need for passing @name
+/**
+ * @brief Attaches a VFIO device to a security context and address space.
+ *
+ * Looks up the device's IOMMU group, ensures the device is not already attached, obtains the device from the group, and creates and realizes the associated legacy host IOMMU device. For mediated devices (mdev), adds a migration blocker indicating CPR is not supported.
+ *
+ * @param name The device name to attach (may differ from vbasedev->name).
+ * @param vbasedev The VFIO device structure to attach.
+ * @param as The address space to which the device is attached.
+ * @param errp Pointer to an Error object for reporting failures.
+ * @return true on success, false on failure (with errp set).
  */
 static bool vfio_legacy_attach_device(const char *name, VFIODevice *vbasedev,
                                       AddressSpace *as, Error **errp)
@@ -1011,6 +1145,12 @@ group_put_exit:
     return false;
 }
 
+/**
+ * @brief Detaches a VFIO device from its group and releases associated resources.
+ *
+ * Unprepares the device, removes migration blockers, unreferences the host IOMMU device,
+ * and releases the device and group resources.
+ */
 static void vfio_legacy_detach_device(VFIODevice *vbasedev)
 {
     VFIOGroup *group = vbasedev->group;

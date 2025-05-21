@@ -2164,6 +2164,14 @@ void ram_discard_manager_register_listener(RamDiscardManager *rdm,
     rdmc->register_listener(rdm, rdl, section);
 }
 
+/**
+ * @brief Unregisters a listener from a RAM discard manager.
+ *
+ * Removes the specified listener from the RAM discard manager, so it will no longer receive discard-related notifications.
+ *
+ * @param rdm The RAM discard manager instance.
+ * @param rdl The listener to unregister.
+ */
 void ram_discard_manager_unregister_listener(RamDiscardManager *rdm,
                                              RamDiscardListener *rdl)
 {
@@ -2173,7 +2181,19 @@ void ram_discard_manager_unregister_listener(RamDiscardManager *rdm,
     rdmc->unregister_listener(rdm, rdl);
 }
 
-/* Called with rcu_read_lock held.  */
+/**
+ * @brief Translates an IOMMU TLB entry to a RAM MemoryRegion and offset.
+ *
+ * Resolves the given IOMMU TLB entry's translated address through the global memory address space,
+ * ensuring the resulting region is RAM and, if managed by a RAM discard manager, that the memory is populated.
+ * On success, stores the translated offset in `*xlat_p` and returns the corresponding MemoryRegion.
+ * On failure, returns NULL and sets an error describing the reason (e.g., mapping to non-RAM, discarded memory, or incompatible granularity).
+ *
+ * @param iotlb Pointer to the IOMMU TLB entry to translate.
+ * @param xlat_p Output pointer for the translated offset within the MemoryRegion.
+ * @param errp Pointer to an Error* for reporting translation failures.
+ * @return MemoryRegion* The resolved RAM MemoryRegion, or NULL on error.
+ */
 MemoryRegion *memory_translate_iotlb(IOMMUTLBEntry *iotlb, hwaddr *xlat_p,
                                      Error **errp)
 {
@@ -2226,6 +2246,15 @@ MemoryRegion *memory_translate_iotlb(IOMMUTLBEntry *iotlb, hwaddr *xlat_p,
     return mr;
 }
 
+/**
+ * @brief Enables or disables VGA dirty logging for a memory region.
+ *
+ * Adjusts the dirty log mask for the specified client (must be DIRTY_MEMORY_VGA) and updates the logging state transactionally. Only triggers a transaction if the logging state changes.
+ *
+ * @param mr The memory region to update.
+ * @param log Whether to enable (true) or disable (false) logging.
+ * @param client The dirty memory client; must be DIRTY_MEMORY_VGA.
+ */
 void memory_region_set_log(MemoryRegion *mr, bool log, unsigned client)
 {
     uint8_t mask = 1 << client;

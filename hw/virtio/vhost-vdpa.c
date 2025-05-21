@@ -199,6 +199,14 @@ static void vhost_vdpa_listener_commit(MemoryListener *listener)
     s->iotlb_batch_begin_sent = false;
 }
 
+/**
+ * @brief Handles IOMMU mapping notifications for vhost-vDPA devices.
+ *
+ * Responds to IOMMU mapping changes by mapping or unmapping the corresponding DMA region
+ * in the vhost-vDPA device. Translates the IOTLB entry to a memory region and virtual address,
+ * checks for valid address space and device IOVA range, and performs the appropriate DMA map
+ * or unmap operation based on permissions.
+ */
 static void vhost_vdpa_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
 {
     struct vdpa_iommu *iommu = container_of(n, struct vdpa_iommu, n);
