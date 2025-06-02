@@ -22,6 +22,7 @@
 #include "qemu/units.h"
 #include "hw/core/qdev-clock.h"
 #include "system/system.h"
+#include "system/qtest.h"
 
 #define AST_SMP_MAILBOX_BASE            0x1e6e2180
 #define AST_SMP_MBOX_FIELD_ENTRY        (AST_SMP_MAILBOX_BASE + 0x0)
@@ -236,7 +237,7 @@ static void aspeed_machine_init(MachineState *machine)
         sdhci_attach_drive(&bmc->soc->emmc.slots[0], emmc0, true, boot_emmc);
     }
 
-    if (!bmc->mmio_exec) {
+    if (!bmc->mmio_exec && !qtest_enabled()) {
         DeviceState *dev = ssi_get_cs(bmc->soc->fmc.spi, 0);
         BlockBackend *fmc0 = dev ? m25p80_get_blk(dev) : NULL;
 
@@ -249,7 +250,7 @@ static void aspeed_machine_init(MachineState *machine)
         }
     }
 
-    if (amc->vbootrom) {
+    if (amc->vbootrom && !qtest_enabled()) {
         bios_name = machine->firmware ?: VBOOTROM_FILE_NAME;
         aspeed_load_vbootrom(bmc->soc, bios_name, &error_abort);
     }
