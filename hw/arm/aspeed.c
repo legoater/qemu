@@ -31,6 +31,7 @@
 #include "qemu/units.h"
 #include "hw/qdev-clock.h"
 #include "system/system.h"
+#include "system/qtest.h"
 
 static struct arm_boot_info aspeed_board_binfo = {
     .board_id = -1, /* device-tree-only board */
@@ -499,7 +500,7 @@ static void aspeed_machine_init(MachineState *machine)
         sdhci_attach_drive(&bmc->soc->emmc.slots[0], emmc0, true, boot_emmc);
     }
 
-    if (!bmc->mmio_exec) {
+    if (!bmc->mmio_exec && !qtest_enabled()) {
         DeviceState *dev = ssi_get_cs(bmc->soc->fmc.spi, 0);
         BlockBackend *fmc0 = dev ? m25p80_get_blk(dev) : NULL;
 
@@ -511,7 +512,7 @@ static void aspeed_machine_init(MachineState *machine)
         }
     }
 
-    if (amc->vbootrom) {
+    if (amc->vbootrom && !qtest_enabled()) {
         bios_name = machine->firmware ?: VBOOTROM_FILE_NAME;
         aspeed_load_vbootrom(bmc, bios_name, &error_abort);
     }
