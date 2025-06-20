@@ -37,11 +37,15 @@ output directory (typically ``rust/target/``).  A vanilla invocation
 of Cargo will complain that it cannot find the generated sources,
 which can be fixed in different ways:
 
-* by using special shorthand targets in the QEMU build directory::
+* by using Makefile targets, provided by Meson, that run ``clippy`` or
+  ``rustdoc``:
 
     make clippy
-    make rustfmt
     make rustdoc
+
+A target for ``rustfmt`` is also declared in ``rust/meson.build``:
+
+    make rustfmt
 
 * by invoking ``cargo`` through the Meson `development environment`__
   feature::
@@ -50,7 +54,7 @@ which can be fixed in different ways:
     pyvenv/bin/meson devenv -w ../rust cargo fmt
 
   If you are going to use ``cargo`` repeatedly, ``pyvenv/bin/meson devenv``
-  will enter a shell where commands like ``cargo clippy`` just work.
+  will enter a shell where commands like ``cargo fmt`` just work.
 
 __ https://mesonbuild.com/Commands.html#devenv
 
@@ -66,7 +70,7 @@ be run via ``meson test`` or ``make``::
 
    make check-rust
 
-Building Rust code with ``--enable-modules`` is not supported yet.
+Note that doctests require all ``.o`` files from the build to be available.
 
 Supported tools
 '''''''''''''''
@@ -91,6 +95,11 @@ are missing:
   function; this is an important limitation for QEMU's migration stream
   architecture (VMState).  Right now, VMState lacks type safety because
   it is hard to place the ``VMStateField`` definitions in traits.
+
+* NUL-terminated file names with ``#[track_caller]`` are scheduled for
+  inclusion as ``#![feature(location_file_nul)]``, but it will be a while
+  before QEMU can use them.  For now, there is special code in
+  ``util/error.c`` to support non-NUL-terminated file names.
 
 * associated const equality would be nice to have for some users of
   ``callbacks::FnCall``, but is still experimental.  ``ASSERT_IS_SOME``
@@ -151,10 +160,10 @@ module           status
 ``callbacks``    complete
 ``cell``         stable
 ``errno``        complete
+``error``        stable
 ``irq``          complete
 ``memory``       stable
 ``module``       complete
-``offset_of``    stable
 ``qdev``         stable
 ``qom``          stable
 ``sysbus``       stable

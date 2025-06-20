@@ -15,7 +15,7 @@
 #
 # @sym: symmetric encryption
 #
-# @asym: asymmetric Encryption
+# @asym: asymmetric encryption
 #
 # Since: 8.0
 ##
@@ -94,7 +94,7 @@
 ##
 # @query-cryptodev:
 #
-# Returns information about current crypto devices.
+# Return information about current crypto devices.
 #
 # Returns: a list of @QCryptodevInfo
 #
