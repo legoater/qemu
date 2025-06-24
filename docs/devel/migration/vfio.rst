@@ -260,3 +260,9 @@ Because a malicious QEMU source causing OOM on the target is not expected to be
 a realistic threat in most of VFIO live migration use cases and the right value
 depends on the particular setup by default this queued buffers limit is
 disabled by setting it to UINT64_MAX.
+
+Some host platforms (like ARM64) require that VFIO device config is loaded only
+after all iterables were loaded.
+Such interlocking is controlled by "x-migration-load-config-after-iter" VFIO
+device property, which in its default setting (AUTO) does so only on platforms
+that actually require it.
