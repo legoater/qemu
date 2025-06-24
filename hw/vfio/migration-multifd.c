@@ -82,6 +82,7 @@ typedef struct VFIOMultifd {
     uint32_t load_buf_idx;
     uint32_t load_buf_idx_last;
     uint32_t load_buf_queued_pending_buffers;
+    size_t load_buf_queued_pending_buffers_size;
 } VFIOMultifd;
 
 static void vfio_state_buffer_clear(gpointer data)
@@ -138,6 +139,7 @@ static bool vfio_load_state_buffer_insert(VFIODevice *vbasedev,
     VFIOMigration *migration = vbasedev->migration;
     VFIOMultifd *multifd = migration->multifd;
     VFIOStateBuffer *lb;
+    size_t data_size = packet_total_size - sizeof(*packet);
 
     vfio_state_buffers_assert_init(&multifd->load_bufs);
     if (packet->idx >= vfio_state_buffers_size_get(&multifd->load_bufs)) {
@@ -164,8 +166,19 @@ static bool vfio_load_state_buffer_insert(VFIODevice *vbasedev,
         return false;
     }
 
-    lb->data = g_memdup2(&packet->data, packet_total_size - sizeof(*packet));
-    lb->len = packet_total_size - sizeof(*packet);
+    multifd->load_buf_queued_pending_buffers_size += data_size;
+    if (multifd->load_buf_queued_pending_buffers_size >
+        vbasedev->migration_max_queued_buffers_size) {
+        error_setg(errp,
+                   "%s: queuing state buffer %" PRIu32
+                   " would exceed the size max of %" PRIu64,
+                   vbasedev->name, packet->idx,
+                   vbasedev->migration_max_queued_buffers_size);
+        return false;
+    }
+
+    lb->data = g_memdup2(&packet->data, data_size);
+    lb->len = data_size;
     lb->is_present = true;
 
     return true;
@@ -349,6 +362,9 @@ static bool vfio_load_state_buffer_write(VFIODevice *vbasedev,
         assert(wr_ret <= buf_len);
         buf_len -= wr_ret;
         buf_cur += wr_ret;
+
+        assert(multifd->load_buf_queued_pending_buffers_size >= wr_ret);
+        multifd->load_buf_queued_pending_buffers_size -= wr_ret;
     }
 
     trace_vfio_load_state_device_buffer_load_end(vbasedev->name,
@@ -522,6 +538,7 @@ static VFIOMultifd *vfio_multifd_new(void)
     multifd->load_buf_idx = 0;
     multifd->load_buf_idx_last = UINT32_MAX;
     multifd->load_buf_queued_pending_buffers = 0;
+    multifd->load_buf_queued_pending_buffers_size = 0;
     qemu_cond_init(&multifd->load_bufs_buffer_ready_cond);
 
     multifd->load_bufs_iter_done = false;

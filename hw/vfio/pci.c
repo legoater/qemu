@@ -3628,6 +3628,8 @@ static const Property vfio_pci_dev_properties[] = {
                             ON_OFF_AUTO_AUTO),
     DEFINE_PROP_UINT64("x-migration-max-queued-buffers", VFIOPCIDevice,
                        vbasedev.migration_max_queued_buffers, UINT64_MAX),
+    DEFINE_PROP_SIZE("x-migration-max-queued-buffers-size", VFIOPCIDevice,
+                     vbasedev.migration_max_queued_buffers_size, UINT64_MAX),
     DEFINE_PROP_BOOL("migration-events", VFIOPCIDevice,
                      vbasedev.migration_events, false),
     DEFINE_PROP_BOOL("x-no-mmap", VFIOPCIDevice, vbasedev.no_mmap, false),
@@ -3811,6 +3813,13 @@ static void vfio_pci_dev_class_init(ObjectClass *klass, const void *data)
     object_class_property_set_description(klass, /* 10.1 */
                                           "x-migration-max-queued-buffers",
                                           "Maximum count of in-flight VFIO "
+                                          "device state buffers queued at the "
+                                          "destination when doing live "
+                                          "migration of device state via "
+                                          "multifd channels");
+    object_class_property_set_description(klass, /* 10.1 */
+                                          "x-migration-max-queued-buffers-size",
+                                          "Maximum size of in-flight VFIO "
                                           "device state buffers queued at the "
                                           "destination when doing live "
                                           "migration of device state via "
