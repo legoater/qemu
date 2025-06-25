@@ -112,6 +112,7 @@ F: hw/intc/s390_flic.c
 F: hw/intc/s390_flic_kvm.c
 F: hw/s390x/
 F: hw/vfio/ap.c
+F: hw/s390x/ap-stub.c
 F: hw/vfio/ccw.c
 F: hw/watchdog/wdt_diag288.c
 F: include/hw/s390x/
@@ -219,7 +220,7 @@ S: Maintained
 F: docs/system/target-avr.rst
 F: gdb-xml/avr-cpu.xml
 F: target/avr/
-F: tests/functional/test_avr_mega2560.py
+F: tests/functional/test_avr_*.py
 
 Hexagon TCG CPUs
 M: Brian Cain <brian.cain@oss.qualcomm.com>
@@ -510,6 +511,7 @@ Apple Silicon HVF CPUs
 M: Alexander Graf <agraf@csgraf.de>
 S: Maintained
 F: target/arm/hvf/
+F: target/arm/hvf-stub.c
 
 X86 HVF CPUs
 M: Cameron Esfahani <dirty@apple.com>
@@ -953,6 +955,7 @@ F: hw/cpu/realview_mpcore.c
 F: hw/intc/realview_gic.c
 F: include/hw/intc/realview_gic.h
 F: docs/system/arm/realview.rst
+F: tests/functional/test_arm_realview.py
 
 SABRELITE / i.MX6
 M: Peter Maydell <peter.maydell@linaro.org>
@@ -1003,6 +1006,7 @@ F: hw/display/ssd03*
 F: include/hw/input/gamepad.h
 F: include/hw/timer/stellaris-gptm.h
 F: docs/system/arm/stellaris.rst
+F: tests/functional/test_arm_stellaris.py
 
 STM32L4x5 SoC Family
 M: Samuel Tardieu <sam@rfc1149.net>
@@ -1234,6 +1238,7 @@ Arduino
 M: Philippe Mathieu-Daudé <philmd@linaro.org>
 S: Maintained
 F: hw/avr/arduino.c
+F: tests/functional/test_avr_uno.py
 
 HP-PARISC Machines
 ------------------
@@ -1938,7 +1943,6 @@ F: hw/core/numa.c
 F: hw/cpu/cluster.c
 F: qapi/machine.json
 F: qapi/machine-common.json
-F: qapi/machine-target.json
 F: include/hw/boards.h
 F: include/hw/core/cpu.h
 F: include/hw/cpu/cluster.h
@@ -2123,7 +2127,7 @@ M: Michael S. Tsirkin <mst@redhat.com>
 S: Supported
 F: tests/functional/acpi-bits/*
 F: tests/functional/test_acpi_bits.py
-F: docs/devel/acpi-bits.rst
+F: docs/devel/testing/acpi-bits.rst
 
 ACPI/HEST/GHES
 R: Dongjiu Geng <gengdongjiu1@gmail.com>
@@ -2518,7 +2522,7 @@ F: tests/qtest/fuzz-megasas-test.c
 
 Network packet abstractions
 M: Dmitry Fleytman <dmitry.fleytman@gmail.com>
-R: Akihiko Odaki <akihiko.odaki@daynix.com>
+R: Akihiko Odaki <odaki@rsg.ci.i.u-tokyo.ac.jp>
 S: Maintained
 F: include/net/eth.h
 F: net/eth.c
@@ -2548,13 +2552,13 @@ F: docs/specs/rocker.rst
 
 e1000x
 M: Dmitry Fleytman <dmitry.fleytman@gmail.com>
-R: Akihiko Odaki <akihiko.odaki@daynix.com>
+R: Akihiko Odaki <odaki@rsg.ci.i.u-tokyo.ac.jp>
 S: Maintained
 F: hw/net/e1000x*
 
 e1000e
 M: Dmitry Fleytman <dmitry.fleytman@gmail.com>
-R: Akihiko Odaki <akihiko.odaki@daynix.com>
+R: Akihiko Odaki <odaki@rsg.ci.i.u-tokyo.ac.jp>
 S: Maintained
 F: hw/net/e1000e*
 F: tests/qtest/fuzz-e1000e-test.c
@@ -2562,9 +2566,9 @@ F: tests/qtest/e1000e-test.c
 F: tests/qtest/libqos/e1000e.*
 
 igb
-M: Akihiko Odaki <akihiko.odaki@daynix.com>
+M: Akihiko Odaki <odaki@rsg.ci.i.u-tokyo.ac.jp>
 R: Sriram Yagnaraman <sriram.yagnaraman@ericsson.com>
-S: Maintained
+S: Odd Fixes
 F: docs/system/devices/igb.rst
 F: hw/net/igb*
 F: tests/functional/test_netdev_ethtool.py
@@ -2909,7 +2913,7 @@ Core Audio framework backend
 M: Gerd Hoffmann <kraxel@redhat.com>
 M: Philippe Mathieu-Daudé <philmd@linaro.org>
 R: Christian Schoenebeck <qemu_oss@crudebyte.com>
-R: Akihiko Odaki <akihiko.odaki@daynix.com>
+R: Akihiko Odaki <odaki@rsg.ci.i.u-tokyo.ac.jp>
 S: Odd Fixes
 F: audio/coreaudio.m
 
@@ -3030,6 +3034,16 @@ F: util/qemu-co-shared-resource.c
 F: include/qemu/co-shared-resource.h
 T: git https://gitlab.com/jsnow/qemu.git jobs
 T: git https://gitlab.com/vsementsov/qemu.git block
+
+CheckPoint and Restart (CPR)
+R: Steve Sistare <steven.sistare@oracle.com>
+S: Supported
+F: hw/vfio/cpr*
+F: include/hw/vfio/vfio-cpr.h
+F: include/migration/cpr.h
+F: migration/cpr*
+F: tests/qtest/migration/cpr*
+F: docs/devel/migration/CPR.rst
 
 Compute Express Link
 M: Jonathan Cameron <jonathan.cameron@huawei.com>
@@ -3161,6 +3175,7 @@ F: system/memory.c
 F: system/memory_mapping.c
 F: system/physmem.c
 F: system/memory-internal.h
+F: system/ram-block-attributes.c
 F: scripts/coccinelle/memory-region-housekeeping.cocci
 
 Memory devices
@@ -3200,7 +3215,7 @@ F: tests/functional/test_vnc.py
 Cocoa graphics
 M: Peter Maydell <peter.maydell@linaro.org>
 M: Philippe Mathieu-Daudé <philmd@linaro.org>
-R: Akihiko Odaki <akihiko.odaki@daynix.com>
+R: Akihiko Odaki <odaki@rsg.ci.i.u-tokyo.ac.jp>
 S: Odd Fixes
 F: ui/cocoa.m
 
@@ -3429,8 +3444,8 @@ F: system/qtest.c
 F: include/system/qtest.h
 F: accel/qtest/
 F: tests/qtest/
-F: docs/devel/qgraph.rst
-F: docs/devel/qtest.rst
+F: docs/devel/testing/qgraph.rst
+F: docs/devel/testing/qtest.rst
 X: tests/qtest/bios-tables-test*
 X: tests/qtest/migration-*
 
@@ -3448,7 +3463,7 @@ F: tests/qtest/fuzz-*test.c
 F: tests/docker/test-fuzz
 F: scripts/oss-fuzz/
 F: hw/mem/sparse-mem.c
-F: docs/devel/fuzzing.rst
+F: docs/devel/testing/fuzzing.rst
 
 Register API
 M: Alistair Francis <alistair@alistair23.me>
@@ -3727,7 +3742,7 @@ F: util/iova-tree.c
 
 elf2dmp
 M: Viktor Prutyanov <viktor.prutyanov@phystech.edu>
-R: Akihiko Odaki <akihiko.odaki@daynix.com>
+R: Akihiko Odaki <odaki@rsg.ci.i.u-tokyo.ac.jp>
 S: Maintained
 F: contrib/elf2dmp/
 
@@ -4067,7 +4082,7 @@ M: Stefan Hajnoczi <stefanha@redhat.com>
 L: qemu-block@nongnu.org
 S: Supported
 F: block/blkverify.c
-F: docs/devel/blkverify.rst
+F: docs/devel/testing/blkverify.rst
 
 bochs
 M: Stefan Hajnoczi <stefanha@redhat.com>
@@ -4103,6 +4118,7 @@ M: Stefan Hajnoczi <stefanha@redhat.com>
 L: qemu-block@nongnu.org
 S: Supported
 F: block/qed.c
+F: docs/interop/qed_spec.rst
 
 raw
 M: Kevin Wolf <kwolf@redhat.com>
@@ -4131,7 +4147,7 @@ M: Hanna Reitz <hreitz@redhat.com>
 L: qemu-block@nongnu.org
 S: Supported
 F: block/qcow2*
-F: docs/interop/qcow2.txt
+F: docs/interop/qcow2.rst
 
 qcow
 M: Kevin Wolf <kwolf@redhat.com>
@@ -4145,7 +4161,7 @@ M: Hanna Reitz <hreitz@redhat.com>
 L: qemu-block@nongnu.org
 S: Supported
 F: block/blkdebug.c
-F: docs/devel/blkdebug.rst
+F: docs/devel/testing/blkdebug.rst
 
 vpc
 M: Kevin Wolf <kwolf@redhat.com>
@@ -4230,12 +4246,21 @@ F: hw/remote/proxy-memory-listener.c
 F: include/hw/remote/proxy-memory-listener.h
 F: hw/remote/iohub.c
 F: include/hw/remote/iohub.h
-F: subprojects/libvfio-user
 F: hw/remote/vfio-user-obj.c
 F: include/hw/remote/vfio-user-obj.h
 F: hw/remote/iommu.c
 F: include/hw/remote/iommu.h
 F: tests/functional/test_multiprocess.py
+
+VFIO-USER:
+M: John Levon <john.levon@nutanix.com>
+M: Thanos Makatos <thanos.makatos@nutanix.com>
+S: Supported
+F: docs/interop/vfio-user.rst
+F: docs/system/devices/vfio-user.rst
+F: hw/vfio-user/*
+F: include/hw/vfio-user/*
+F: subprojects/libvfio-user
 
 EBPF:
 M: Jason Wang <jasowang@redhat.com>
@@ -4265,7 +4290,8 @@ F: tests/vm/
 F: tests/lcitool/
 F: tests/functional/test_*_tuxrun.py
 F: scripts/archive-source.sh
-F: docs/devel/testing.rst
+F: docs/devel/testing/ci*
+F: docs/devel/testing/main.rst
 W: https://gitlab.com/qemu-project/qemu/pipelines
 W: https://travis-ci.org/qemu/qemu
 
