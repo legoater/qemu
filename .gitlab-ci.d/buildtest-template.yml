@@ -24,6 +24,7 @@
     - ccache --zero-stats
     - section_start configure "Running configure"
     - ../configure --enable-werror --disable-docs --enable-fdt=system
+          --disable-debug-info
           ${TARGETS:+--target-list="$TARGETS"}
           $CONFIGURE_ARGS ||
       { cat config.log meson-logs/meson-log.txt && exit 1; }
@@ -76,7 +77,8 @@
       fi
     - section_end buildenv
     - section_start test "Running tests"
-    - $MAKE NINJA=":" $MAKE_CHECK_ARGS
+    # doctests need all the compilation artifacts
+    - $MAKE NINJA=":" MTESTARGS="--no-suite doc" $MAKE_CHECK_ARGS
     - section_end test
 
 .native_test_job_template:

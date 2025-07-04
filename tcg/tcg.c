@@ -34,6 +34,7 @@
 #include "qemu/cacheflush.h"
 #include "qemu/cacheinfo.h"
 #include "qemu/timer.h"
+#include "exec/target_page.h"
 #include "exec/translation-block.h"
 #include "exec/tlb-common.h"
 #include "tcg/startup.h"
@@ -5153,7 +5154,7 @@ static void tcg_reg_alloc_dup(TCGContext *s, const TCGOp *op)
 
     if (its->val_type == TEMP_VAL_CONST) {
         /* Propagate constant via movi -> dupi.  */
-        tcg_target_ulong val = its->val;
+        tcg_target_ulong val = dup_const(vece, its->val);
         if (IS_DEAD_ARG(1)) {
             temp_dead(s, its);
         }

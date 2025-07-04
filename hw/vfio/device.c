@@ -28,6 +28,8 @@
 #include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "qemu/units.h"
+#include "migration/cpr.h"
+#include "migration/blocker.h"
 #include "monitor/monitor.h"
 #include "vfio-helpers.h"
 
@@ -200,6 +202,7 @@ int vfio_device_get_region_info(VFIODevice *vbasedev, int index,
                                 struct vfio_region_info **info)
 {
     size_t argsz = sizeof(struct vfio_region_info);
+    int fd = -1;
     int ret;
 
     /* check cache */
@@ -214,7 +217,7 @@ int vfio_device_get_region_info(VFIODevice *vbasedev, int index,
 retry:
     (*info)->argsz = argsz;
 
-    ret = vbasedev->io_ops->get_region_info(vbasedev, *info);
+    ret = vbasedev->io_ops->get_region_info(vbasedev, *info, &fd);
     if (ret != 0) {
         g_free(*info);
         *info = NULL;
@@ -225,13 +228,28 @@ retry:
         argsz = (*info)->argsz;
         *info = g_realloc(*info, argsz);
 
+        if (fd != -1) {
+            close(fd);
+            fd = -1;
+        }
+
         goto retry;
     }
 
     /* fill cache */
     vbasedev->reginfo[index] = *info;
+    if (vbasedev->region_fds != NULL) {
+        vbasedev->region_fds[index] = fd;
+    }
 
     return 0;
+}
+
+int vfio_device_get_region_fd(VFIODevice *vbasedev, int index)
+{
+        return vbasedev->region_fds ?
+               vbasedev->region_fds[index] :
+               vbasedev->fd;
 }
 
 int vfio_device_get_region_info_type(VFIODevice *vbasedev, uint32_t type,
@@ -300,28 +318,40 @@ bool vfio_device_get_name(VFIODevice *vbasedev, Error **errp)
             error_setg(errp, "Use FD passing only with iommufd backend");
             return false;
         }
-        /*
-         * Give a name with fd so any function printing out vbasedev->name
-         * will not break.
-         */
         if (!vbasedev->name) {
-            vbasedev->name = g_strdup_printf("VFIO_FD%d", vbasedev->fd);
+
+            if (vbasedev->dev->id) {
+                vbasedev->name = g_strdup(vbasedev->dev->id);
+                return true;
+            } else {
+                /*
+                 * Assign a name so any function printing it will not break.
+                 * The fd number changes across processes, so this cannot be
+                 * used as an invariant name for CPR.
+                 */
+                vbasedev->name = g_strdup_printf("VFIO_FD%d", vbasedev->fd);
+                error_setg(&vbasedev->cpr.id_blocker,
+                           "vfio device with fd=%d needs an id property",
+                           vbasedev->fd);
+                return migrate_add_blocker_modes(&vbasedev->cpr.id_blocker,
+                                                 errp, MIG_MODE_CPR_TRANSFER,
+                                                 -1) == 0;
+            }
         }
     }
 
     return true;
 }
 
+void vfio_device_free_name(VFIODevice *vbasedev)
+{
+    g_clear_pointer(&vbasedev->name, g_free);
+    migrate_del_blocker(&vbasedev->cpr.id_blocker);
+}
+
 void vfio_device_set_fd(VFIODevice *vbasedev, const char *str, Error **errp)
 {
-    ERRP_GUARD();
-    int fd = monitor_fd_param(monitor_cur(), str, errp);
-
-    if (fd < 0) {
-        error_prepend(errp, "Could not parse remote object fd %s:", str);
-        return;
-    }
-    vbasedev->fd = fd;
+    vbasedev->fd = cpr_get_fd_param(vbasedev->dev->id, str, 0, errp);
 }
 
 static VFIODeviceIOOps vfio_device_io_ops_ioctl;
@@ -334,6 +364,7 @@ void vfio_device_init(VFIODevice *vbasedev, int type, VFIODeviceOps *ops,
     vbasedev->io_ops = &vfio_device_io_ops_ioctl;
     vbasedev->dev = dev;
     vbasedev->fd = -1;
+    vbasedev->use_region_fds = false;
 
     vbasedev->ram_block_discard_allowed = ram_discard;
 }
@@ -444,6 +475,9 @@ void vfio_device_prepare(VFIODevice *vbasedev, VFIOContainerBase *bcontainer,
 
     vbasedev->reginfo = g_new0(struct vfio_region_info *,
                                vbasedev->num_regions);
+    if (vbasedev->use_region_fds) {
+        vbasedev->region_fds = g_new0(int, vbasedev->num_regions);
+    }
 }
 
 void vfio_device_unprepare(VFIODevice *vbasedev)
@@ -452,9 +486,14 @@ void vfio_device_unprepare(VFIODevice *vbasedev)
 
     for (i = 0; i < vbasedev->num_regions; i++) {
         g_free(vbasedev->reginfo[i]);
+        if (vbasedev->region_fds != NULL && vbasedev->region_fds[i] != -1) {
+            close(vbasedev->region_fds[i]);
+        }
+
     }
-    g_free(vbasedev->reginfo);
-    vbasedev->reginfo = NULL;
+
+    g_clear_pointer(&vbasedev->reginfo, g_free);
+    g_clear_pointer(&vbasedev->region_fds, g_free);
 
     QLIST_REMOVE(vbasedev, container_next);
     QLIST_REMOVE(vbasedev, global_next);
@@ -476,9 +515,12 @@ static int vfio_device_io_device_feature(VFIODevice *vbasedev,
 }
 
 static int vfio_device_io_get_region_info(VFIODevice *vbasedev,
-                                          struct vfio_region_info *info)
+                                          struct vfio_region_info *info,
+                                          int *fd)
 {
     int ret;
+
+    *fd = -1;
 
     ret = ioctl(vbasedev->fd, VFIO_DEVICE_GET_REGION_INFO, info);
 
@@ -522,7 +564,8 @@ static int vfio_device_io_region_read(VFIODevice *vbasedev, uint8_t index,
 }
 
 static int vfio_device_io_region_write(VFIODevice *vbasedev, uint8_t index,
-                                       off_t off, uint32_t size, void *data)
+                                       off_t off, uint32_t size, void *data,
+                                       bool post)
 {
     struct vfio_region_info *info;
     int ret;

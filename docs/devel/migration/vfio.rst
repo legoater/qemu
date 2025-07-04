@@ -247,3 +247,24 @@ The multifd VFIO device state transfer is controlled by
 "x-migration-multifd-transfer" VFIO device property. This property defaults to
 AUTO, which means that VFIO device state transfer via multifd channels is
 attempted in configurations that otherwise support it.
+
+Since the target QEMU needs to load device state buffers in-order it needs to
+queue incoming buffers until they can be loaded into the device.
+This means that a malicious QEMU source could theoretically cause the target
+QEMU to allocate unlimited amounts of memory for such buffers-in-flight.
+
+The "x-migration-max-queued-buffers" property allows capping the maximum count
+of these VFIO device state buffers queued at the destination while
+"x-migration-max-queued-buffers-size" property allows capping their total queued
+size.
+
+Because a malicious QEMU source causing OOM on the target is not expected to be
+a realistic threat in most of VFIO live migration use cases and the right value
+depends on the particular setup by default these queued buffers limits are
+disabled by setting them to UINT64_MAX.
+
+Some host platforms (like ARM64) require that VFIO device config is loaded only
+after all iterables were loaded.
+Such interlocking is controlled by "x-migration-load-config-after-iter" VFIO
+device property, which in its default setting (AUTO) does so only on platforms
+that actually require it.

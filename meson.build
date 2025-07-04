@@ -106,6 +106,7 @@ if have_rust
 endif
 
 if have_rust
+  rustdoc = find_program('rustdoc', required: get_option('rust'))
   bindgen = find_program('bindgen', required: get_option('rust'))
   if not bindgen.found() or bindgen.version().version_compare('<0.60.0')
     if get_option('rust').enabled()
@@ -837,13 +838,17 @@ emulator_link_args = []
 midl = not_found
 widl = not_found
 pathcch = not_found
+synchronization = not_found
 host_dsosuf = '.so'
 if host_os == 'windows'
   midl = find_program('midl', required: false)
   widl = find_program('widl', required: false)
-  pathcch = cc.find_library('pathcch')
-  socket = cc.find_library('ws2_32')
-  winmm = cc.find_library('winmm')
+
+  # MinGW uses lowercase for library names
+  pathcch = cc.find_library('pathcch', required: true)
+  synchronization = cc.find_library('synchronization', required: true)
+  socket = cc.find_library('ws2_32', required: true)
+  winmm = cc.find_library('winmm', required: true)
 
   win = import('windows')
   version_res = win.compile_resources('version.rc',
@@ -3272,6 +3277,7 @@ config_devices_mak_list = []
 config_devices_h = {}
 config_target_h = {}
 config_target_mak = {}
+config_base_arch_mak = {}
 
 disassemblers = {
   'alpha' : ['CONFIG_ALPHA_DIS'],
@@ -3463,6 +3469,11 @@ foreach target : target_dirs
     config_all_devices += config_devices
   endif
   config_target_mak += {target: config_target}
+
+  # build a merged config for all targets with the same TARGET_BASE_ARCH
+  target_base_arch = config_target['TARGET_BASE_ARCH']
+  config_base_arch = config_base_arch_mak.get(target_base_arch, {}) + config_target
+  config_base_arch_mak += {target_base_arch: config_base_arch}
 endforeach
 target_dirs = actual_target_dirs
 
@@ -3619,6 +3630,7 @@ if have_block
 endif
 if have_system
   trace_events_subdirs += [
+    'accel/hvf',
     'accel/kvm',
     'audio',
     'backends',
@@ -3672,6 +3684,7 @@ if have_system
     'hw/ufs',
     'hw/usb',
     'hw/vfio',
+    'hw/vfio-user',
     'hw/virtio',
     'hw/vmapple',
     'hw/watchdog',
@@ -3718,14 +3731,12 @@ io_ss = ss.source_set()
 qmp_ss = ss.source_set()
 qom_ss = ss.source_set()
 system_ss = ss.source_set()
-libsystem_ss = ss.source_set()
 specific_fuzz_ss = ss.source_set()
 specific_ss = ss.source_set()
 rust_devices_ss = ss.source_set()
 stub_ss = ss.source_set()
 trace_ss = ss.source_set()
 user_ss = ss.source_set()
-libuser_ss = ss.source_set()
 util_ss = ss.source_set()
 
 # accel modules
@@ -4102,30 +4113,20 @@ common_ss.add(hwcore)
 system_ss.add(authz, blockdev, chardev, crypto, io, qmp)
 common_ss.add(qom, qemuutil)
 
-common_ss.add_all(when: 'CONFIG_SYSTEM_ONLY', if_true: [system_ss])
-common_ss.add_all(when: 'CONFIG_USER_ONLY', if_true: user_ss)
-
-libuser_ss = libuser_ss.apply({})
 libuser = static_library('user',
-                         libuser_ss.sources() + genh,
+                         user_ss.all_sources() + genh,
                          c_args: ['-DCONFIG_USER_ONLY',
                                   '-DCOMPILING_SYSTEM_VS_USER'],
-                         dependencies: libuser_ss.dependencies(),
+                         include_directories: common_user_inc,
+                         dependencies: user_ss.all_dependencies(),
                          build_by_default: false)
-libuser = declare_dependency(objects: libuser.extract_all_objects(recursive: false),
-                             dependencies: libuser_ss.dependencies())
-common_ss.add(when: 'CONFIG_USER_ONLY', if_true: libuser)
 
-libsystem_ss = libsystem_ss.apply({})
 libsystem = static_library('system',
-                           libsystem_ss.sources() + genh,
+                           system_ss.all_sources() + genh,
                            c_args: ['-DCONFIG_SOFTMMU',
                                     '-DCOMPILING_SYSTEM_VS_USER'],
-                           dependencies: libsystem_ss.dependencies(),
+                           dependencies: system_ss.all_dependencies(),
                            build_by_default: false)
-libsystem = declare_dependency(objects: libsystem.extract_all_objects(recursive: false),
-                               dependencies: libsystem_ss.dependencies())
-common_ss.add(when: 'CONFIG_SYSTEM_ONLY', if_true: libsystem)
 
 # Note that this library is never used directly (only through extract_objects)
 # and is not built by default; therefore, source files not used by the build
@@ -4133,73 +4134,79 @@ common_ss.add(when: 'CONFIG_SYSTEM_ONLY', if_true: libsystem)
 common_all = static_library('common',
                             build_by_default: false,
                             sources: common_ss.all_sources() + genh,
-                            include_directories: common_user_inc,
                             implicit_include_directories: false,
                             dependencies: common_ss.all_dependencies())
 
 # construct common libraries per base architecture
-hw_common_arch_libs = {}
 target_common_arch_libs = {}
 target_common_system_arch_libs = {}
-foreach target : target_dirs
-  config_target = config_target_mak[target]
-  target_base_arch = config_target['TARGET_BASE_ARCH']
+foreach target_base_arch, config_base_arch : config_base_arch_mak
   target_inc = [include_directories('target' / target_base_arch)]
   inc = [common_user_inc + target_inc]
+
+  target_common = common_ss.apply(config_base_arch, strict: false)
+  target_system = system_ss.apply(config_base_arch, strict: false)
+  target_user = user_ss.apply(config_base_arch, strict: false)
+  common_deps = []
+  system_deps = []
+  user_deps = []
+  foreach dep: target_common.dependencies()
+    common_deps += dep.partial_dependency(compile_args: true, includes: true)
+  endforeach
+  foreach dep: target_system.dependencies()
+    system_deps += dep.partial_dependency(compile_args: true, includes: true)
+  endforeach
+  foreach dep: target_user.dependencies()
+    user_deps += dep.partial_dependency(compile_args: true, includes: true)
+  endforeach
 
   # prevent common code to access cpu compile time definition,
   # but still allow access to cpu.h
   target_c_args = ['-DCPU_DEFS_H']
   target_system_c_args = target_c_args + ['-DCOMPILING_SYSTEM_VS_USER', '-DCONFIG_SOFTMMU']
 
-  if target_base_arch in hw_common_arch
-    if target_base_arch not in hw_common_arch_libs
-      src = hw_common_arch[target_base_arch]
-      lib = static_library(
-        'hw_' + target_base_arch,
-        build_by_default: false,
-        sources: src.all_sources() + genh,
-        include_directories: inc,
-        c_args: target_system_c_args,
-        dependencies: src.all_dependencies())
-      hw_common_arch_libs += {target_base_arch: lib}
-    endif
+  if target_base_arch in target_common_arch
+    src = target_common_arch[target_base_arch]
+    lib = static_library(
+      'common_' + target_base_arch,
+      build_by_default: false,
+      sources: src.all_sources() + genh,
+      include_directories: inc,
+      c_args: target_c_args,
+      dependencies: src.all_dependencies() + common_deps +
+                    system_deps + user_deps)
+    target_common_arch_libs += {target_base_arch: lib}
   endif
 
-  if target_base_arch in target_common_arch
-    if target_base_arch not in target_common_arch_libs
-      src = target_common_arch[target_base_arch]
-      lib = static_library(
-        'target_' + target_base_arch,
-        build_by_default: false,
-        sources: src.all_sources() + genh,
-        include_directories: inc,
-        c_args: target_c_args,
-        dependencies: src.all_dependencies())
-      target_common_arch_libs += {target_base_arch: lib}
+  # merge hw_common_arch in target_common_system_arch
+  if target_base_arch in hw_common_arch
+    hw_src = hw_common_arch[target_base_arch]
+    if target_base_arch in target_common_system_arch
+      target_common_system_arch[target_base_arch].add_all(hw_src)
+    else
+      target_common_system_arch += {target_base_arch: hw_src}
     endif
   endif
 
   if target_base_arch in target_common_system_arch
-    if target_base_arch not in target_common_system_arch_libs
-      src = target_common_system_arch[target_base_arch]
-      lib = static_library(
-        'target_system_' + target_base_arch,
-        build_by_default: false,
-        sources: src.all_sources() + genh,
-        include_directories: inc,
-        c_args: target_system_c_args,
-        dependencies: src.all_dependencies())
-      target_common_system_arch_libs += {target_base_arch: lib}
-    endif
+    src = target_common_system_arch[target_base_arch]
+    lib = static_library(
+      'system_' + target_base_arch,
+      build_by_default: false,
+      sources: src.all_sources() + genh,
+      include_directories: inc,
+      c_args: target_system_c_args,
+      dependencies: src.all_dependencies() + common_deps + system_deps)
+    target_common_system_arch_libs += {target_base_arch: lib}
   endif
 endforeach
 
 if have_rust
+  bindings_incdir = include_directories('.', 'include')
   # We would like to use --generate-cstr, but it is only available
   # starting with bindgen 0.66.0.  The oldest supported versions
   # is 0.60.x (Debian 12 has 0.60.1) which introduces --allowlist-file.
-  bindgen_args = [
+  bindgen_args_common = [
     '--disable-header-comment',
     '--raw-line', '// @generated',
     '--ctypes-prefix', 'std::os::raw',
@@ -4215,59 +4222,20 @@ if have_rust
     ]
   if not rustfmt.found()
     if bindgen.version().version_compare('<0.65.0')
-      bindgen_args += ['--no-rustfmt-bindings']
+      bindgen_args_common += ['--no-rustfmt-bindings']
     else
-      bindgen_args += ['--formatter', 'none']
+      bindgen_args_common += ['--formatter', 'none']
     endif
   endif
   if bindgen.version().version_compare('>=0.66.0')
-    bindgen_args += ['--rust-target', '1.59']
+    bindgen_args_common += ['--rust-target', '1.59']
   endif
   if bindgen.version().version_compare('<0.61.0')
     # default in 0.61+
-    bindgen_args += ['--size_t-is-usize']
+    bindgen_args_common += ['--size_t-is-usize']
   else
-    bindgen_args += ['--merge-extern-blocks']
+    bindgen_args_common += ['--merge-extern-blocks']
   endif
-  c_enums = [
-    'DeviceCategory',
-    'GpioPolarity',
-    'MachineInitPhase',
-    'MemoryDeviceInfoKind',
-    'MigrationPolicy',
-    'MigrationPriority',
-    'QEMUChrEvent',
-    'QEMUClockType',
-    'ResetType',
-    'device_endian',
-    'module_init_type',
-  ]
-  foreach enum : c_enums
-    bindgen_args += ['--rustified-enum', enum]
-  endforeach
-  c_bitfields = [
-    'ClockEvent',
-    'VMStateFlags',
-  ]
-  foreach enum : c_bitfields
-    bindgen_args += ['--bitfield-enum', enum]
-  endforeach
-
-  # TODO: Remove this comment when the clang/libclang mismatch issue is solved.
-  #
-  # Rust bindings generation with `bindgen` might fail in some cases where the
-  # detected `libclang` does not match the expected `clang` version/target. In
-  # this case you must pass the path to `clang` and `libclang` to your build
-  # command invocation using the environment variables CLANG_PATH and
-  # LIBCLANG_PATH
-  bindings_rs = rust.bindgen(
-    input: 'rust/wrapper.h',
-    dependencies: common_ss.all_dependencies(),
-    output: 'bindings.inc.rs',
-    include_directories: include_directories('.', 'include'),
-    bindgen_version: ['>=0.60.0'],
-    args: bindgen_args,
-    )
   subdir('rust')
 endif
 
@@ -4368,10 +4336,14 @@ foreach target : target_dirs
     objects += lib.extract_objects(src.sources())
     arch_deps += src.dependencies()
   endif
-  if target_type == 'system' and target_base_arch in hw_common_arch_libs
-    src = hw_common_arch[target_base_arch].apply(config_target, strict: false)
-    lib = hw_common_arch_libs[target_base_arch]
-    objects += lib.extract_objects(src.sources())
+  if target_type == 'system'
+    src = system_ss.apply(config_target, strict: false)
+    objects += libsystem.extract_objects(src.sources())
+    arch_deps += src.dependencies()
+  endif
+  if target_type == 'user'
+    src = user_ss.apply(config_target, strict: false)
+    objects += libuser.extract_objects(src.sources())
     arch_deps += src.dependencies()
   endif
   if target_type == 'system' and target_base_arch in target_common_system_arch_libs
@@ -4399,7 +4371,7 @@ foreach target : target_dirs
                               build_by_default: true,
                               build_always_stale: true)
       rlib = static_library('rust_' + target.underscorify(),
-                            rlib_rs,
+                            structured_sources([], {'.': rlib_rs}),
                             dependencies: target_rust.dependencies(),
                             override_options: ['rust_std=2021', 'build.rust_std=2021'],
                             rust_abi: 'c')
@@ -4753,6 +4725,7 @@ if have_rust
   summary_info += {'Rust target':     config_host['RUST_TARGET_TRIPLE']}
   summary_info += {'rustc':           ' '.join(rustc.cmd_array())}
   summary_info += {'rustc version':   rustc.version()}
+  summary_info += {'rustdoc':         rustdoc}
   summary_info += {'bindgen':         bindgen.full_path()}
   summary_info += {'bindgen version': bindgen.version()}
 endif

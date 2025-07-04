@@ -260,9 +260,21 @@ static void s390_create_sclpconsole(SCLPDevice *sclp,
     qdev_realize_and_unref(dev, ev_fac_bus, &error_fatal);
 }
 
+static void s390_create_sclpcpi(SCLPDevice *sclp)
+{
+    SCLPEventFacility *ef = sclp->event_facility;
+    BusState *ev_fac_bus = sclp_get_event_facility_bus(ef);
+    DeviceState *dev;
+
+    dev = qdev_new(TYPE_SCLP_EVENT_CPI);
+    object_property_add_child(OBJECT(ef), "sclpcpi", OBJECT(dev));
+    qdev_realize_and_unref(dev, ev_fac_bus, &error_fatal);
+}
+
 static void ccw_init(MachineState *machine)
 {
     MachineClass *mc = MACHINE_GET_CLASS(machine);
+    S390CcwMachineClass *s390mc = S390_CCW_MACHINE_CLASS(mc);
     S390CcwMachineState *ms = S390_CCW_MACHINE(machine);
     int ret;
     VirtualCssBus *css_bus;
@@ -323,6 +335,12 @@ static void ccw_init(MachineState *machine)
 
     /* init the TOD clock */
     s390_init_tod();
+
+    /* init SCLP event Control-Program Identification */
+    if (s390mc->use_cpi) {
+        s390_create_sclpcpi(ms->sclp);
+    }
+
 }
 
 static void s390_cpu_plug(HotplugHandler *hotplug_dev,
@@ -783,6 +801,7 @@ static void ccw_machine_class_init(ObjectClass *oc, const void *data)
     DumpSKeysInterface *dsi = DUMP_SKEYS_INTERFACE_CLASS(oc);
 
     s390mc->max_threads = 1;
+    s390mc->use_cpi = true;
     mc->reset = s390_machine_reset;
     mc->block_default_type = IF_VIRTIO;
     mc->no_cdrom = 1;
@@ -908,6 +927,9 @@ static void ccw_machine_10_0_instance_options(MachineState *machine)
 
 static void ccw_machine_10_0_class_options(MachineClass *mc)
 {
+    S390CcwMachineClass *s390mc = S390_CCW_MACHINE_CLASS(mc);
+    s390mc->use_cpi = false;
+
     ccw_machine_10_1_class_options(mc);
     compat_props_add(mc->compat_props, hw_compat_10_0, hw_compat_10_0_len);
 }
@@ -1144,20 +1166,6 @@ static void ccw_machine_4_2_class_options(MachineClass *mc)
     compat_props_add(mc->compat_props, hw_compat_4_2, hw_compat_4_2_len);
 }
 DEFINE_CCW_MACHINE(4, 2);
-
-static void ccw_machine_4_1_instance_options(MachineState *machine)
-{
-    static const S390FeatInit qemu_cpu_feat = { S390_FEAT_LIST_QEMU_V4_1 };
-    ccw_machine_4_2_instance_options(machine);
-    s390_set_qemu_cpu_model(0x2964, 13, 2, qemu_cpu_feat);
-}
-
-static void ccw_machine_4_1_class_options(MachineClass *mc)
-{
-    ccw_machine_4_2_class_options(mc);
-    compat_props_add(mc->compat_props, hw_compat_4_1, hw_compat_4_1_len);
-}
-DEFINE_CCW_MACHINE(4, 1);
 
 static void ccw_machine_register_types(void)
 {
