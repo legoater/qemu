@@ -101,7 +101,7 @@
 ##
 # @query-iothreads:
 #
-# Returns a list of information about each iothread.
+# Return a list of information about each iothread.
 #
 # .. note:: This list excludes the QEMU main loop thread, which is not
 #    declared using the ``-object iothread`` command-line option.  It
@@ -222,8 +222,8 @@
 # .. note:: This command only exists as a stop-gap.  Its use is highly
 #    discouraged.  The semantics of this command are not guaranteed:
 #    this means that command names, arguments and responses can change
-#    or be removed at ANY time.  Applications that rely on long term
-#    stability guarantees should NOT use this command.
+#    or be removed at **any** time.  Applications that rely on long
+#    term stability guarantees should **not** use this command.
 #
 #    Known limitations:
 #
