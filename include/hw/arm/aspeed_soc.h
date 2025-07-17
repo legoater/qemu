@@ -128,6 +128,19 @@ struct Aspeed2600SoCState {
 #define TYPE_ASPEED2600_SOC "aspeed2600-soc"
 OBJECT_DECLARE_SIMPLE_TYPE(Aspeed2600SoCState, ASPEED2600_SOC)
 
+struct Aspeed27x0SSPSoCState {
+    AspeedSoCState parent;
+    AspeedINTCState intc[2];
+    UnimplementedDeviceState ipc[2];
+    UnimplementedDeviceState scuio;
+    MemoryRegion memory;
+
+    ARMv7MState armv7m;
+};
+
+#define TYPE_ASPEED27X0SSP_SOC "aspeed27x0ssp-soc"
+OBJECT_DECLARE_SIMPLE_TYPE(Aspeed27x0SSPSoCState, ASPEED27X0SSP_SOC)
+
 struct Aspeed27x0SoCState {
     AspeedSoCState parent;
 
@@ -135,6 +148,8 @@ struct Aspeed27x0SoCState {
     AspeedINTCState intc[2];
     GICv3State gic;
     MemoryRegion dram_empty;
+
+    Aspeed27x0SSPSoCState ssp;
 };
 
 #define TYPE_ASPEED27X0_SOC "aspeed27x0-soc"
@@ -145,18 +160,6 @@ struct Aspeed10x0SoCState {
 
     ARMv7MState armv7m;
 };
-
-struct Aspeed27x0SSPSoCState {
-    AspeedSoCState parent;
-    AspeedINTCState intc[2];
-    UnimplementedDeviceState ipc[2];
-    UnimplementedDeviceState scuio;
-
-    ARMv7MState armv7m;
-};
-
-#define TYPE_ASPEED27X0SSP_SOC "aspeed27x0ssp-soc"
-OBJECT_DECLARE_SIMPLE_TYPE(Aspeed27x0SSPSoCState, ASPEED27X0SSP_SOC)
 
 struct Aspeed27x0TSPSoCState {
     AspeedSoCState parent;
