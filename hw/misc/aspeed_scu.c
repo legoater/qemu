@@ -143,13 +143,15 @@
 #define AST2700_HW_STRAP1_SEC2    TO_REG(0x28)
 #define AST2700_HW_STRAP1_SEC3    TO_REG(0x2C)
 
-/* SSP */
+/* SSP TSP */
 #define AST2700_SCU_SSP_CTRL_1          TO_REG(0x124)
 #define AST2700_SCU_SSP_CTRL_2          TO_REG(0x128)
 #define AST2700_SCU_SSP_REMAP_ADDR_1    TO_REG(0x148)
 #define AST2700_SCU_SSP_REMAP_SIZE_1    TO_REG(0x14c)
 #define AST2700_SCU_SSP_REMAP_ADDR_2    TO_REG(0x150)
 #define AST2700_SCU_SSP_REMAP_SIZE_2    TO_REG(0x154)
+#define AST2700_SCU_TSP_CTRL_1          TO_REG(0x168)
+#define AST2700_SCU_TSP_REMAP_SIZE_2    TO_REG(0x194)
 
 #define AST2700_SCU_CLK_SEL_1       TO_REG(0x280)
 #define AST2700_SCU_HPLL_PARAM      TO_REG(0x300)
@@ -630,6 +632,8 @@ static const Property aspeed_scu_properties[] = {
                      TYPE_MEMORY_REGION, MemoryRegion *),
     DEFINE_PROP_LINK("ssp-sdram-remap2", AspeedSCUState, ssp_sdram_remap2,
                      TYPE_MEMORY_REGION, MemoryRegion *),
+    DEFINE_PROP_LINK("tsp-sdram-remap", AspeedSCUState, tsp_sdram_remap,
+                     TYPE_MEMORY_REGION, MemoryRegion *),
 };
 
 static void aspeed_scu_class_init(ObjectClass *klass, const void *data)
@@ -956,6 +960,22 @@ static void aspeed_ast2700_scu_write(void *opaque, hwaddr offset,
         data &= 0x3fffffff;
         memory_region_set_size(mr, data);
         break;
+    case AST2700_SCU_TSP_CTRL_1:
+        if (s->tsp_sdram_remap == NULL) {
+            return;
+        }
+        data &= 0x7fffffff;
+        /* remapped to SOC DRAM by adding data << 4 */
+        memory_region_set_alias_offset(s->tsp_sdram_remap,
+                                       (uint64_t) data << 4);
+        break;
+    case AST2700_SCU_TSP_REMAP_SIZE_2:
+        if (s->tsp_sdram_remap == NULL) {
+            return;
+        }
+        data &= 0x3fffffff;
+        memory_region_set_size(s->tsp_sdram_remap, data);
+        break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: Unhandled write at offset 0x%" HWADDR_PRIx "\n",
@@ -989,6 +1009,8 @@ static const uint32_t ast2700_a0_resets[ASPEED_AST2700_SCU_NR_REGS] = {
     [AST2700_SCU_SSP_REMAP_SIZE_1]  = 0x02000000,
     [AST2700_SCU_SSP_REMAP_ADDR_2]  = 0x00000000,
     [AST2700_SCU_SSP_REMAP_SIZE_2]  = 0x02000000,
+    [AST2700_SCU_TSP_CTRL_1]        = 0x42E00000,
+    [AST2700_SCU_TSP_REMAP_SIZE_2]  = 0x02000000,
     [AST2700_SCU_HPLL_PARAM]        = 0x0000009f,
     [AST2700_SCU_HPLL_EXT_PARAM]    = 0x8000004f,
     [AST2700_SCU_DPLL_PARAM]        = 0x0080009f,

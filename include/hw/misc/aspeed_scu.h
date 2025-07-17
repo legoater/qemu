@@ -42,6 +42,7 @@ struct AspeedSCUState {
 
     MemoryRegion *ssp_sdram_remap1;
     MemoryRegion *ssp_sdram_remap2;
+    MemoryRegion *tsp_sdram_remap;
 };
 
 #define AST2400_A0_SILICON_REV   0x02000303U
