@@ -839,6 +839,9 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
         object_property_set_link(OBJECT(&s->scu), "ssp-sdram-remap2",
                                  OBJECT(&a->ssp.sdram_remap2_alias),
                                  &error_abort);
+        object_property_set_link(OBJECT(&s->scu), "tsp-sdram-remap",
+                                 OBJECT(&a->tsp.sdram_remap_alias),
+                                 &error_abort);
     }
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->scu), errp)) {
         return;
