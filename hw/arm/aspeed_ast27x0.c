@@ -673,6 +673,10 @@ static bool aspeed_soc_ast2700_tsp_realize(DeviceState *dev, Error **errp)
     mr = &s->sram;
     memory_region_init_alias(&a->tsp.sram_mr_alias, OBJECT(s), "tsp.sram.alias",
                              mr, 0, memory_region_size(mr));
+
+    mr = &s->scu.iomem;
+    memory_region_init_alias(&a->tsp.scu_mr_alias, OBJECT(s), "tsp.scu.alias",
+                             mr, 0, memory_region_size(mr));
     if (!qdev_realize(DEVICE(&a->tsp), NULL, &error_abort)) {
         return false;
     }
