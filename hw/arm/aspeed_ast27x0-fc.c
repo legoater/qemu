@@ -11,6 +11,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/units.h"
+#include "qemu/datadir.h"
 #include "qapi/error.h"
 #include "system/block-backend.h"
 #include "system/system.h"
@@ -35,6 +36,7 @@ struct Ast2700FCState {
 
     MemoryRegion ca35_memory;
     MemoryRegion ca35_dram;
+    MemoryRegion ca35_boot_rom;
     MemoryRegion ssp_memory;
     MemoryRegion tsp_memory;
 
@@ -55,12 +57,65 @@ struct Ast2700FCState {
 #define AST2700FC_HW_STRAP2 0x00000003
 #define AST2700FC_FMC_MODEL "w25q01jvq"
 #define AST2700FC_SPI_MODEL "w25q512jv"
+#define VBOOTROM_FILE_NAME  "ast27x0_bootrom.bin"
+
+static void ast2700fc_ca35_load_vbootrom(AspeedSoCState *soc,
+                                         const char *bios_name, Error **errp)
+{
+    g_autofree char *filename = NULL;
+    int ret;
+
+    filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
+    if (!filename) {
+        error_setg(errp, "Could not find vbootrom image '%s'", bios_name);
+        return;
+    }
+
+    ret = load_image_mr(filename, &soc->vbootrom);
+    if (ret < 0) {
+        error_setg(errp, "Failed to load vbootrom image '%s'", bios_name);
+        return;
+    }
+}
+
+static void ast2700fc_ca35_write_boot_rom(DriveInfo *dinfo, hwaddr addr,
+                                         size_t rom_size, Error **errp)
+{
+    BlockBackend *blk = blk_by_legacy_dinfo(dinfo);
+    g_autofree void *storage = NULL;
+    int64_t size;
+
+    /*
+     * The block backend size should have already been 'validated' by
+     * the creation of the m25p80 object.
+     */
+    size = blk_getlength(blk);
+    if (size <= 0) {
+        error_setg(errp, "failed to get flash size");
+        return;
+    }
+
+    if (rom_size > size) {
+        rom_size = size;
+    }
+
+    storage = g_malloc0(rom_size);
+    if (blk_pread(blk, 0, rom_size, storage, 0) < 0) {
+        error_setg(errp, "failed to read the initial flash content");
+        return;
+    }
+
+    rom_add_blob_fixed("aspeed.boot_rom", storage, rom_size, addr);
+}
 
 static void ast2700fc_ca35_init(MachineState *machine)
 {
     Ast2700FCState *s = AST2700A1FC(machine);
+    const char *bios_name = NULL;
     AspeedSoCState *soc;
     AspeedSoCClass *sc;
+    uint64_t rom_size;
+    DriveInfo *mtd0;
 
     object_initialize_child(OBJECT(s), "ca35", &s->ca35, "ast2700-a1");
     soc = ASPEED_SOC(&s->ca35);
@@ -117,6 +172,26 @@ static void ast2700fc_ca35_init(MachineState *machine)
 
     ast2700fc_board_info.ram_size = machine->ram_size;
     ast2700fc_board_info.loader_start = sc->memmap[ASPEED_DEV_SDRAM];
+
+    /* Install first FMC flash content as a boot rom. */
+    if (!s->mmio_exec) {
+        mtd0 = drive_get(IF_MTD, 0, 0);
+
+        if (mtd0) {
+            rom_size = memory_region_size(&soc->spi_boot);
+            memory_region_init_rom(&s->ca35_boot_rom, NULL, "aspeed.boot_rom",
+                                   rom_size, &error_abort);
+            memory_region_add_subregion_overlap(&soc->spi_boot_container, 0,
+                                                &s->ca35_boot_rom, 1);
+            ast2700fc_ca35_write_boot_rom(mtd0,
+                                          sc->memmap[ASPEED_DEV_SPI_BOOT],
+                                          rom_size, &error_abort);
+        }
+    }
+
+    /* VBOOTROM */
+    bios_name = machine->firmware ?: VBOOTROM_FILE_NAME;
+    ast2700fc_ca35_load_vbootrom(soc, bios_name, &error_abort);
 
     arm_load_kernel(ARM_CPU(first_cpu), machine, &ast2700fc_board_info);
 }
