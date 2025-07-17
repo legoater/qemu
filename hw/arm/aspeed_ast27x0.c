@@ -641,6 +641,10 @@ static bool aspeed_soc_ast2700_ssp_realize(DeviceState *dev, Error **errp)
     mr = &s->sram;
     memory_region_init_alias(&a->ssp.sram_mr_alias, OBJECT(s), "ssp.sram.alias",
                              mr, 0, memory_region_size(mr));
+
+    mr = &s->scu.iomem;
+    memory_region_init_alias(&a->ssp.scu_mr_alias, OBJECT(s), "ssp.scu.alias",
+                             mr, 0, memory_region_size(mr));
     if (!qdev_realize(DEVICE(&a->ssp), NULL, &error_abort)) {
         return false;
     }
@@ -788,14 +792,22 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
                     sc->memmap[ASPEED_DEV_SCUIO]);
 
     /*
-     * Coprocessors must be realized after the SRAM region.
+     * Coprocessors must be realized after the SRAM and SCU regions.
      *
-     * The SRAM is used for shared memory between the main CPU (PSP) and
-     * coprocessors. The coprocessors accesses this shared SRAM region
-     * through a memory alias mapped to a different physical address.
+     * The SRAM is used as shared memory between the main CPU (PSP) and the
+     * coprocessors. Coprocessors access this shared SRAM region through a
+     * MemoryRegion alias mapped to a different physical address.
      *
-     * Therefore, the SRAM must be fully initialized before the coprocessors
-     * can create aliases pointing to it.
+     * Similarly, the SCU is a single hardware block shared across all
+     * processors. Coprocessors access it via a MemoryRegion alias that maps
+     * to a different address than the one used by the main CPU.
+     *
+     * Therefore, both the SRAM and SCU must be fully initialized before the
+     * coprocessors can create aliases pointing to them.
+     *
+     * To ensure correctness, the device realization order is explicitly
+     * managed:
+     * coprocessors are initialized only after SRAM and SCU are ready.
      */
     if (mc->default_cpus > sc->num_cpus) {
         if (!aspeed_soc_ast2700_ssp_realize(dev, errp)) {
