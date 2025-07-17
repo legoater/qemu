@@ -624,6 +624,7 @@ static bool aspeed_soc_ast2700_ssp_realize(DeviceState *dev, Error **errp)
 {
     Aspeed27x0SoCState *a = ASPEED27X0_SOC(dev);
     AspeedSoCState *s = ASPEED_SOC(dev);
+    MemoryRegion *mr;
     Clock *sysclk;
 
     sysclk = clock_new(OBJECT(s), "SSP_SYSCLK");
@@ -637,6 +638,9 @@ static bool aspeed_soc_ast2700_ssp_realize(DeviceState *dev, Error **errp)
         return false;
     }
 
+    mr = &s->sram;
+    memory_region_init_alias(&a->ssp.sram_mr_alias, OBJECT(s), "ssp.sram.alias",
+                             mr, 0, memory_region_size(mr));
     if (!qdev_realize(DEVICE(&a->ssp), NULL, &error_abort)) {
         return false;
     }
@@ -779,7 +783,16 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
     aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->scuio), 0,
                     sc->memmap[ASPEED_DEV_SCUIO]);
 
-    /* Coprocessors */
+    /*
+     * Coprocessors must be realized after the SRAM region.
+     *
+     * The SRAM is used for shared memory between the main CPU (PSP) and
+     * coprocessors. The coprocessors accesses this shared SRAM region
+     * through a memory alias mapped to a different physical address.
+     *
+     * Therefore, the SRAM must be fully initialized before the coprocessors
+     * can create aliases pointing to it.
+     */
     if (mc->default_cpus > sc->num_cpus) {
         if (!aspeed_soc_ast2700_ssp_realize(dev, errp)) {
             return;
