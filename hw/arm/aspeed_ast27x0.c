@@ -833,6 +833,12 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
         memory_region_init_alias(&a->tsp.sdram_remap_alias, OBJECT(a),
                                  "tsp.sdram.remap", s->memory,
                                  0x42e000000, 32 * MiB);
+        object_property_set_link(OBJECT(&s->scu), "ssp-sdram-remap1",
+                                 OBJECT(&a->ssp.sdram_remap1_alias),
+                                 &error_abort);
+        object_property_set_link(OBJECT(&s->scu), "ssp-sdram-remap2",
+                                 OBJECT(&a->ssp.sdram_remap2_alias),
+                                 &error_abort);
     }
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->scu), errp)) {
         return;
