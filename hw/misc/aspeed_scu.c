@@ -152,6 +152,7 @@
 #define AST2700_SCU_SSP_REMAP_SIZE_1    TO_REG(0x14c)
 #define AST2700_SCU_SSP_REMAP_ADDR_2    TO_REG(0x150)
 #define AST2700_SCU_SSP_REMAP_SIZE_2    TO_REG(0x154)
+#define AST2700_SCU_TSP_CTRL_0          TO_REG(0x160)
 #define AST2700_SCU_TSP_CTRL_1          TO_REG(0x168)
 #define AST2700_SCU_TSP_REMAP_SIZE_2    TO_REG(0x194)
 #define AST2700_SSP_TSP_ENABLE          BIT(0)
@@ -162,6 +163,9 @@
 #define AST2700_SCU_SYS_RST_CTRL_1      TO_REG(0x200)
 #define AST2700_SCU_SYS_RST_CLR_1       TO_REG(0x204)
 #define AST2700_SCU_SYS_RST_SSP         BIT(30)
+#define AST2700_SCU_SYS_RST_CTRL_2      TO_REG(0x220)
+#define AST2700_SCU_SYS_RST_CLR_2       TO_REG(0x224)
+#define AST2700_SCU_SYS_RST_TSP         BIT(9)
 
 #define AST2700_SCU_CLK_SEL_1       TO_REG(0x280)
 #define AST2700_SCU_HPLL_PARAM      TO_REG(0x300)
@@ -923,7 +927,7 @@ static uint64_t aspeed_ast2700_scu_read(void *opaque, hwaddr offset,
 
 static void handle_ssp_tsp_on(struct AspeedSCUState *s, int cpuid)
 {
-    int reg = AST2700_SCU_SSP_CTRL_0;
+    int reg = (cpuid == 4) ? AST2700_SCU_SSP_CTRL_0 : AST2700_SCU_TSP_CTRL_0;
     uint32_t val = s->regs[reg];
 
     val &= ~AST2700_SSP_TSP_RST_SRC_RB;
@@ -937,7 +941,7 @@ static void handle_ssp_tsp_on(struct AspeedSCUState *s, int cpuid)
 
 static void handle_ssp_tsp_off(struct AspeedSCUState *s, int cpuid)
 {
-    int reg = AST2700_SCU_SSP_CTRL_0;
+    int reg = (cpuid == 4) ? AST2700_SCU_SSP_CTRL_0 : AST2700_SCU_TSP_CTRL_0;
     uint32_t val = s->regs[reg];
 
     val |= AST2700_SSP_TSP_RST_RB;
@@ -973,7 +977,8 @@ static void aspeed_ast2700_scu_write(void *opaque, hwaddr offset,
 
     switch (reg) {
     case AST2700_SCU_SSP_CTRL_0:
-        cpuid = 4;
+    case AST2700_SCU_TSP_CTRL_0:
+        cpuid = (reg == AST2700_SCU_SSP_CTRL_0) ? 4 : 5;
         oldval = s->regs[reg];
         data &= 0xff;
         active = oldval ^ data;
@@ -1068,6 +1073,24 @@ static void aspeed_ast2700_scu_write(void *opaque, hwaddr offset,
         }
         s->regs[AST2700_SCU_SYS_RST_CTRL_1] &= ~active;
         return;
+    case AST2700_SCU_SYS_RST_CTRL_2:
+        data &= 0x00001fff;
+        oldval = s->regs[reg];
+        active = data & ~oldval;
+        if (data & AST2700_SCU_SYS_RST_TSP) {
+            handle_ssp_tsp_off(s, 5);
+        }
+        s->regs[reg] |= data;
+        return;
+    case AST2700_SCU_SYS_RST_CLR_2:
+        data &= 0x00001fff;
+        oldval = s->regs[AST2700_SCU_SYS_RST_CTRL_2];
+        active = data & oldval;
+        if (active & AST2700_SCU_SYS_RST_TSP) {
+            handle_ssp_tsp_on(s, 5);
+        }
+        s->regs[AST2700_SCU_SYS_RST_CTRL_2] &= ~active;
+        return;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: Unhandled write at offset 0x%" HWADDR_PRIx "\n",
@@ -1102,9 +1125,11 @@ static const uint32_t ast2700_a0_resets[ASPEED_AST2700_SCU_NR_REGS] = {
     [AST2700_SCU_SSP_REMAP_SIZE_1]  = 0x02000000,
     [AST2700_SCU_SSP_REMAP_ADDR_2]  = 0x00000000,
     [AST2700_SCU_SSP_REMAP_SIZE_2]  = 0x02000000,
+    [AST2700_SCU_TSP_CTRL_0]        = 0x000007FE,
     [AST2700_SCU_TSP_CTRL_1]        = 0x42E00000,
     [AST2700_SCU_TSP_REMAP_SIZE_2]  = 0x02000000,
     [AST2700_SCU_SYS_RST_CTRL_1]    = 0xFFC37FDC,
+    [AST2700_SCU_SYS_RST_CTRL_2]    = 0x00001FFF,
     [AST2700_SCU_HPLL_PARAM]        = 0x0000009f,
     [AST2700_SCU_HPLL_EXT_PARAM]    = 0x8000004f,
     [AST2700_SCU_DPLL_PARAM]        = 0x0080009f,
