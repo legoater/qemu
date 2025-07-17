@@ -812,6 +812,12 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
      *   - remap2 maps PSP DRAM at 0x42c000000 (size: 32MB) to SSP SDRAM
      *     offset 0x0
      *
+     * The TSP coprocessor uses one memory alias (remap) to access a shared
+     * region in the PSP DRAM:
+     *
+     *   - remap maps PSP DRAM at 0x42e000000 (size: 32MB) to TSP SDRAM
+     *     offset 0x0
+     *
      * These mappings correspond to the default values of the SCU registers:
      *
      * This configuration enables shared memory communication between the PSP
@@ -824,6 +830,9 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
         memory_region_init_alias(&a->ssp.sdram_remap2_alias, OBJECT(a),
                                  "ssp.sdram.remap2", s->memory,
                                  0x42c000000ULL, 32 * MiB);
+        memory_region_init_alias(&a->tsp.sdram_remap_alias, OBJECT(a),
+                                 "tsp.sdram.remap", s->memory,
+                                 0x42e000000, 32 * MiB);
     }
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->scu), errp)) {
         return;
