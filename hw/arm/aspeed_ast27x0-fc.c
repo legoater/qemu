@@ -37,14 +37,11 @@ struct Ast2700FCState {
     MemoryRegion ca35_memory;
     MemoryRegion ca35_dram;
     MemoryRegion ca35_boot_rom;
-    MemoryRegion ssp_memory;
     MemoryRegion tsp_memory;
 
-    Clock *ssp_sysclk;
     Clock *tsp_sysclk;
 
     Aspeed27x0SoCState ca35;
-    Aspeed27x0SSPSoCState ssp;
     Aspeed27x0TSPSoCState tsp;
 
     bool mmio_exec;
@@ -158,6 +155,8 @@ static void ast2700fc_ca35_init(MachineState *machine)
         return;
     }
     aspeed_soc_uart_set_chr(soc, ASPEED_DEV_UART12, serial_hd(0));
+    aspeed_soc_uart_set_chr(ASPEED_SOC(&s->ca35.ssp), ASPEED_DEV_UART4,
+                            serial_hd(1));
     if (!qdev_realize(DEVICE(&s->ca35), NULL, &error_abort)) {
         return;
     }
@@ -196,30 +195,6 @@ static void ast2700fc_ca35_init(MachineState *machine)
     arm_load_kernel(ARM_CPU(first_cpu), machine, &ast2700fc_board_info);
 }
 
-static void ast2700fc_ssp_init(MachineState *machine)
-{
-    AspeedSoCState *soc;
-    Ast2700FCState *s = AST2700A1FC(machine);
-    s->ssp_sysclk = clock_new(OBJECT(s), "SSP_SYSCLK");
-    clock_set_hz(s->ssp_sysclk, 200000000ULL);
-
-    object_initialize_child(OBJECT(s), "ssp", &s->ssp, TYPE_ASPEED27X0SSP_SOC);
-    memory_region_init(&s->ssp_memory, OBJECT(&s->ssp), "ssp-memory",
-                       UINT64_MAX);
-
-    qdev_connect_clock_in(DEVICE(&s->ssp), "sysclk", s->ssp_sysclk);
-    if (!object_property_set_link(OBJECT(&s->ssp), "memory",
-                                  OBJECT(&s->ssp_memory), &error_abort)) {
-        return;
-    }
-
-    soc = ASPEED_SOC(&s->ssp);
-    aspeed_soc_uart_set_chr(soc, ASPEED_DEV_UART4, serial_hd(1));
-    if (!qdev_realize(DEVICE(&s->ssp), NULL, &error_abort)) {
-        return;
-    }
-}
-
 static void ast2700fc_tsp_init(MachineState *machine)
 {
     AspeedSoCState *soc;
@@ -247,7 +222,6 @@ static void ast2700fc_tsp_init(MachineState *machine)
 static void ast2700fc_init(MachineState *machine)
 {
     ast2700fc_ca35_init(machine);
-    ast2700fc_ssp_init(machine);
     ast2700fc_tsp_init(machine);
 }
 
