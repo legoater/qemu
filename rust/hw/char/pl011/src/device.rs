@@ -2,18 +2,21 @@
 // Author(s): Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-use std::{ffi::CStr, mem::size_of, ptr::addr_of_mut};
+use std::{ffi::CStr, mem::size_of};
 
 use qemu_api::{
     chardev::{CharBackend, Chardev, Event},
     impl_vmstate_forward,
     irq::{IRQState, InterruptSource},
+    log::Log,
+    log_mask_ln,
     memory::{hwaddr, MemoryRegion, MemoryRegionOps, MemoryRegionOpsBuilder},
     prelude::*,
     qdev::{Clock, ClockEvent, DeviceImpl, DeviceState, Property, ResetType, ResettablePhasesImpl},
-    qom::{ObjectImpl, Owned, ParentField},
+    qom::{ObjectImpl, Owned, ParentField, ParentInit},
     static_assert,
     sysbus::{SysBusDevice, SysBusDeviceImpl},
+    uninit_field_mut,
     vmstate::VMStateDescription,
 };
 
@@ -85,8 +88,8 @@ pub struct PL011Registers {
     #[doc(alias = "cr")]
     pub control: registers::Control,
     pub dmacr: u32,
-    pub int_enabled: u32,
-    pub int_level: u32,
+    pub int_enabled: Interrupt,
+    pub int_level: Interrupt,
     pub read_fifo: Fifo,
     pub ilpr: u32,
     pub ibrd: u32,
@@ -163,7 +166,7 @@ impl PL011Impl for PL011State {
 impl ObjectImpl for PL011State {
     type ParentType = SysBusDevice;
 
-    const INSTANCE_INIT: Option<unsafe fn(&mut Self)> = Some(Self::init);
+    const INSTANCE_INIT: Option<unsafe fn(ParentInit<Self>)> = Some(Self::init);
     const INSTANCE_POST_INIT: Option<fn(&Self)> = Some(Self::post_init);
     const CLASS_INIT: fn(&mut Self::Class) = Self::Class::class_init::<Self>;
 }
@@ -175,7 +178,7 @@ impl DeviceImpl for PL011State {
     fn vmsd() -> Option<&'static VMStateDescription> {
         Some(&device_class::VMSTATE_PL011)
     }
-    const REALIZE: Option<fn(&Self)> = Some(Self::realize);
+    const REALIZE: Option<fn(&Self) -> qemu_api::Result<()>> = Some(Self::realize);
 }
 
 impl ResettablePhasesImpl for PL011State {
@@ -199,9 +202,9 @@ impl PL011Registers {
             LCR_H => u32::from(self.line_control),
             CR => u32::from(self.control),
             FLS => self.ifl,
-            IMSC => self.int_enabled,
-            RIS => self.int_level,
-            MIS => self.int_level & self.int_enabled,
+            IMSC => u32::from(self.int_enabled),
+            RIS => u32::from(self.int_level),
+            MIS => u32::from(self.int_level & self.int_enabled),
             ICR => {
                 // "The UARTICR Register is the interrupt clear register and is write-only"
                 // Source: ARM DDI 0183G 3.3.13 Interrupt Clear Register, UARTICR
@@ -263,20 +266,19 @@ impl PL011Registers {
                 self.set_read_trigger();
             }
             IMSC => {
-                self.int_enabled = value;
+                self.int_enabled = Interrupt::from(value);
                 return true;
             }
             RIS => {}
             MIS => {}
             ICR => {
-                self.int_level &= !value;
+                self.int_level &= !Interrupt::from(value);
                 return true;
             }
             DMACR => {
                 self.dmacr = value;
                 if value & 3 > 0 {
-                    // qemu_log_mask(LOG_UNIMP, "pl011: DMA not implemented\n");
-                    eprintln!("pl011: DMA not implemented");
+                    log_mask_ln!(Log::Unimp, "pl011: DMA not implemented");
                 }
             }
         }
@@ -295,7 +297,7 @@ impl PL011Registers {
             self.flags.set_receive_fifo_empty(true);
         }
         if self.read_count + 1 == self.read_trigger {
-            self.int_level &= !Interrupt::RX.0;
+            self.int_level &= !Interrupt::RX;
         }
         self.receive_status_error_clear.set_from_data(c);
         *update = true;
@@ -303,9 +305,15 @@ impl PL011Registers {
     }
 
     fn write_data_register(&mut self, value: u32) -> bool {
+        if !self.control.enable_uart() {
+            log_mask_ln!(Log::GuestError, "PL011 data written to disabled UART");
+        }
+        if !self.control.enable_transmit() {
+            log_mask_ln!(Log::GuestError, "PL011 data written to disabled TX UART");
+        }
         // interrupts always checked
         let _ = self.loopback_tx(value.into());
-        self.int_level |= Interrupt::TX.0;
+        self.int_level |= Interrupt::TX;
         true
     }
 
@@ -361,19 +369,19 @@ impl PL011Registers {
         // Change interrupts based on updated FR
         let mut il = self.int_level;
 
-        il &= !Interrupt::MS.0;
+        il &= !Interrupt::MS;
 
         if self.flags.data_set_ready() {
-            il |= Interrupt::DSR.0;
+            il |= Interrupt::DSR;
         }
         if self.flags.data_carrier_detect() {
-            il |= Interrupt::DCD.0;
+            il |= Interrupt::DCD;
         }
         if self.flags.clear_to_send() {
-            il |= Interrupt::CTS.0;
+            il |= Interrupt::CTS;
         }
         if self.flags.ring_indicator() {
-            il |= Interrupt::RI.0;
+            il |= Interrupt::RI;
         }
         self.int_level = il;
         true
@@ -391,8 +399,8 @@ impl PL011Registers {
         self.line_control.reset();
         self.receive_status_error_clear.reset();
         self.dmacr = 0;
-        self.int_enabled = 0;
-        self.int_level = 0;
+        self.int_enabled = 0.into();
+        self.int_level = 0.into();
         self.ilpr = 0;
         self.ibrd = 0;
         self.fbrd = 0;
@@ -451,7 +459,7 @@ impl PL011Registers {
         }
 
         if self.read_count == self.read_trigger {
-            self.int_level |= Interrupt::RX.0;
+            self.int_level |= Interrupt::RX;
             return true;
         }
         false
@@ -480,15 +488,15 @@ impl PL011Registers {
 }
 
 impl PL011State {
-    /// Initializes a pre-allocated, unitialized instance of `PL011State`.
+    /// Initializes a pre-allocated, uninitialized instance of `PL011State`.
     ///
     /// # Safety
     ///
     /// `self` must point to a correctly sized and aligned location for the
     /// `PL011State` type. It must not be called more than once on the same
-    /// location/instance. All its fields are expected to hold unitialized
+    /// location/instance. All its fields are expected to hold uninitialized
     /// values with the sole exception of `parent_obj`.
-    unsafe fn init(&mut self) {
+    unsafe fn init(mut this: ParentInit<Self>) {
         static PL011_OPS: MemoryRegionOps<PL011State> = MemoryRegionOpsBuilder::<PL011State>::new()
             .read(&PL011State::read)
             .write(&PL011State::write)
@@ -496,28 +504,23 @@ impl PL011State {
             .impl_sizes(4, 4)
             .build();
 
-        // SAFETY:
-        //
-        // self and self.iomem are guaranteed to be valid at this point since callers
-        // must make sure the `self` reference is valid.
+        // SAFETY: this and this.iomem are guaranteed to be valid at this point
         MemoryRegion::init_io(
-            unsafe { &mut *addr_of_mut!(self.iomem) },
-            addr_of_mut!(*self),
+            &mut uninit_field_mut!(*this, iomem),
             &PL011_OPS,
             "pl011",
             0x1000,
         );
 
-        self.regs = Default::default();
+        uninit_field_mut!(*this, regs).write(Default::default());
 
-        // SAFETY:
-        //
-        // self.clock is not initialized at this point; but since `Owned<_>` is
-        // not Drop, we can overwrite the undefined value without side effects;
-        // it's not sound but, because for all PL011State instances are created
-        // by QOM code which calls this function to initialize the fields, at
-        // leastno code is able to access an invalid self.clock value.
-        self.clock = self.init_clock_in("clk", &Self::clock_update, ClockEvent::ClockUpdate);
+        let clock = DeviceState::init_clock_in(
+            &mut this,
+            "clk",
+            &Self::clock_update,
+            ClockEvent::ClockUpdate,
+        );
+        uninit_field_mut!(*this, clock).write(clock);
     }
 
     const fn clock_update(&self, _event: ClockEvent) {
@@ -538,7 +541,7 @@ impl PL011State {
                 u64::from(device_id[(offset - 0xfe0) >> 2])
             }
             Err(_) => {
-                // qemu_log_mask(LOG_GUEST_ERROR, "pl011_read: Bad offset 0x%x\n", (int)offset);
+                log_mask_ln!(Log::GuestError, "PL011State::read: Bad offset {offset}");
                 0
             }
             Ok(field) => {
@@ -570,7 +573,10 @@ impl PL011State {
                 .borrow_mut()
                 .write(field, value as u32, &self.char_backend);
         } else {
-            eprintln!("write bad offset {offset} value {value}");
+            log_mask_ln!(
+                Log::GuestError,
+                "PL011State::write: Bad offset {offset} value {value}"
+            );
         }
         if update_irq {
             self.update();
@@ -619,9 +625,10 @@ impl PL011State {
         }
     }
 
-    fn realize(&self) {
+    fn realize(&self) -> qemu_api::Result<()> {
         self.char_backend
             .enable_handlers(self, Self::can_receive, Self::receive, Self::event);
+        Ok(())
     }
 
     fn reset_hold(&self, _type: ResetType) {
@@ -632,7 +639,7 @@ impl PL011State {
         let regs = self.regs.borrow();
         let flags = regs.int_level & regs.int_enabled;
         for (irq, i) in self.interrupts.iter().zip(IRQMASK) {
-            irq.set(flags & i != 0);
+            irq.set(flags.any_set(i));
         }
     }
 
@@ -642,14 +649,13 @@ impl PL011State {
 }
 
 /// Which bits in the interrupt status matter for each outbound IRQ line ?
-const IRQMASK: [u32; 6] = [
-    /* combined IRQ */
-    Interrupt::E.0 | Interrupt::MS.0 | Interrupt::RT.0 | Interrupt::TX.0 | Interrupt::RX.0,
-    Interrupt::RX.0,
-    Interrupt::TX.0,
-    Interrupt::RT.0,
-    Interrupt::MS.0,
-    Interrupt::E.0,
+const IRQMASK: [Interrupt; 6] = [
+    Interrupt::all(),
+    Interrupt::RX,
+    Interrupt::TX,
+    Interrupt::RT,
+    Interrupt::MS,
+    Interrupt::E,
 ];
 
 /// # Safety

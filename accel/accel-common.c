@@ -10,7 +10,9 @@
 #include "qemu/osdep.h"
 #include "qemu/accel.h"
 #include "qemu/target-info.h"
+#include "accel/accel-ops.h"
 #include "accel/accel-cpu.h"
+#include "accel/accel-cpu-ops.h"
 #include "accel-internal.h"
 
 /* Lookup AccelClass from opt_name. Returns NULL if not found */
@@ -124,7 +126,7 @@ int accel_supported_gdbstub_sstep_flags(void)
     AccelState *accel = current_accel();
     AccelClass *acc = ACCEL_GET_CLASS(accel);
     if (acc->gdbstub_supported_sstep_flags) {
-        return acc->gdbstub_supported_sstep_flags();
+        return acc->gdbstub_supported_sstep_flags(accel);
     }
     return 0;
 }

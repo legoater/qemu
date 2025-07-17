@@ -13,6 +13,7 @@ endif
 test_timeouts = {
   'aarch64_aspeed_ast2700' : 600,
   'aarch64_aspeed_ast2700fc' : 600,
+  'aarch64_device_passthrough' : 720,
   'aarch64_imx8mp_evk' : 240,
   'aarch64_raspi4' : 480,
   'aarch64_reverse_debug' : 180,
@@ -31,6 +32,8 @@ test_timeouts = {
   'arm_aspeed_ast2500' : 720,
   'arm_aspeed_ast2600' : 1200,
   'arm_aspeed_bletchley' : 480,
+  'arm_aspeed_catalina' : 480,
+  'arm_aspeed_gb200nvl_bmc' : 480,
   'arm_aspeed_rainier' : 480,
   'arm_bpim2u' : 500,
   'arm_collie' : 180,
@@ -83,6 +86,8 @@ tests_aarch64_system_quick = [
 tests_aarch64_system_thorough = [
   'aarch64_aspeed_ast2700',
   'aarch64_aspeed_ast2700fc',
+  'aarch64_device_passthrough',
+  'aarch64_hotplug_pci',
   'aarch64_imx8mp_evk',
   'aarch64_raspi3',
   'aarch64_raspi4',
@@ -124,6 +129,8 @@ tests_arm_system_thorough = [
   'arm_aspeed_ast2500',
   'arm_aspeed_ast2600',
   'arm_aspeed_bletchley',
+  'arm_aspeed_catalina',
+  'arm_aspeed_gb200nvl_bmc',
   'arm_aspeed_rainier',
   'arm_bpim2u',
   'arm_canona1100',
@@ -131,12 +138,15 @@ tests_arm_system_thorough = [
   'arm_cubieboard',
   'arm_emcraft_sf2',
   'arm_integratorcp',
+  'arm_max78000fthr',
   'arm_microbit',
   'arm_orangepi',
   'arm_quanta_gsj',
   'arm_raspi2',
+  'arm_realview',
   'arm_replay',
   'arm_smdkc210',
+  'arm_stellaris',
   'arm_sx1',
   'arm_vexpress',
   'arm_virt',
@@ -149,6 +159,7 @@ tests_arm_linuxuser_thorough = [
 
 tests_avr_system_thorough = [
   'avr_mega2560',
+  'avr_uno',
 ]
 
 tests_hppa_system_quick = [
@@ -271,6 +282,7 @@ tests_rx_system_thorough = [
 
 tests_s390x_system_thorough = [
   's390x_ccw_virtio',
+  's390x_pxelinux',
   's390x_replay',
   's390x_topology',
   's390x_tuxrun',
@@ -311,6 +323,7 @@ tests_x86_64_system_quick = [
   'virtio_version',
   'x86_cpu_model_versions',
   'vnc',
+  'memlock',
 ]
 
 tests_x86_64_system_thorough = [
@@ -362,7 +375,7 @@ foreach speed : ['quick', 'thorough']
       target_tests = get_variable('tests_' + target_base + '_' + sysmode + '_' + speed, [])
     endif
 
-    test_deps = roms
+    test_deps = [roms, keymap_targets]
     test_env = environment()
     if have_tools
       test_env.set('QEMU_TEST_QEMU_IMG', meson.global_build_root() / 'qemu-img')
@@ -413,4 +426,4 @@ endforeach
 
 run_target('precache-functional',
            depends: precache_all,
-           command: ['true'])
+           command: [python, '-c', ''])

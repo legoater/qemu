@@ -117,6 +117,17 @@ bool vfio_get_info_dma_avail(struct vfio_iommu_type1_info *info,
 int vfio_kvm_device_fd = -1;
 #endif
 
+void vfio_kvm_device_close(void)
+{
+#ifdef CONFIG_KVM
+    kvm_close();
+    if (vfio_kvm_device_fd != -1) {
+        close(vfio_kvm_device_fd);
+        vfio_kvm_device_fd = -1;
+    }
+#endif
+}
+
 int vfio_kvm_device_add_fd(int fd, Error **errp)
 {
 #ifdef CONFIG_KVM
@@ -197,4 +208,21 @@ retry:
     }
 
     return info;
+}
+
+bool vfio_arch_wants_loading_config_after_iter(void)
+{
+    /*
+     * Starting the config load only after all iterables were loaded (during
+     * non-iterables loading phase) is required for ARM64 due to this platform
+     * VFIO dependency on interrupt controller being loaded first.
+     *
+     * See commit d329f5032e17 ("vfio: Move the saving of the config space to
+     * the right place in VFIO migration").
+     */
+#if defined(TARGET_ARM)
+    return true;
+#else
+    return false;
+#endif
 }

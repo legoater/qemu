@@ -20,7 +20,7 @@
 #include "qemu/log.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
-#include "exec/tswap.h"
+#include "qemu/target-info.h"
 #include "qom/object_interfaces.h"
 #include "hw/core/cpu.h"
 #include "hw/virtio/virtio.h"
@@ -203,6 +203,15 @@ static const char *virtio_id_to_name(uint16_t device_id)
     const char *name = virtio_device_names[device_id];
     assert(name != NULL);
     return name;
+}
+
+static void virtio_check_indirect_feature(VirtIODevice *vdev)
+{
+    if (!virtio_vdev_has_feature(vdev, VIRTIO_RING_F_INDIRECT_DESC)) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "Device %s: indirect_desc was not negotiated!\n",
+                      vdev->name);
+    }
 }
 
 /* Called within call_rcu().  */
@@ -1680,8 +1689,8 @@ static void *virtqueue_split_pop(VirtQueue *vq, size_t sz)
     VirtIODevice *vdev = vq->vdev;
     VirtQueueElement *elem = NULL;
     unsigned out_num, in_num, elem_entries;
-    hwaddr addr[VIRTQUEUE_MAX_SIZE];
-    struct iovec iov[VIRTQUEUE_MAX_SIZE];
+    hwaddr QEMU_UNINITIALIZED addr[VIRTQUEUE_MAX_SIZE];
+    struct iovec QEMU_UNINITIALIZED iov[VIRTQUEUE_MAX_SIZE];
     VRingDesc desc;
     int rc;
 
@@ -1733,6 +1742,7 @@ static void *virtqueue_split_pop(VirtQueue *vq, size_t sz)
             virtio_error(vdev, "Invalid size for indirect buffer table");
             goto done;
         }
+        virtio_check_indirect_feature(vdev);
 
         /* loop over the indirect descriptor table */
         len = address_space_cache_init(&indirect_desc_cache, vdev->dma_as,
@@ -1826,8 +1836,8 @@ static void *virtqueue_packed_pop(VirtQueue *vq, size_t sz)
     VirtIODevice *vdev = vq->vdev;
     VirtQueueElement *elem = NULL;
     unsigned out_num, in_num, elem_entries;
-    hwaddr addr[VIRTQUEUE_MAX_SIZE];
-    struct iovec iov[VIRTQUEUE_MAX_SIZE];
+    hwaddr QEMU_UNINITIALIZED addr[VIRTQUEUE_MAX_SIZE];
+    struct iovec QEMU_UNINITIALIZED iov[VIRTQUEUE_MAX_SIZE];
     VRingPackedDesc desc;
     uint16_t id;
     int rc;
@@ -1870,6 +1880,7 @@ static void *virtqueue_packed_pop(VirtQueue *vq, size_t sz)
             virtio_error(vdev, "Invalid size for indirect buffer table");
             goto done;
         }
+        virtio_check_indirect_feature(vdev);
 
         /* loop over the indirect descriptor table */
         len = address_space_cache_init(&indirect_desc_cache, vdev->dma_as,
@@ -3259,18 +3270,18 @@ virtio_load(VirtIODevice *vdev, QEMUFile *f, int version_id)
         config_len--;
     }
 
-    if (vdc->pre_load_queues) {
-        ret = vdc->pre_load_queues(vdev);
-        if (ret) {
-            return ret;
-        }
-    }
-
     num = qemu_get_be32(f);
 
     if (num > VIRTIO_QUEUE_MAX) {
         error_report("Invalid number of virtqueues: 0x%x", num);
         return -1;
+    }
+
+    if (vdc->pre_load_queues) {
+        ret = vdc->pre_load_queues(vdev, num);
+        if (ret) {
+            return ret;
+        }
     }
 
     for (i = 0; i < num; i++) {

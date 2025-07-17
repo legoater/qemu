@@ -116,6 +116,7 @@ typedef struct VFIOMSIXInfo {
     uint32_t pba_offset;
     unsigned long *pending;
     bool noresize;
+    MemoryRegion *pba_region;
 } VFIOMSIXInfo;
 
 /*
@@ -156,6 +157,7 @@ struct VFIOPCIDevice {
     uint32_t device_id;
     uint32_t sub_vendor_id;
     uint32_t sub_device_id;
+    uint32_t class_code;
     uint32_t features;
 #define VFIO_FEATURE_ENABLE_VGA_BIT 0
 #define VFIO_FEATURE_ENABLE_VGA (1 << VFIO_FEATURE_ENABLE_VGA_BIT)
@@ -204,11 +206,18 @@ static inline bool vfio_pci_is(VFIOPCIDevice *vdev, uint32_t vendor, uint32_t de
 
 static inline bool vfio_is_vga(VFIOPCIDevice *vdev)
 {
-    PCIDevice *pdev = &vdev->pdev;
-    uint16_t class = pci_get_word(pdev->config + PCI_CLASS_DEVICE);
-
-    return class == PCI_CLASS_DISPLAY_VGA;
+    return (vdev->class_code >> 8) == PCI_CLASS_DISPLAY_VGA;
 }
+
+/* MSI/MSI-X/INTx */
+void vfio_pci_vector_init(VFIOPCIDevice *vdev, int nr);
+void vfio_pci_add_kvm_msi_virq(VFIOPCIDevice *vdev, VFIOMSIVector *vector,
+                               int vector_n, bool msix);
+void vfio_pci_prepare_kvm_msi_virq_batch(VFIOPCIDevice *vdev);
+void vfio_pci_commit_kvm_msi_virq_batch(VFIOPCIDevice *vdev);
+bool vfio_pci_intx_enable(VFIOPCIDevice *vdev, Error **errp);
+void vfio_pci_msix_set_notifiers(VFIOPCIDevice *vdev);
+void vfio_pci_msi_set_handler(VFIOPCIDevice *vdev, int nr);
 
 uint32_t vfio_pci_read_config(PCIDevice *pdev, uint32_t addr, int len);
 void vfio_pci_write_config(PCIDevice *pdev,
@@ -247,5 +256,16 @@ bool vfio_display_probe(VFIOPCIDevice *vdev, Error **errp);
 void vfio_display_finalize(VFIOPCIDevice *vdev);
 
 extern const VMStateDescription vfio_display_vmstate;
+
+void vfio_pci_bars_exit(VFIOPCIDevice *vdev);
+bool vfio_pci_add_capabilities(VFIOPCIDevice *vdev, Error **errp);
+bool vfio_pci_config_setup(VFIOPCIDevice *vdev, Error **errp);
+bool vfio_pci_interrupt_setup(VFIOPCIDevice *vdev, Error **errp);
+void vfio_pci_intx_eoi(VFIODevice *vbasedev);
+void vfio_pci_put_device(VFIOPCIDevice *vdev);
+bool vfio_pci_populate_device(VFIOPCIDevice *vdev, Error **errp);
+void vfio_pci_register_err_notifier(VFIOPCIDevice *vdev);
+void vfio_pci_register_req_notifier(VFIOPCIDevice *vdev);
+void vfio_pci_teardown_msi(VFIOPCIDevice *vdev);
 
 #endif /* HW_VFIO_VFIO_PCI_H */

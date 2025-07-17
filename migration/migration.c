@@ -576,22 +576,27 @@ int migrate_send_rp_message_req_pages(MigrationIncomingState *mis,
 }
 
 int migrate_send_rp_req_pages(MigrationIncomingState *mis,
-                              RAMBlock *rb, ram_addr_t start, uint64_t haddr)
+                              RAMBlock *rb, ram_addr_t start, uint64_t haddr,
+                              uint32_t tid)
 {
     void *aligned = (void *)(uintptr_t)ROUND_DOWN(haddr, qemu_ram_pagesize(rb));
     bool received = false;
 
     WITH_QEMU_LOCK_GUARD(&mis->page_request_mutex) {
         received = ramblock_recv_bitmap_test_byte_offset(rb, start);
-        if (!received && !g_tree_lookup(mis->page_requested, aligned)) {
-            /*
-             * The page has not been received, and it's not yet in the page
-             * request list.  Queue it.  Set the value of element to 1, so that
-             * things like g_tree_lookup() will return TRUE (1) when found.
-             */
-            g_tree_insert(mis->page_requested, aligned, (gpointer)1);
-            qatomic_inc(&mis->page_requested_count);
-            trace_postcopy_page_req_add(aligned, mis->page_requested_count);
+        if (!received) {
+            if (!g_tree_lookup(mis->page_requested, aligned)) {
+                /*
+                 * The page has not been received, and it's not yet in the
+                 * page request list.  Queue it.  Set the value of element
+                 * to 1, so that things like g_tree_lookup() will return
+                 * TRUE (1) when found.
+                 */
+                g_tree_insert(mis->page_requested, aligned, (gpointer)1);
+                qatomic_inc(&mis->page_requested_count);
+                trace_postcopy_page_req_add(aligned, mis->page_requested_count);
+            }
+            mark_postcopy_blocktime_begin(haddr, tid, rb);
         }
     }
 
@@ -1630,7 +1635,7 @@ void migration_cancel(void)
         }
         /* If the migration is paused, kick it out of the pause */
         if (old_state == MIGRATION_STATUS_PRE_SWITCHOVER) {
-            qemu_sem_post(&s->pause_sem);
+            qemu_event_set(&s->pause_event);
         }
         migrate_set_state(&s->state, old_state, MIGRATION_STATUS_CANCELLING);
     } while (s->state != MIGRATION_STATUS_CANCELLING);
@@ -2342,7 +2347,7 @@ void qmp_migrate_continue(MigrationStatus state, Error **errp)
                    MigrationStatus_str(s->state));
         return;
     }
-    qemu_sem_post(&s->pause_sem);
+    qemu_event_set(&s->pause_event);
 }
 
 int migration_rp_wait(MigrationState *s)
@@ -2911,21 +2916,18 @@ static bool migration_switchover_prepare(MigrationState *s)
         return true;
     }
 
-    /* Since leaving this state is not atomic with posting the semaphore
+    /*
+     * Since leaving this state is not atomic with setting the event
      * it's possible that someone could have issued multiple migrate_continue
-     * and the semaphore is incorrectly positive at this point;
-     * the docs say it's undefined to reinit a semaphore that's already
-     * init'd, so use timedwait to eat up any existing posts.
+     * and the event is incorrectly set at this point so reset it.
      */
-    while (qemu_sem_timedwait(&s->pause_sem, 1) == 0) {
-        /* This block intentionally left blank */
-    }
+    qemu_event_reset(&s->pause_event);
 
     /* Update [POSTCOPY_]ACTIVE to PRE_SWITCHOVER */
     migrate_set_state(&s->state, s->state, MIGRATION_STATUS_PRE_SWITCHOVER);
     bql_unlock();
 
-    qemu_sem_wait(&s->pause_sem);
+    qemu_event_wait(&s->pause_event);
 
     bql_lock();
     /*
@@ -3439,31 +3441,58 @@ static MigIterateState migration_iteration_run(MigrationState *s)
     Error *local_err = NULL;
     bool in_postcopy = s->state == MIGRATION_STATUS_POSTCOPY_ACTIVE;
     bool can_switchover = migration_can_switchover(s);
+    bool complete_ready;
 
+    /* Fast path - get the estimated amount of pending data */
     qemu_savevm_state_pending_estimate(&must_precopy, &can_postcopy);
     pending_size = must_precopy + can_postcopy;
     trace_migrate_pending_estimate(pending_size, must_precopy, can_postcopy);
 
-    if (pending_size < s->threshold_size) {
-        qemu_savevm_state_pending_exact(&must_precopy, &can_postcopy);
-        pending_size = must_precopy + can_postcopy;
-        trace_migrate_pending_exact(pending_size, must_precopy, can_postcopy);
+    if (in_postcopy) {
+        /*
+         * Iterate in postcopy until all pending data flushed.  Note that
+         * postcopy completion doesn't rely on can_switchover, because when
+         * POSTCOPY_ACTIVE it means switchover already happened.
+         */
+        complete_ready = !pending_size;
+    } else {
+        /*
+         * Exact pending reporting is only needed for precopy.  Taking RAM
+         * as example, there'll be no extra dirty information after
+         * postcopy started, so ESTIMATE should always match with EXACT
+         * during postcopy phase.
+         */
+        if (pending_size < s->threshold_size) {
+            qemu_savevm_state_pending_exact(&must_precopy, &can_postcopy);
+            pending_size = must_precopy + can_postcopy;
+            trace_migrate_pending_exact(pending_size, must_precopy,
+                                        can_postcopy);
+        }
+
+        /* Should we switch to postcopy now? */
+        if (must_precopy <= s->threshold_size &&
+            can_switchover && qatomic_read(&s->start_postcopy)) {
+            if (postcopy_start(s, &local_err)) {
+                migrate_set_error(s, local_err);
+                error_report_err(local_err);
+            }
+            return MIG_ITERATE_SKIP;
+        }
+
+        /*
+         * For precopy, migration can complete only if:
+         *
+         * (1) Switchover is acknowledged by destination
+         * (2) Pending size is no more than the threshold specified
+         *     (which was calculated from expected downtime)
+         */
+        complete_ready = can_switchover && (pending_size <= s->threshold_size);
     }
 
-    if ((!pending_size || pending_size < s->threshold_size) && can_switchover) {
+    if (complete_ready) {
         trace_migration_thread_low_pending(pending_size);
         migration_completion(s);
         return MIG_ITERATE_BREAK;
-    }
-
-    /* Still a significant amount to transfer */
-    if (!in_postcopy && must_precopy <= s->threshold_size && can_switchover &&
-        qatomic_read(&s->start_postcopy)) {
-        if (postcopy_start(s, &local_err)) {
-            migrate_set_error(s, local_err);
-            error_report_err(local_err);
-        }
-        return MIG_ITERATE_SKIP;
     }
 
     /* Just another iteration step */
@@ -3890,9 +3919,8 @@ static void *bg_migration_thread(void *opaque)
 
     while (migration_is_active()) {
         MigIterateState iter_state = bg_migration_iteration_run(s);
-        if (iter_state == MIG_ITERATE_SKIP) {
-            continue;
-        } else if (iter_state == MIG_ITERATE_BREAK) {
+
+        if (iter_state == MIG_ITERATE_BREAK) {
             break;
         }
 
@@ -4057,7 +4085,7 @@ static void migration_instance_finalize(Object *obj)
     qemu_mutex_destroy(&ms->qemu_file_lock);
     qemu_sem_destroy(&ms->wait_unplug_sem);
     qemu_sem_destroy(&ms->rate_limit_sem);
-    qemu_sem_destroy(&ms->pause_sem);
+    qemu_event_destroy(&ms->pause_event);
     qemu_sem_destroy(&ms->postcopy_pause_sem);
     qemu_sem_destroy(&ms->rp_state.rp_sem);
     qemu_sem_destroy(&ms->rp_state.rp_pong_acks);
@@ -4072,7 +4100,7 @@ static void migration_instance_init(Object *obj)
     ms->state = MIGRATION_STATUS_NONE;
     ms->mbps = -1;
     ms->pages_per_second = -1;
-    qemu_sem_init(&ms->pause_sem, 0);
+    qemu_event_init(&ms->pause_event, false);
     qemu_mutex_init(&ms->error_mutex);
 
     migrate_params_init(&ms->parameters);

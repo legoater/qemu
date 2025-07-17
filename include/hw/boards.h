@@ -286,8 +286,7 @@ struct MachineClass {
         no_parallel:1,
         no_floppy:1,
         no_cdrom:1,
-        pci_allow_0_address:1,
-        legacy_fw_cfg_order:1;
+        pci_allow_0_address:1;
     bool auto_create_sdcard;
     bool is_default;
     const char *default_machine_opts;
@@ -444,6 +443,7 @@ struct MachineState {
     SmpCache smp_cache;
     struct NVDIMMState *nvdimms_state;
     struct NumaState *numa_state;
+    bool acpi_spcr_enabled;
 };
 
 /*
@@ -862,11 +862,5 @@ extern const size_t hw_compat_2_7_len;
 
 extern GlobalProperty hw_compat_2_6[];
 extern const size_t hw_compat_2_6_len;
-
-extern GlobalProperty hw_compat_2_5[];
-extern const size_t hw_compat_2_5_len;
-
-extern GlobalProperty hw_compat_2_4[];
-extern const size_t hw_compat_2_4_len;
 
 #endif

@@ -831,14 +831,24 @@ static inline bool migration_bitmap_clear_dirty(RAMState *rs,
     bool ret;
 
     /*
-     * Clear dirty bitmap if needed.  This _must_ be called before we
-     * send any of the page in the chunk because we need to make sure
-     * we can capture further page content changes when we sync dirty
-     * log the next time.  So as long as we are going to send any of
-     * the page in the chunk we clear the remote dirty bitmap for all.
-     * Clearing it earlier won't be a problem, but too late will.
+     * During the last stage (after source VM stopped), resetting the write
+     * protections isn't needed as we know there will be either (1) no
+     * further writes if migration will complete, or (2) migration fails
+     * at last then tracking isn't needed either.
+     *
+     * Do the same for postcopy due to the same reason.
      */
-    migration_clear_memory_region_dirty_bitmap(rb, page);
+    if (!rs->last_stage && !migration_in_postcopy()) {
+        /*
+         * Clear dirty bitmap if needed.  This _must_ be called before we
+         * send any of the page in the chunk because we need to make sure
+         * we can capture further page content changes when we sync dirty
+         * log the next time.  So as long as we are going to send any of
+         * the page in the chunk we clear the remote dirty bitmap for all.
+         * Clearing it earlier won't be a problem, but too late will.
+         */
+        migration_clear_memory_region_dirty_bitmap(rb, page);
+    }
 
     ret = test_and_clear_bit(page, rb->bmap);
     if (ret) {
@@ -848,8 +858,8 @@ static inline bool migration_bitmap_clear_dirty(RAMState *rs,
     return ret;
 }
 
-static void dirty_bitmap_clear_section(MemoryRegionSection *section,
-                                       void *opaque)
+static int dirty_bitmap_clear_section(MemoryRegionSection *section,
+                                      void *opaque)
 {
     const hwaddr offset = section->offset_within_region;
     const hwaddr size = int128_get64(section->size);
@@ -868,6 +878,7 @@ static void dirty_bitmap_clear_section(MemoryRegionSection *section,
     }
     *cleared_bits += bitmap_count_one_with_offset(rb->bmap, start, npages);
     bitmap_clear(rb->bmap, start, npages);
+    return 0;
 }
 
 /*
@@ -2277,16 +2288,18 @@ static int ram_find_and_save_block(RAMState *rs)
         if (!get_queued_page(rs, pss)) {
             /* priority queue empty, so just search for something dirty */
             int res = find_dirty_block(rs, pss);
-            if (res != PAGE_DIRTY_FOUND) {
-                if (res == PAGE_ALL_CLEAN) {
-                    break;
-                } else if (res == PAGE_TRY_AGAIN) {
-                    continue;
-                } else if (res < 0) {
-                    pages = res;
-                    break;
-                }
+
+            if (res == PAGE_ALL_CLEAN) {
+                break;
+            } else if (res == PAGE_TRY_AGAIN) {
+                continue;
+            } else if (res < 0) {
+                pages = res;
+                break;
             }
+
+            /* Otherwise we must have a dirty page to move */
+            assert(res == PAGE_DIRTY_FOUND);
         }
         pages = ram_save_host_page(rs, pss);
         if (pages) {
@@ -3279,6 +3292,8 @@ static int ram_save_complete(QEMUFile *f, void *opaque)
     RAMState *rs = *temp;
     int ret = 0;
 
+    trace_ram_save_complete(rs->migration_dirty_pages, 0);
+
     rs->last_stage = !migration_in_colo_state();
 
     WITH_RCU_READ_LOCK_GUARD() {
@@ -3342,6 +3357,9 @@ static int ram_save_complete(QEMUFile *f, void *opaque)
     }
 
     qemu_put_be64(f, RAM_SAVE_FLAG_EOS);
+
+    trace_ram_save_complete(rs->migration_dirty_pages, 1);
+
     return qemu_fflush(f);
 }
 
@@ -3672,7 +3690,9 @@ static int ram_load_cleanup(void *opaque)
     RAMBlock *rb;
 
     RAMBLOCK_FOREACH_NOT_IGNORED(rb) {
-        qemu_ram_block_writeback(rb);
+        if (memory_region_is_nonvolatile(rb->mr)) {
+            qemu_ram_block_writeback(rb);
+        }
     }
 
     xbzrle_load_cleanup();
@@ -4537,8 +4557,7 @@ void postcopy_preempt_shutdown_file(MigrationState *s)
 static SaveVMHandlers savevm_ram_handlers = {
     .save_setup = ram_save_setup,
     .save_live_iterate = ram_save_iterate,
-    .save_live_complete_postcopy = ram_save_complete,
-    .save_live_complete_precopy = ram_save_complete,
+    .save_complete = ram_save_complete,
     .has_postcopy = ram_has_postcopy,
     .state_pending_exact = ram_state_pending_exact,
     .state_pending_estimate = ram_state_pending_estimate,

@@ -357,7 +357,7 @@ static inline TCGRegSet output_pref(const TCGOp *op, unsigned i)
 }
 
 struct TCGContext {
-    uint8_t *pool_cur, *pool_end;
+    uintptr_t pool_cur, pool_end;
     TCGPool *pool_first, *pool_current, *pool_first_large;
     int nb_labels;
     int nb_globals;
@@ -365,10 +365,6 @@ struct TCGContext {
     int nb_indirects;
     int nb_ops;
     TCGType addr_type;            /* TCG_TYPE_I32 or TCG_TYPE_I64 */
-
-    int page_mask;
-    uint8_t page_bits;
-    uint8_t tlb_dyn_max_bits;
     TCGBar guest_mo;
 
     TCGRegSet reserved_regs;
@@ -710,7 +706,7 @@ size_t tcg_nb_tbs(void);
 static inline void *tcg_malloc(int size)
 {
     TCGContext *s = tcg_ctx;
-    uint8_t *ptr, *ptr_end;
+    uintptr_t ptr, ptr_end;
 
     /* ??? This is a weak placeholder for minimum malloc alignment.  */
     size = QEMU_ALIGN_UP(size, 8);
@@ -721,7 +717,7 @@ static inline void *tcg_malloc(int size)
         return tcg_malloc_internal(tcg_ctx, size);
     } else {
         s->pool_cur = ptr_end;
-        return ptr;
+        return (void *)ptr;
     }
 }
 
@@ -1009,5 +1005,7 @@ static inline const TCGOpcode *tcg_swap_vecop_list(const TCGOpcode *n)
 
 bool tcg_can_emit_vecop_list(const TCGOpcode *, TCGType, unsigned);
 void tcg_dump_ops(TCGContext *s, FILE *f, bool have_prefs);
+/* tcg_dump_stats: Append TCG statistics to @buf */
+void tcg_dump_stats(GString *buf);
 
 #endif /* TCG_H */

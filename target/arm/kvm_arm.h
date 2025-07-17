@@ -12,6 +12,7 @@
 #define QEMU_KVM_ARM_H
 
 #include "system/kvm.h"
+#include "target/arm/cpu-qom.h"
 
 #define KVM_ARM_VGIC_V2   (1 << 0)
 #define KVM_ARM_VGIC_V3   (1 << 1)
@@ -189,6 +190,13 @@ bool kvm_arm_sve_supported(void);
  * Returns: true if KVM can enable MTE, and false otherwise.
  */
 bool kvm_arm_mte_supported(void);
+
+/**
+ * kvm_arm_el2_supported:
+ *
+ * Returns true if KVM can enable EL2 and false otherwise.
+ */
+bool kvm_arm_el2_supported(void);
 
 /**
  * kvm_arm_get_max_vm_ipa_size:

@@ -19,13 +19,16 @@ pub mod callbacks;
 pub mod cell;
 pub mod chardev;
 pub mod errno;
+pub mod error;
 pub mod irq;
+pub mod log;
 pub mod memory;
 pub mod module;
 pub mod qdev;
 pub mod qom;
 pub mod sysbus;
 pub mod timer;
+pub mod uninit;
 pub mod vmstate;
 pub mod zeroable;
 
@@ -33,6 +36,8 @@ use std::{
     alloc::{GlobalAlloc, Layout},
     ffi::c_void,
 };
+
+pub use error::{Error, Result};
 
 #[cfg(HAVE_GLIB_WITH_ALIGNED_ALLOC)]
 extern "C" {

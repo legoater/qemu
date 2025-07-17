@@ -37,11 +37,15 @@ output directory (typically ``rust/target/``).  A vanilla invocation
 of Cargo will complain that it cannot find the generated sources,
 which can be fixed in different ways:
 
-* by using special shorthand targets in the QEMU build directory::
+* by using Makefile targets, provided by Meson, that run ``clippy`` or
+  ``rustdoc``:
 
     make clippy
-    make rustfmt
     make rustdoc
+
+A target for ``rustfmt`` is also declared in ``rust/meson.build``:
+
+    make rustfmt
 
 * by invoking ``cargo`` through the Meson `development environment`__
   feature::
@@ -50,7 +54,7 @@ which can be fixed in different ways:
     pyvenv/bin/meson devenv -w ../rust cargo fmt
 
   If you are going to use ``cargo`` repeatedly, ``pyvenv/bin/meson devenv``
-  will enter a shell where commands like ``cargo clippy`` just work.
+  will enter a shell where commands like ``cargo fmt`` just work.
 
 __ https://mesonbuild.com/Commands.html#devenv
 
@@ -66,7 +70,7 @@ be run via ``meson test`` or ``make``::
 
    make check-rust
 
-Building Rust code with ``--enable-modules`` is not supported yet.
+Note that doctests require all ``.o`` files from the build to be available.
 
 Supported tools
 '''''''''''''''
@@ -91,6 +95,11 @@ are missing:
   function; this is an important limitation for QEMU's migration stream
   architecture (VMState).  Right now, VMState lacks type safety because
   it is hard to place the ``VMStateField`` definitions in traits.
+
+* NUL-terminated file names with ``#[track_caller]`` are scheduled for
+  inclusion as ``#![feature(location_file_nul)]``, but it will be a while
+  before QEMU can use them.  For now, there is special code in
+  ``util/error.c`` to support non-NUL-terminated file names.
 
 * associated const equality would be nice to have for some users of
   ``callbacks::FnCall``, but is still experimental.  ``ASSERT_IS_SOME``
@@ -151,10 +160,11 @@ module           status
 ``callbacks``    complete
 ``cell``         stable
 ``errno``        complete
+``error``        stable
 ``irq``          complete
+``log``          proof of concept
 ``memory``       stable
 ``module``       complete
-``offset_of``    stable
 ``qdev``         stable
 ``qom``          stable
 ``sysbus``       stable
@@ -341,7 +351,7 @@ Writing procedural macros
 '''''''''''''''''''''''''
 
 By conventions, procedural macros are split in two functions, one
-returning ``Result<proc_macro2::TokenStream, MacroError>`` with the body of
+returning ``Result<proc_macro2::TokenStream, syn::Error>`` with the body of
 the procedural macro, and the second returning ``proc_macro::TokenStream``
 which is the actual procedural macro.  The former's name is the same as
 the latter with the ``_or_error`` suffix.  The code for the latter is more
@@ -351,18 +361,19 @@ from the type after ``as`` in the invocation of ``parse_macro_input!``::
     #[proc_macro_derive(Object)]
     pub fn derive_object(input: TokenStream) -> TokenStream {
         let input = parse_macro_input!(input as DeriveInput);
-        let expanded = derive_object_or_error(input).unwrap_or_else(Into::into);
 
-        TokenStream::from(expanded)
+        derive_object_or_error(input)
+            .unwrap_or_else(syn::Error::into_compile_error)
+            .into()
     }
 
 The ``qemu_api_macros`` crate has utility functions to examine a
 ``DeriveInput`` and perform common checks (e.g. looking for a struct
-with named fields).  These functions return ``Result<..., MacroError>``
+with named fields).  These functions return ``Result<..., syn::Error>``
 and can be used easily in the procedural macro function::
 
     fn derive_object_or_error(input: DeriveInput) ->
-        Result<proc_macro2::TokenStream, MacroError>
+        Result<proc_macro2::TokenStream, Error>
     {
         is_c_repr(&input, "#[derive(Object)]")?;
 

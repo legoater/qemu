@@ -42,6 +42,7 @@
 #include "user/page-protection.h"
 #include "exec/gdbstub.h"
 #include "gdbstub/user.h"
+#include "accel/accel-ops.h"
 #include "tcg/startup.h"
 #include "qemu/timer.h"
 #include "qemu/envlist.h"
@@ -149,12 +150,14 @@ void fork_start(void)
     cpu_list_lock();
     qemu_plugin_user_prefork_lock();
     gdbserver_fork_start();
+    fd_trans_prefork();
 }
 
 void fork_end(pid_t pid)
 {
     bool child = pid == 0;
 
+    fd_trans_postfork();
     qemu_plugin_user_postfork(child);
     mmap_fork_end(child);
     if (child) {
@@ -820,7 +823,7 @@ int main(int argc, char **argv, char **envp)
                                  opt_one_insn_per_tb, &error_abort);
         object_property_set_int(OBJECT(accel), "tb-size",
                                 opt_tb_size, &error_abort);
-        ac->init_machine(NULL);
+        ac->init_machine(accel, NULL);
     }
 
     /*

@@ -402,6 +402,8 @@ AH_MINMAX_HELPER(vfp_ah_mind, float64, float64, min)
 AH_MINMAX_HELPER(vfp_ah_maxh, dh_ctype_f16, float16, max)
 AH_MINMAX_HELPER(vfp_ah_maxs, float32, float32, max)
 AH_MINMAX_HELPER(vfp_ah_maxd, float64, float64, max)
+AH_MINMAX_HELPER(sme2_ah_fmax_b16, bfloat16, bfloat16, max)
+AH_MINMAX_HELPER(sme2_ah_fmin_b16, bfloat16, bfloat16, min)
 
 /* 64-bit versions of the CRC helpers. Note that although the operation
  * (and the prototypes of crc32c() and crc32() mean that only the bottom
@@ -656,15 +658,6 @@ void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
         spsr &= ~PSTATE_SS;
     }
 
-    /*
-     * FEAT_RME forbids return from EL3 with an invalid security state.
-     * We don't need an explicit check for FEAT_RME here because we enforce
-     * in scr_write() that you can't set the NSE bit without it.
-     */
-    if (cur_el == 3 && (env->cp15.scr_el3 & (SCR_NS | SCR_NSE)) == SCR_NSE) {
-        goto illegal_return;
-    }
-
     new_el = el_from_spsr(spsr);
     if (new_el == -1) {
         goto illegal_return;
@@ -673,6 +666,17 @@ void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
         /* Disallow return to an EL which is unimplemented or higher
          * than the current one.
          */
+        goto illegal_return;
+    }
+
+    /*
+     * FEAT_RME forbids return from EL3 to a lower exception level
+     * with an invalid security state.
+     * We don't need an explicit check for FEAT_RME here because we enforce
+     * in scr_write() that you can't set the NSE bit without it.
+     */
+    if (cur_el == 3 && new_el < 3 &&
+        (env->cp15.scr_el3 & (SCR_NS | SCR_NSE)) == SCR_NSE) {
         goto illegal_return;
     }
 

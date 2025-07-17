@@ -26,39 +26,8 @@
 #include "qom/object.h"
 #include "exec/hwaddr.h"
 
-struct AccelState {
-    /*< private >*/
-    Object parent_obj;
-};
-
-typedef struct AccelClass {
-    /*< private >*/
-    ObjectClass parent_class;
-    /*< public >*/
-
-    const char *name;
-    int (*init_machine)(MachineState *ms);
-    bool (*cpu_common_realize)(CPUState *cpu, Error **errp);
-    void (*cpu_common_unrealize)(CPUState *cpu);
-
-    /* system related hooks */
-    void (*setup_post)(MachineState *ms, AccelState *accel);
-    bool (*has_memory)(MachineState *ms, AddressSpace *as,
-                       hwaddr start_addr, hwaddr size);
-
-    /* gdbstub related hooks */
-    int (*gdbstub_supported_sstep_flags)(void);
-
-    bool *allowed;
-    /*
-     * Array of global properties that would be applied when specific
-     * accelerator is chosen. It works like MachineClass.compat_props
-     * but it's for accelerators not machines. Accelerator-provided
-     * global properties may be overridden by machine-type
-     * compat_props or user-provided global properties.
-     */
-    GPtrArray *compat_props;
-} AccelClass;
+typedef struct AccelState AccelState;
+typedef struct AccelClass AccelClass;
 
 #define TYPE_ACCEL "accel"
 
@@ -82,6 +51,8 @@ int accel_init_machine(AccelState *accel, MachineState *ms);
 
 /* Called just before os_setup_post (ie just before drop OS privs) */
 void accel_setup_post(MachineState *ms);
+
+void accel_pre_resume(MachineState *ms, bool step_pending);
 
 /**
  * accel_cpu_instance_init:
