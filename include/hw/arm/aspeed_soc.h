@@ -148,6 +148,7 @@ struct Aspeed27x0TSPSoCState {
     UnimplementedDeviceState ipc[2];
     UnimplementedDeviceState scuio;
     MemoryRegion memory;
+    MemoryRegion sram_mr_alias;
 
     ARMv7MState armv7m;
 };
