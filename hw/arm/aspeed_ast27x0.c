@@ -433,6 +433,7 @@ static void aspeed_soc_ast2700_init(Object *obj)
     /* Coprocessors */
     if (mc->default_cpus > sc->num_cpus) {
         object_initialize_child(obj, "ssp", &a->ssp, TYPE_ASPEED27X0SSP_SOC);
+        object_initialize_child(obj, "tsp", &a->tsp, TYPE_ASPEED27X0TSP_SOC);
     }
 
     object_initialize_child(obj, "gic", &a->gic, gicv3_class_name());
@@ -643,6 +644,30 @@ static bool aspeed_soc_ast2700_ssp_realize(DeviceState *dev, Error **errp)
     return true;
 }
 
+static bool aspeed_soc_ast2700_tsp_realize(DeviceState *dev, Error **errp)
+{
+    Aspeed27x0SoCState *a = ASPEED27X0_SOC(dev);
+    AspeedSoCState *s = ASPEED_SOC(dev);
+    Clock *sysclk;
+
+    sysclk = clock_new(OBJECT(s), "TSP_SYSCLK");
+    clock_set_hz(sysclk, 200000000ULL);
+    qdev_connect_clock_in(DEVICE(&a->tsp), "sysclk", sysclk);
+
+    memory_region_init(&a->tsp.memory, OBJECT(&a->tsp), "tsp-memory",
+                       UINT64_MAX);
+    if (!object_property_set_link(OBJECT(&a->tsp), "memory",
+                                  OBJECT(&a->tsp.memory), &error_abort)) {
+        return false;
+    }
+
+    if (!qdev_realize(DEVICE(&a->tsp), NULL, &error_abort)) {
+        return false;
+    }
+
+    return true;
+}
+
 static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
 {
     int i;
@@ -757,6 +782,9 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
     /* Coprocessors */
     if (mc->default_cpus > sc->num_cpus) {
         if (!aspeed_soc_ast2700_ssp_realize(dev, errp)) {
+            return;
+        }
+        if (!aspeed_soc_ast2700_tsp_realize(dev, errp)) {
             return;
         }
     }
