@@ -22,6 +22,8 @@
 #include "hw/intc/arm_gicv3.h"
 #include "qobject/qlist.h"
 #include "qemu/log.h"
+#include "hw/qdev-clock.h"
+#include "hw/boards.h"
 
 #define AST2700_SOC_IO_SIZE          0x00FE0000
 #define AST2700_SOC_IOMEM_SIZE       0x01000000
@@ -410,6 +412,8 @@ static bool aspeed_soc_ast2700_dram_init(DeviceState *dev, Error **errp)
 
 static void aspeed_soc_ast2700_init(Object *obj)
 {
+    MachineState *ms = MACHINE(qdev_get_machine());
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
     Aspeed27x0SoCState *a = ASPEED27X0_SOC(obj);
     AspeedSoCState *s = ASPEED_SOC(obj);
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
@@ -424,6 +428,11 @@ static void aspeed_soc_ast2700_init(Object *obj)
     for (i = 0; i < sc->num_cpus; i++) {
         object_initialize_child(obj, "cpu[*]", &a->cpu[i],
                                 aspeed_soc_cpu_type(sc));
+    }
+
+    /* Coprocessors */
+    if (mc->default_cpus > sc->num_cpus) {
+        object_initialize_child(obj, "ssp", &a->ssp, TYPE_ASPEED27X0SSP_SOC);
     }
 
     object_initialize_child(obj, "gic", &a->gic, gicv3_class_name());
@@ -610,9 +619,35 @@ static bool aspeed_soc_ast2700_gic_realize(DeviceState *dev, Error **errp)
     return true;
 }
 
+static bool aspeed_soc_ast2700_ssp_realize(DeviceState *dev, Error **errp)
+{
+    Aspeed27x0SoCState *a = ASPEED27X0_SOC(dev);
+    AspeedSoCState *s = ASPEED_SOC(dev);
+    Clock *sysclk;
+
+    sysclk = clock_new(OBJECT(s), "SSP_SYSCLK");
+    clock_set_hz(sysclk, 200000000ULL);
+    qdev_connect_clock_in(DEVICE(&a->ssp), "sysclk", sysclk);
+
+    memory_region_init(&a->ssp.memory, OBJECT(&a->ssp), "ssp-memory",
+                       UINT64_MAX);
+    if (!object_property_set_link(OBJECT(&a->ssp), "memory",
+                                  OBJECT(&a->ssp.memory), &error_abort)) {
+        return false;
+    }
+
+    if (!qdev_realize(DEVICE(&a->ssp), NULL, &error_abort)) {
+        return false;
+    }
+
+    return true;
+}
+
 static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
 {
     int i;
+    MachineState *ms = MACHINE(qdev_get_machine());
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
     Aspeed27x0SoCState *a = ASPEED27X0_SOC(dev);
     AspeedSoCState *s = ASPEED_SOC(dev);
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
@@ -718,6 +753,13 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
     }
     aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->scuio), 0,
                     sc->memmap[ASPEED_DEV_SCUIO]);
+
+    /* Coprocessors */
+    if (mc->default_cpus > sc->num_cpus) {
+        if (!aspeed_soc_ast2700_ssp_realize(dev, errp)) {
+            return;
+        }
+    }
 
     /* UART */
     if (!aspeed_soc_uart_realize(s, errp)) {
