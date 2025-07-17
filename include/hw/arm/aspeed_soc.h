@@ -136,6 +136,8 @@ struct Aspeed27x0SSPSoCState {
     MemoryRegion memory;
     MemoryRegion sram_mr_alias;
     MemoryRegion scu_mr_alias;
+    MemoryRegion sdram_remap1_alias;
+    MemoryRegion sdram_remap2_alias;
 
     ARMv7MState armv7m;
 };
