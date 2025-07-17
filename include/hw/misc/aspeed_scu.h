@@ -39,6 +39,9 @@ struct AspeedSCUState {
     uint32_t hw_strap1;
     uint32_t hw_strap2;
     uint32_t hw_prot_key;
+
+    MemoryRegion *ssp_sdram_remap1;
+    MemoryRegion *ssp_sdram_remap2;
 };
 
 #define AST2400_A0_SILICON_REV   0x02000303U
