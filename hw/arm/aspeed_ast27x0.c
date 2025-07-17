@@ -803,6 +803,28 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
                                 sc->memmap[ASPEED_DEV_VBOOTROM], &s->vbootrom);
 
     /* SCU */
+    /*
+     * The SSP coprocessor uses two memory aliases (remap1 and remap2)
+     * to access shared memory regions in the PSP DRAM:
+     *
+     *   - remap1 maps PSP DRAM at 0x400000000 (size: 32MB) to SSP SDRAM
+     *     offset 0x2000000
+     *   - remap2 maps PSP DRAM at 0x42c000000 (size: 32MB) to SSP SDRAM
+     *     offset 0x0
+     *
+     * These mappings correspond to the default values of the SCU registers:
+     *
+     * This configuration enables shared memory communication between the PSP
+     * and coprocessors, with address translation controlled by the SCU.
+     */
+    if (mc->default_cpus > sc->num_cpus) {
+        memory_region_init_alias(&a->ssp.sdram_remap1_alias, OBJECT(a),
+                                 "ssp.sdram.remap1", s->memory,
+                                 0x400000000ULL, 32 * MiB);
+        memory_region_init_alias(&a->ssp.sdram_remap2_alias, OBJECT(a),
+                                 "ssp.sdram.remap2", s->memory,
+                                 0x42c000000ULL, 32 * MiB);
+    }
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->scu), errp)) {
         return;
     }
@@ -816,22 +838,27 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
                     sc->memmap[ASPEED_DEV_SCUIO]);
 
     /*
-     * Coprocessors must be realized after the SRAM and SCU regions.
+     * Coprocessors must be realized after the DRAM, SRAM, and SCU regions.
      *
-     * The SRAM is used as shared memory between the main CPU (PSP) and the
-     * coprocessors. Coprocessors access this shared SRAM region through a
-     * MemoryRegion alias mapped to a different physical address.
+     * - DRAM: Coprocessors access shared memory through MemoryRegion aliases
+     *   that point into PSP's DRAM space. These aliases are mapped into the
+     *   coprocessors' SDRAM windows at specific offsets (e.g., 0x0 and
+     *   0x2000000), and configured according to SCU register defaults.
+     *   Therefore, DRAM must be fully initialized before coprocessors can
+     *   attach aliases to it.
      *
-     * Similarly, the SCU is a single hardware block shared across all
-     * processors. Coprocessors access it via a MemoryRegion alias that maps
-     * to a different address than the one used by the main CPU.
+     * - SRAM: Used as shared memory between the PSP and coprocessors.
+     *   Coprocessors access this memory via alias regions mapped to
+     *   different physical addresses.
      *
-     * Therefore, both the SRAM and SCU must be fully initialized before the
-     * coprocessors can create aliases pointing to them.
+     * - SCU: A single hardware block shared across all processors.
+     *   Coprocessors access SCU registers through alias mappings.
+     *   SCU must be initialized first to allow for consistent register
+     *   state and memory remap configuration.
      *
      * To ensure correctness, the device realization order is explicitly
-     * managed:
-     * coprocessors are initialized only after SRAM and SCU are ready.
+     * managed: coprocessors are initialized only after DRAM, SRAM, and SCU
+     * are ready.
      */
     if (mc->default_cpus > sc->num_cpus) {
         if (!aspeed_soc_ast2700_ssp_realize(dev, errp)) {

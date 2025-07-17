@@ -187,6 +187,11 @@ static void aspeed_soc_ast27x0ssp_realize(DeviceState *dev_soc, Error **errp)
                                 AST2700_SSP_SDRAM_SIZE, errp)) {
         return;
     }
+    /* SDRAM remap alias used by PSP to access SSP SDRAM */
+    memory_region_add_subregion(&s->dram_container, 0, &a->sdram_remap2_alias);
+    memory_region_add_subregion(&s->dram_container,
+                                memory_region_size(&a->sdram_remap2_alias),
+                                &a->sdram_remap1_alias);
     memory_region_add_subregion(s->memory,
                                 sc->memmap[ASPEED_DEV_SDRAM],
                                 &s->dram_container);
