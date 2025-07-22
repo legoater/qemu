@@ -242,7 +242,7 @@ static const MemoryRegionOps aspeed_wdt_ops = {
     .read = aspeed_wdt_read,
     .write = aspeed_wdt_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid.min_access_size = 4,
+    .valid.min_access_size = 1,
     .valid.max_access_size = 4,
     .valid.unaligned = false,
 };
@@ -297,9 +297,14 @@ static void aspeed_wdt_realize(DeviceState *dev, Error **errp)
      */
     s->pclk_freq = PCLK_HZ;
 
+    memory_region_init(&s->iomem_container, OBJECT(s),
+                       TYPE_ASPEED_WDT ".container", awc->iosize);
+    sysbus_init_mmio(sbd, &s->iomem_container);
+
     memory_region_init_io(&s->iomem, OBJECT(s), &aspeed_wdt_ops, s,
                           TYPE_ASPEED_WDT, awc->iosize);
     sysbus_init_mmio(sbd, &s->iomem);
+    memory_region_add_subregion(&s->iomem_container, 0x0, &s->iomem);
 }
 
 static const Property aspeed_wdt_properties[] = {
