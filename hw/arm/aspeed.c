@@ -733,10 +733,21 @@ static void witherspoon_bmc_i2c_init(AspeedMachineState *bmc)
         qdev_connect_gpio_out(dev, pca1_leds[i].gpio_id,
                               qdev_get_gpio_in(DEVICE(led), 0));
     }
+
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "ibm-cffps",
+        0x68);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "ibm-cffps",
+        0x69);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "dps310", 0x76);
+
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "max31785", 0x52);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 4), "tmp423", 0x4c);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 4), "ir35221", 0x70);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 4), "ir35221", 0x71);
+
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 5), "tmp423", 0x4c);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 5), "ir35221", 0x70);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 5), "ir35221", 0x71);
 
     /* The Witherspoon expects a TMP275 but a TMP105 is compatible */
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), TYPE_TMP105,
@@ -830,6 +841,15 @@ static void rainier_bmc_i2c_init(AspeedMachineState *bmc)
 
     create_pca9552(soc, 3, 0x61);
 
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "ibm-cffps",
+                     0x68);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "ibm-cffps",
+                     0x69);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "ibm-cffps",
+                     0x6a);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3), "ibm-cffps",
+                     0x6b);
+
     /* The rainier expects a TMP275 but a TMP105 is compatible */
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 4), TYPE_TMP105,
                      0x48);
@@ -896,10 +916,22 @@ static void rainier_bmc_i2c_init(AspeedMachineState *bmc)
     /* Bus 8: ucd90320@b */
     /* Bus 8: ucd90320@c */
 
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x42);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x43);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x44);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x72);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x73);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "ir35221", 0x74);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "tmp423", 0x4c);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9), "tmp423", 0x4d);
     at24c_eeprom_init(aspeed_i2c_get_bus(&soc->i2c, 9), 0x50, 128 * KiB);
 
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x42);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x43);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x44);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x72);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x73);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "ir35221", 0x74);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "tmp423", 0x4c);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 10), "tmp423", 0x4d);
     at24c_eeprom_init(aspeed_i2c_get_bus(&soc->i2c, 10), 0x50, 128 * KiB);

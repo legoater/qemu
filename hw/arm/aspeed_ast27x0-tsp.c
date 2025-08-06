@@ -15,10 +15,11 @@
 #include "hw/misc/unimp.h"
 #include "hw/arm/aspeed_soc.h"
 
-#define AST2700_TSP_RAM_SIZE (32 * MiB)
+#define AST2700_TSP_SDRAM_SIZE (512 * MiB)
 
 static const hwaddr aspeed_soc_ast27x0tsp_memmap[] = {
-    [ASPEED_DEV_SRAM]      =  0x00000000,
+    [ASPEED_DEV_SDRAM]     =  0x00000000,
+    [ASPEED_DEV_SRAM]      =  0x70000000,
     [ASPEED_DEV_INTC]      =  0x72100000,
     [ASPEED_DEV_SCU]       =  0x72C02000,
     [ASPEED_DEV_SCUIO]     =  0x74C02000,
@@ -134,9 +135,7 @@ static void aspeed_soc_ast27x0tsp_init(Object *obj)
     int i;
 
     object_initialize_child(obj, "armv7m", &a->armv7m, TYPE_ARMV7M);
-    object_initialize_child(obj, "scu", &s->scu, TYPE_ASPEED_2700_SCU);
     s->sysclk = qdev_init_clock_in(DEVICE(s), "sysclk", NULL, NULL, 0);
-    qdev_prop_set_uint32(DEVICE(&s->scu), "silicon-rev", sc->silicon_rev);
 
     for (i = 0; i < sc->uarts_num; i++) {
         object_initialize_child(obj, "uart[*]", &s->uart[i], TYPE_SERIAL_MM);
@@ -163,7 +162,7 @@ static void aspeed_soc_ast27x0tsp_realize(DeviceState *dev_soc, Error **errp)
     AspeedSoCState *s = ASPEED_SOC(dev_soc);
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
     DeviceState *armv7m;
-    g_autofree char *sram_name = NULL;
+    g_autofree char *name = NULL;
     int i;
 
     if (!clock_has_source(s->sysclk)) {
@@ -178,24 +177,36 @@ static void aspeed_soc_ast27x0tsp_realize(DeviceState *dev_soc, Error **errp)
     qdev_connect_clock_in(armv7m, "cpuclk", s->sysclk);
     object_property_set_link(OBJECT(&a->armv7m), "memory",
                              OBJECT(s->memory), &error_abort);
+    /*
+     * The TSP starts in a powered-down state and can be powered up
+     * by setting the TSP Control Register through the SCU
+     * (System Control Unit)
+     */
+    object_property_set_bool(OBJECT(&a->armv7m), "start-powered-off", true,
+                             &error_abort);
     sysbus_realize(SYS_BUS_DEVICE(&a->armv7m), &error_abort);
 
-    sram_name = g_strdup_printf("aspeed.dram.%d",
-                                CPU(a->armv7m.cpu)->cpu_index);
+    /* SDRAM */
+    name = g_strdup_printf("aspeed.sdram-container.%d",
+                           CPU(a->armv7m.cpu)->cpu_index);
 
-    if (!memory_region_init_ram(&s->sram, OBJECT(s), sram_name, sc->sram_size,
-                                errp)) {
+    if (!memory_region_init_ram(&s->dram_container, OBJECT(s), name,
+                                AST2700_TSP_SDRAM_SIZE, errp)) {
         return;
     }
+    /* SDRAM remap alias used by PSP to access TSP SDRAM */
+    memory_region_add_subregion(&s->dram_container, 0, &a->sdram_remap_alias);
     memory_region_add_subregion(s->memory,
-                                sc->memmap[ASPEED_DEV_SRAM],
-                                &s->sram);
+                                sc->memmap[ASPEED_DEV_SDRAM],
+                                &s->dram_container);
+
+    /* SRAM */
+    memory_region_add_subregion(s->memory, sc->memmap[ASPEED_DEV_SRAM],
+                                &a->sram_mr_alias);
 
     /* SCU */
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->scu), errp)) {
-        return;
-    }
-    aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->scu), 0, sc->memmap[ASPEED_DEV_SCU]);
+    memory_region_add_subregion(s->memory, sc->memmap[ASPEED_DEV_SCU],
+                                &a->scu_mr_alias);
 
     /* INTC */
     if (!sysbus_realize(SYS_BUS_DEVICE(&a->intc[0]), errp)) {
@@ -267,8 +278,6 @@ static void aspeed_soc_ast27x0tsp_class_init(ObjectClass *klass, const void *dat
     dc->realize = aspeed_soc_ast27x0tsp_realize;
 
     sc->valid_cpu_types = valid_cpu_types;
-    sc->silicon_rev = AST2700_A1_SILICON_REV;
-    sc->sram_size = AST2700_TSP_RAM_SIZE;
     sc->spis_num = 0;
     sc->ehcis_num = 0;
     sc->wdts_num = 0;

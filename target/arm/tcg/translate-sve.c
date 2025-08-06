@@ -31,9 +31,9 @@ typedef void gen_helper_gvec_flags_3(TCGv_i32, TCGv_ptr, TCGv_ptr,
 typedef void gen_helper_gvec_flags_4(TCGv_i32, TCGv_ptr, TCGv_ptr,
                                      TCGv_ptr, TCGv_ptr, TCGv_i32);
 
-typedef void gen_helper_gvec_mem(TCGv_env, TCGv_ptr, TCGv_i64, TCGv_i32);
+typedef void gen_helper_gvec_mem(TCGv_env, TCGv_ptr, TCGv_i64, TCGv_i64);
 typedef void gen_helper_gvec_mem_scatter(TCGv_env, TCGv_ptr, TCGv_ptr,
-                                         TCGv_ptr, TCGv_i64, TCGv_i32);
+                                         TCGv_ptr, TCGv_i64, TCGv_i64);
 
 /*
  * Helpers for extracting complex instruction fields.
@@ -190,6 +190,10 @@ static bool gen_gvec_fpst_zzz(DisasContext *s, gen_helper_gvec_3_ptr *fn,
 static bool gen_gvec_fpst_arg_zzz(DisasContext *s, gen_helper_gvec_3_ptr *fn,
                                   arg_rrr_esz *a, int data)
 {
+    /* These insns use MO_8 to encode BFloat16 */
+    if (a->esz == MO_8 && !dc_isar_feature(aa64_sve_b16b16, s)) {
+        return false;
+    }
     return gen_gvec_fpst_zzz(s, fn, a->rd, a->rn, a->rm, data,
                              a->esz == MO_16 ? FPST_A64_F16 : FPST_A64);
 }
@@ -403,6 +407,10 @@ static bool gen_gvec_fpst_zzzp(DisasContext *s, gen_helper_gvec_4_ptr *fn,
 static bool gen_gvec_fpst_arg_zpzz(DisasContext *s, gen_helper_gvec_4_ptr *fn,
                                    arg_rprr_esz *a)
 {
+    /* These insns use MO_8 to encode BFloat16. */
+    if (a->esz == MO_8 && !dc_isar_feature(aa64_sve_b16b16, s)) {
+        return false;
+    }
     return gen_gvec_fpst_zzzp(s, fn, a->rd, a->rn, a->rm, a->pg, 0,
                               a->esz == MO_16 ? FPST_A64_F16 : FPST_A64);
 }
@@ -3875,31 +3883,38 @@ DO_SVE2_RRXR_ROT(CDOT_zzxw_d, gen_helper_sve2_cdot_idx_d)
  *** SVE Floating Point Multiply-Add Indexed Group
  */
 
+static bool do_fmla_zzxz(DisasContext *s, arg_rrxr_esz *a,
+                         gen_helper_gvec_4_ptr *fn)
+{
+    /* These insns use MO_8 to encode BFloat16 */
+    if (a->esz == MO_8 && !dc_isar_feature(aa64_sve_b16b16, s)) {
+        return false;
+    }
+    return gen_gvec_fpst_zzzz(s, fn, a->rd, a->rn, a->rm, a->ra, a->index,
+                              a->esz == MO_16 ? FPST_A64_F16 : FPST_A64);
+}
+
 static gen_helper_gvec_4_ptr * const fmla_idx_fns[4] = {
-    NULL,                       gen_helper_gvec_fmla_idx_h,
+    gen_helper_gvec_bfmla_idx, gen_helper_gvec_fmla_idx_h,
     gen_helper_gvec_fmla_idx_s, gen_helper_gvec_fmla_idx_d
 };
-TRANS_FEAT(FMLA_zzxz, aa64_sve, gen_gvec_fpst_zzzz,
-           fmla_idx_fns[a->esz], a->rd, a->rn, a->rm, a->ra, a->index,
-           a->esz == MO_16 ? FPST_A64_F16 : FPST_A64)
+TRANS_FEAT(FMLA_zzxz, aa64_sve, do_fmla_zzxz, a, fmla_idx_fns[a->esz])
 
 static gen_helper_gvec_4_ptr * const fmls_idx_fns[4][2] = {
-    { NULL, NULL },
+    { gen_helper_gvec_bfmls_idx, gen_helper_gvec_ah_bfmls_idx },
     { gen_helper_gvec_fmls_idx_h, gen_helper_gvec_ah_fmls_idx_h },
     { gen_helper_gvec_fmls_idx_s, gen_helper_gvec_ah_fmls_idx_s },
     { gen_helper_gvec_fmls_idx_d, gen_helper_gvec_ah_fmls_idx_d },
 };
-TRANS_FEAT(FMLS_zzxz, aa64_sve, gen_gvec_fpst_zzzz,
-           fmls_idx_fns[a->esz][s->fpcr_ah],
-           a->rd, a->rn, a->rm, a->ra, a->index,
-           a->esz == MO_16 ? FPST_A64_F16 : FPST_A64)
+TRANS_FEAT(FMLS_zzxz, aa64_sve, do_fmla_zzxz, a,
+           fmls_idx_fns[a->esz][s->fpcr_ah])
 
 /*
  *** SVE Floating Point Multiply Indexed Group
  */
 
 static gen_helper_gvec_3_ptr * const fmul_idx_fns[4] = {
-    NULL,                       gen_helper_gvec_fmul_idx_h,
+    gen_helper_gvec_fmul_idx_b16, gen_helper_gvec_fmul_idx_h,
     gen_helper_gvec_fmul_idx_s, gen_helper_gvec_fmul_idx_d,
 };
 TRANS_FEAT(FMUL_zzx, aa64_sve, gen_gvec_fpst_zzz,
@@ -4005,7 +4020,7 @@ static gen_helper_gvec_3_ptr * const fmaxqv_ah_fns[4] = {
     gen_helper_sve2p1_ah_fmaxqv_s, gen_helper_sve2p1_ah_fmaxqv_d,
 };
 TRANS_FEAT(FMAXQV, aa64_sme2p1_or_sve2p1, gen_gvec_fpst_arg_zpz,
-           (s->fpcr_ah ? fmaxqv_fns : fmaxqv_ah_fns)[a->esz], a, 0,
+           (s->fpcr_ah ? fmaxqv_ah_fns : fmaxqv_fns)[a->esz], a, 0,
            a->esz == MO_16 ? FPST_A64_F16 : FPST_A64)
 
 static gen_helper_gvec_3_ptr * const fminqv_fns[4] = {
@@ -4017,7 +4032,7 @@ static gen_helper_gvec_3_ptr * const fminqv_ah_fns[4] = {
     gen_helper_sve2p1_ah_fminqv_s, gen_helper_sve2p1_ah_fminqv_d,
 };
 TRANS_FEAT(FMINQV, aa64_sme2p1_or_sve2p1, gen_gvec_fpst_arg_zpz,
-           (s->fpcr_ah ? fminqv_fns : fminqv_ah_fns)[a->esz], a, 0,
+           (s->fpcr_ah ? fminqv_ah_fns : fminqv_fns)[a->esz], a, 0,
            a->esz == MO_16 ? FPST_A64_F16 : FPST_A64)
 
 /*
@@ -4146,7 +4161,7 @@ static bool trans_FADDA(DisasContext *s, arg_rprr_esz *a)
 
 #define DO_FP3(NAME, name) \
     static gen_helper_gvec_3_ptr * const name##_fns[4] = {          \
-        NULL, gen_helper_gvec_##name##_h,                           \
+        gen_helper_gvec_##name##_b16, gen_helper_gvec_##name##_h,   \
         gen_helper_gvec_##name##_s, gen_helper_gvec_##name##_d      \
     };                                                              \
     TRANS_FEAT(NAME, aa64_sve, gen_gvec_fpst_arg_zzz, name##_fns[a->esz], a, 0)
@@ -4202,13 +4217,34 @@ TRANS_FEAT_NONSTREAMING(FTSMUL, aa64_sve, gen_gvec_fpst_arg_zzz,
                s->fpcr_ah ? name##_ah_zpzz_fns[a->esz] :                \
                name##_zpzz_fns[a->esz], a)
 
-DO_ZPZZ_FP(FADD_zpzz, aa64_sve, sve_fadd)
-DO_ZPZZ_FP(FSUB_zpzz, aa64_sve, sve_fsub)
-DO_ZPZZ_FP(FMUL_zpzz, aa64_sve, sve_fmul)
-DO_ZPZZ_AH_FP(FMIN_zpzz, aa64_sve, sve_fmin, sve_ah_fmin)
-DO_ZPZZ_AH_FP(FMAX_zpzz, aa64_sve, sve_fmax, sve_ah_fmax)
-DO_ZPZZ_FP(FMINNM_zpzz, aa64_sve, sve_fminnum)
-DO_ZPZZ_FP(FMAXNM_zpzz, aa64_sve, sve_fmaxnum)
+/* Similar, but for insns where sz == 0 encodes bfloat16 */
+#define DO_ZPZZ_FP_B16(NAME, FEAT, name) \
+    static gen_helper_gvec_4_ptr * const name##_zpzz_fns[4] = { \
+        gen_helper_##name##_b16, gen_helper_##name##_h,         \
+        gen_helper_##name##_s, gen_helper_##name##_d            \
+    };                                                          \
+    TRANS_FEAT(NAME, FEAT, gen_gvec_fpst_arg_zpzz, name##_zpzz_fns[a->esz], a)
+
+#define DO_ZPZZ_AH_FP_B16(NAME, FEAT, name, ah_name)                    \
+    static gen_helper_gvec_4_ptr * const name##_zpzz_fns[4] = {         \
+        gen_helper_##name##_b16, gen_helper_##name##_h,                 \
+        gen_helper_##name##_s, gen_helper_##name##_d                    \
+    };                                                                  \
+    static gen_helper_gvec_4_ptr * const name##_ah_zpzz_fns[4] = {      \
+        gen_helper_##ah_name##_b16, gen_helper_##ah_name##_h,           \
+        gen_helper_##ah_name##_s, gen_helper_##ah_name##_d              \
+    };                                                                  \
+    TRANS_FEAT(NAME, FEAT, gen_gvec_fpst_arg_zpzz,                      \
+               s->fpcr_ah ? name##_ah_zpzz_fns[a->esz] :                \
+               name##_zpzz_fns[a->esz], a)
+
+DO_ZPZZ_FP_B16(FADD_zpzz, aa64_sve, sve_fadd)
+DO_ZPZZ_FP_B16(FSUB_zpzz, aa64_sve, sve_fsub)
+DO_ZPZZ_FP_B16(FMUL_zpzz, aa64_sve, sve_fmul)
+DO_ZPZZ_AH_FP_B16(FMIN_zpzz, aa64_sve, sve_fmin, sve_ah_fmin)
+DO_ZPZZ_AH_FP_B16(FMAX_zpzz, aa64_sve, sve_fmax, sve_ah_fmax)
+DO_ZPZZ_FP_B16(FMINNM_zpzz, aa64_sve, sve_fminnum)
+DO_ZPZZ_FP_B16(FMAXNM_zpzz, aa64_sve, sve_fmaxnum)
 DO_ZPZZ_AH_FP(FABD, aa64_sve, sve_fabd, sve_ah_fabd)
 DO_ZPZZ_FP(FSCALE, aa64_sve, sve_fscalbn)
 DO_ZPZZ_FP(FDIV, aa64_sve, sve_fdiv)
@@ -4339,19 +4375,28 @@ TRANS_FEAT(FCADD, aa64_sve, gen_gvec_fpst_zzzp, fcadd_fns[a->esz],
            a->rd, a->rn, a->rm, a->pg, a->rot | (s->fpcr_ah << 1),
            a->esz == MO_16 ? FPST_A64_F16 : FPST_A64)
 
+static bool do_fmla_zpzzz(DisasContext *s, arg_rprrr_esz *a,
+                          gen_helper_gvec_5_ptr *fn)
+{
+    /* These insns use MO_8 to encode BFloat16 */
+    if (a->esz == MO_8 && !dc_isar_feature(aa64_sve_b16b16, s)) {
+        return false;
+    }
+    return gen_gvec_fpst_zzzzp(s, fn, a->rd, a->rn, a->rm, a->ra, a->pg, 0,
+                               a->esz == MO_16 ? FPST_A64_F16 : FPST_A64);
+}
+
 #define DO_FMLA(NAME, name, ah_name)                                    \
     static gen_helper_gvec_5_ptr * const name##_fns[4] = {              \
-        NULL, gen_helper_sve_##name##_h,                                \
+        gen_helper_sve_##name##_b16, gen_helper_sve_##name##_h,         \
         gen_helper_sve_##name##_s, gen_helper_sve_##name##_d            \
     };                                                                  \
     static gen_helper_gvec_5_ptr * const name##_ah_fns[4] = {           \
-        NULL, gen_helper_sve_##ah_name##_h,                             \
+        gen_helper_sve_##ah_name##_b16, gen_helper_sve_##ah_name##_h,   \
         gen_helper_sve_##ah_name##_s, gen_helper_sve_##ah_name##_d      \
     };                                                                  \
-    TRANS_FEAT(NAME, aa64_sve, gen_gvec_fpst_zzzzp,                     \
-               s->fpcr_ah ? name##_ah_fns[a->esz] : name##_fns[a->esz], \
-               a->rd, a->rn, a->rm, a->ra, a->pg, 0,                    \
-               a->esz == MO_16 ? FPST_A64_F16 : FPST_A64)
+    TRANS_FEAT(NAME, aa64_sve, do_fmla_zpzzz, a,                        \
+               s->fpcr_ah ? name##_ah_fns[a->esz] : name##_fns[a->esz])
 
 /* We don't need an ah_fmla_zpzzz because fmla doesn't negate anything */
 DO_FMLA(FMLA_zpzzz, fmla_zpzzz, fmla_zpzzz)
@@ -4838,17 +4883,16 @@ static const uint8_t dtype_esz[19] = {
     4, 4, 4,
 };
 
-uint32_t make_svemte_desc(DisasContext *s, unsigned vsz, uint32_t nregs,
+uint64_t make_svemte_desc(DisasContext *s, unsigned vsz, uint32_t nregs,
                           uint32_t msz, bool is_write, uint32_t data)
 {
     uint32_t sizem1;
-    uint32_t desc = 0;
+    uint64_t desc = 0;
 
     /* Assert all of the data fits, with or without MTE enabled. */
     assert(nregs >= 1 && nregs <= 4);
     sizem1 = (nregs << msz) - 1;
     assert(sizem1 <= R_MTEDESC_SIZEM1_MASK >> R_MTEDESC_SIZEM1_SHIFT);
-    assert(data < 1u << SVE_MTEDESC_SHIFT);
 
     if (s->mte_active[0]) {
         desc = FIELD_DP32(desc, MTEDESC, MIDX, get_mem_index(s));
@@ -4856,9 +4900,9 @@ uint32_t make_svemte_desc(DisasContext *s, unsigned vsz, uint32_t nregs,
         desc = FIELD_DP32(desc, MTEDESC, TCMA, s->tcma);
         desc = FIELD_DP32(desc, MTEDESC, WRITE, is_write);
         desc = FIELD_DP32(desc, MTEDESC, SIZEM1, sizem1);
-        desc <<= SVE_MTEDESC_SHIFT;
+        desc <<= 32;
     }
-    return simd_desc(vsz, vsz, desc | data);
+    return simd_desc(vsz, vsz, data) | desc;
 }
 
 static void do_mem_zpa(DisasContext *s, int zt, int pg, TCGv_i64 addr,
@@ -4866,7 +4910,7 @@ static void do_mem_zpa(DisasContext *s, int zt, int pg, TCGv_i64 addr,
                        gen_helper_gvec_mem *fn)
 {
     TCGv_ptr t_pg;
-    uint32_t desc;
+    uint64_t desc;
 
     if (!s->mte_active[0]) {
         addr = clean_data_tbi(s, addr);
@@ -4882,7 +4926,7 @@ static void do_mem_zpa(DisasContext *s, int zt, int pg, TCGv_i64 addr,
     t_pg = tcg_temp_new_ptr();
 
     tcg_gen_addi_ptr(t_pg, tcg_env, pred_full_reg_offset(s, pg));
-    fn(tcg_env, t_pg, addr, tcg_constant_i32(desc));
+    fn(tcg_env, t_pg, addr, tcg_constant_i64(desc));
 }
 
 /* Indexed by [mte][be][dtype][nreg] */
@@ -5334,7 +5378,7 @@ static void do_ldrq(DisasContext *s, int zt, int pg, TCGv_i64 addr, int dtype)
     unsigned vsz = vec_full_reg_size(s);
     TCGv_ptr t_pg;
     int poff;
-    uint32_t desc;
+    uint64_t desc;
 
     /* Load the first quadword using the normal predicated load helpers.  */
     if (!s->mte_active[0]) {
@@ -5365,7 +5409,7 @@ static void do_ldrq(DisasContext *s, int zt, int pg, TCGv_i64 addr, int dtype)
     gen_helper_gvec_mem *fn
         = ldr_fns[s->mte_active[0]][s->be_data == MO_BE][dtype][0];
     desc = make_svemte_desc(s, 16, 1, dtype_msz(dtype), false, zt);
-    fn(tcg_env, t_pg, addr, tcg_constant_i32(desc));
+    fn(tcg_env, t_pg, addr, tcg_constant_i64(desc));
 
     /* Replicate that first quadword.  */
     if (vsz > 16) {
@@ -5408,7 +5452,7 @@ static void do_ldro(DisasContext *s, int zt, int pg, TCGv_i64 addr, int dtype)
     unsigned vsz_r32;
     TCGv_ptr t_pg;
     int poff, doff;
-    uint32_t desc;
+    uint64_t desc;
 
     if (vsz < 32) {
         /*
@@ -5449,7 +5493,7 @@ static void do_ldro(DisasContext *s, int zt, int pg, TCGv_i64 addr, int dtype)
     gen_helper_gvec_mem *fn
         = ldr_fns[s->mte_active[0]][s->be_data == MO_BE][dtype][0];
     desc = make_svemte_desc(s, 32, 1, dtype_msz(dtype), false, zt);
-    fn(tcg_env, t_pg, addr, tcg_constant_i32(desc));
+    fn(tcg_env, t_pg, addr, tcg_constant_i64(desc));
 
     /*
      * Replicate that first octaword.
@@ -5783,14 +5827,14 @@ static void do_mem_zpz(DisasContext *s, int zt, int pg, int zm,
     TCGv_ptr t_zm = tcg_temp_new_ptr();
     TCGv_ptr t_pg = tcg_temp_new_ptr();
     TCGv_ptr t_zt = tcg_temp_new_ptr();
-    uint32_t desc;
+    uint64_t desc;
 
     tcg_gen_addi_ptr(t_pg, tcg_env, pred_full_reg_offset(s, pg));
     tcg_gen_addi_ptr(t_zm, tcg_env, vec_full_reg_offset(s, zm));
     tcg_gen_addi_ptr(t_zt, tcg_env, vec_full_reg_offset(s, zt));
 
     desc = make_svemte_desc(s, vec_full_reg_size(s), 1, msz, is_write, scale);
-    fn(tcg_env, t_zt, t_pg, t_zm, scalar, tcg_constant_i32(desc));
+    fn(tcg_env, t_zt, t_pg, t_zm, scalar, tcg_constant_i64(desc));
 }
 
 /* Indexed by [mte][be][ff][xs][u][msz].  */
@@ -6135,9 +6179,7 @@ static bool trans_LD1_zprz(DisasContext *s, arg_LD1_zprz *a)
     bool be = s->be_data == MO_BE;
     bool mte = s->mte_active[0];
 
-    if (a->esz < MO_128
-        ? !dc_isar_feature(aa64_sve, s)
-        : !dc_isar_feature(aa64_sve2p1, s)) {
+    if (!dc_isar_feature(aa64_sve, s)) {
         return false;
     }
     s->is_nonstreaming = true;
@@ -6152,10 +6194,6 @@ static bool trans_LD1_zprz(DisasContext *s, arg_LD1_zprz *a)
     case MO_64:
         fn = gather_load_fn64[mte][be][a->ff][a->xs][a->u][a->msz];
         break;
-    case MO_128:
-        assert(!a->ff && a->u && a->xs == 2 && a->msz == MO_128);
-        fn = gather_load_fn128[mte][be];
-        break;
     default:
         g_assert_not_reached();
     }
@@ -6163,6 +6201,32 @@ static bool trans_LD1_zprz(DisasContext *s, arg_LD1_zprz *a)
 
     do_mem_zpz(s, a->rd, a->pg, a->rm, a->scale * a->msz,
                cpu_reg_sp(s, a->rn), a->msz, false, fn);
+    return true;
+}
+
+static bool trans_LD1Q(DisasContext *s, arg_LD1Q *a)
+{
+    gen_helper_gvec_mem_scatter *fn = NULL;
+    bool be = s->be_data == MO_BE;
+    bool mte = s->mte_active[0];
+
+    if (!dc_isar_feature(aa64_sve2p1, s)) {
+        return false;
+    }
+    s->is_nonstreaming = true;
+    if (!sve_access_check(s)) {
+        return true;
+    }
+
+    fn = gather_load_fn128[mte][be];
+    assert(fn != NULL);
+
+    /*
+     * Unlike LD1_zprz, a->rm is the scalar register and it can be XZR, not XSP.
+     * a->rn is the vector register.
+     */
+    do_mem_zpz(s, a->rd, a->pg, a->rn, 0,
+               cpu_reg(s, a->rm), MO_128, false, fn);
     return true;
 }
 
@@ -6342,9 +6406,7 @@ static bool trans_ST1_zprz(DisasContext *s, arg_ST1_zprz *a)
     if (a->esz < a->msz || (a->msz == 0 && a->scale)) {
         return false;
     }
-    if (a->esz < MO_128
-        ? !dc_isar_feature(aa64_sve, s)
-        : !dc_isar_feature(aa64_sve2p1, s)) {
+    if (!dc_isar_feature(aa64_sve, s)) {
         return false;
     }
     s->is_nonstreaming = true;
@@ -6358,15 +6420,34 @@ static bool trans_ST1_zprz(DisasContext *s, arg_ST1_zprz *a)
     case MO_64:
         fn = scatter_store_fn64[mte][be][a->xs][a->msz];
         break;
-    case MO_128:
-        assert(a->xs == 2 && a->msz == MO_128);
-        fn = scatter_store_fn128[mte][be];
-        break;
     default:
         g_assert_not_reached();
     }
     do_mem_zpz(s, a->rd, a->pg, a->rm, a->scale * a->msz,
                cpu_reg_sp(s, a->rn), a->msz, true, fn);
+    return true;
+}
+
+static bool trans_ST1Q(DisasContext *s, arg_ST1Q *a)
+{
+    gen_helper_gvec_mem_scatter *fn;
+    bool be = s->be_data == MO_BE;
+    bool mte = s->mte_active[0];
+
+    if (!dc_isar_feature(aa64_sve2p1, s)) {
+        return false;
+    }
+    s->is_nonstreaming = true;
+    if (!sve_access_check(s)) {
+        return true;
+    }
+    fn = scatter_store_fn128[mte][be];
+    /*
+     * Unlike ST1_zprz, a->rm is the scalar register, and it
+     * can be XZR, not XSP. a->rn is the vector register.
+     */
+    do_mem_zpz(s, a->rd, a->pg, a->rn, 0,
+               cpu_reg(s, a->rm), MO_128, true, fn);
     return true;
 }
 
@@ -8034,7 +8115,7 @@ static bool gen_ldst_c(DisasContext *s, TCGv_i64 addr, int zd, int png,
                        MemOp esz, bool is_write, int n, bool strided)
 {
     typedef void ldst_c_fn(TCGv_env, TCGv_ptr, TCGv_i64,
-                           TCGv_i32, TCGv_i32);
+                           TCGv_i32, TCGv_i64);
     static ldst_c_fn * const f_ldst[2][2][4] = {
         { { gen_helper_sve2p1_ld1bb_c,
             gen_helper_sve2p1_ld1hh_le_c,
@@ -8055,9 +8136,10 @@ static bool gen_ldst_c(DisasContext *s, TCGv_i64 addr, int zd, int png,
             gen_helper_sve2p1_st1dd_be_c, } }
     };
 
-    TCGv_i32 t_png, t_desc;
+    TCGv_i32 t_png;
+    TCGv_i64 t_desc;
     TCGv_ptr t_zd;
-    uint32_t desc, lg2_rstride = 0;
+    uint64_t desc, lg2_rstride = 0;
     bool be = s->be_data == MO_BE;
 
     assert(n == 2 || n == 4);
@@ -8087,7 +8169,7 @@ static bool gen_ldst_c(DisasContext *s, TCGv_i64 addr, int zd, int png,
     desc = n == 2 ? 0 : 1;
     desc = desc | (lg2_rstride << 1);
     desc = make_svemte_desc(s, vec_full_reg_size(s), 1, esz, is_write, desc);
-    t_desc = tcg_constant_i32(desc);
+    t_desc = tcg_constant_i64(desc);
 
     t_png = tcg_temp_new_i32();
     tcg_gen_ld16u_i32(t_png, tcg_env,
