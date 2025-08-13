@@ -22,6 +22,8 @@
 #include "hw/intc/arm_gicv3.h"
 #include "qobject/qlist.h"
 #include "qemu/log.h"
+#include "hw/qdev-clock.h"
+#include "hw/boards.h"
 
 #define AST2700_SOC_IO_SIZE          0x00FE0000
 #define AST2700_SOC_IOMEM_SIZE       0x01000000
@@ -410,6 +412,8 @@ static bool aspeed_soc_ast2700_dram_init(DeviceState *dev, Error **errp)
 
 static void aspeed_soc_ast2700_init(Object *obj)
 {
+    MachineState *ms = MACHINE(qdev_get_machine());
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
     Aspeed27x0SoCState *a = ASPEED27X0_SOC(obj);
     AspeedSoCState *s = ASPEED_SOC(obj);
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
@@ -424,6 +428,12 @@ static void aspeed_soc_ast2700_init(Object *obj)
     for (i = 0; i < sc->num_cpus; i++) {
         object_initialize_child(obj, "cpu[*]", &a->cpu[i],
                                 aspeed_soc_cpu_type(sc));
+    }
+
+    /* Coprocessors */
+    if (mc->default_cpus > sc->num_cpus) {
+        object_initialize_child(obj, "ssp", &a->ssp, TYPE_ASPEED27X0SSP_SOC);
+        object_initialize_child(obj, "tsp", &a->tsp, TYPE_ASPEED27X0TSP_SOC);
     }
 
     object_initialize_child(obj, "gic", &a->gic, gicv3_class_name());
@@ -610,9 +620,75 @@ static bool aspeed_soc_ast2700_gic_realize(DeviceState *dev, Error **errp)
     return true;
 }
 
+static bool aspeed_soc_ast2700_ssp_realize(DeviceState *dev, Error **errp)
+{
+    Aspeed27x0SoCState *a = ASPEED27X0_SOC(dev);
+    AspeedSoCState *s = ASPEED_SOC(dev);
+    MemoryRegion *mr;
+    Clock *sysclk;
+
+    sysclk = clock_new(OBJECT(s), "SSP_SYSCLK");
+    clock_set_hz(sysclk, 200000000ULL);
+    qdev_connect_clock_in(DEVICE(&a->ssp), "sysclk", sysclk);
+
+    memory_region_init(&a->ssp.memory, OBJECT(&a->ssp), "ssp-memory",
+                       UINT64_MAX);
+    if (!object_property_set_link(OBJECT(&a->ssp), "memory",
+                                  OBJECT(&a->ssp.memory), &error_abort)) {
+        return false;
+    }
+
+    mr = &s->sram;
+    memory_region_init_alias(&a->ssp.sram_mr_alias, OBJECT(s), "ssp.sram.alias",
+                             mr, 0, memory_region_size(mr));
+
+    mr = &s->scu.iomem;
+    memory_region_init_alias(&a->ssp.scu_mr_alias, OBJECT(s), "ssp.scu.alias",
+                             mr, 0, memory_region_size(mr));
+    if (!qdev_realize(DEVICE(&a->ssp), NULL, &error_abort)) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool aspeed_soc_ast2700_tsp_realize(DeviceState *dev, Error **errp)
+{
+    Aspeed27x0SoCState *a = ASPEED27X0_SOC(dev);
+    AspeedSoCState *s = ASPEED_SOC(dev);
+    MemoryRegion *mr;
+    Clock *sysclk;
+
+    sysclk = clock_new(OBJECT(s), "TSP_SYSCLK");
+    clock_set_hz(sysclk, 200000000ULL);
+    qdev_connect_clock_in(DEVICE(&a->tsp), "sysclk", sysclk);
+
+    memory_region_init(&a->tsp.memory, OBJECT(&a->tsp), "tsp-memory",
+                       UINT64_MAX);
+    if (!object_property_set_link(OBJECT(&a->tsp), "memory",
+                                  OBJECT(&a->tsp.memory), &error_abort)) {
+        return false;
+    }
+
+    mr = &s->sram;
+    memory_region_init_alias(&a->tsp.sram_mr_alias, OBJECT(s), "tsp.sram.alias",
+                             mr, 0, memory_region_size(mr));
+
+    mr = &s->scu.iomem;
+    memory_region_init_alias(&a->tsp.scu_mr_alias, OBJECT(s), "tsp.scu.alias",
+                             mr, 0, memory_region_size(mr));
+    if (!qdev_realize(DEVICE(&a->tsp), NULL, &error_abort)) {
+        return false;
+    }
+
+    return true;
+}
+
 static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
 {
     int i;
+    MachineState *ms = MACHINE(qdev_get_machine());
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
     Aspeed27x0SoCState *a = ASPEED27X0_SOC(dev);
     AspeedSoCState *s = ASPEED_SOC(dev);
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
@@ -689,6 +765,26 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
                            qdev_get_gpio_in(DEVICE(&a->intc[0].orgates[0]), i));
     }
 
+    /*
+     * SDMC - SDRAM Memory Controller
+     * The SDMC controller is unlocked at SPL stage.
+     * At present, only supports to emulate booting
+     * start from u-boot stage. Set SDMC controller
+     * unlocked by default. It is a temporarily solution.
+     */
+    object_property_set_bool(OBJECT(&s->sdmc), "unlocked", true,
+                                 &error_abort);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->sdmc), errp)) {
+        return;
+    }
+    aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->sdmc), 0,
+                    sc->memmap[ASPEED_DEV_SDMC]);
+
+    /* RAM */
+    if (!aspeed_soc_ast2700_dram_init(dev, errp)) {
+        return;
+    }
+
     /* SRAM */
     name = g_strdup_printf("aspeed.sram.%d", CPU(&a->cpu[0])->cpu_index);
     if (!memory_region_init_ram(&s->sram, OBJECT(s), name, sc->sram_size,
@@ -707,6 +803,46 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
                                 sc->memmap[ASPEED_DEV_VBOOTROM], &s->vbootrom);
 
     /* SCU */
+    /*
+     * The SSP coprocessor uses two memory aliases (remap1 and remap2)
+     * to access shared memory regions in the PSP DRAM:
+     *
+     *   - remap1 maps PSP DRAM at 0x400000000 (size: 32MB) to SSP SDRAM
+     *     offset 0x2000000
+     *   - remap2 maps PSP DRAM at 0x42c000000 (size: 32MB) to SSP SDRAM
+     *     offset 0x0
+     *
+     * The TSP coprocessor uses one memory alias (remap) to access a shared
+     * region in the PSP DRAM:
+     *
+     *   - remap maps PSP DRAM at 0x42e000000 (size: 32MB) to TSP SDRAM
+     *     offset 0x0
+     *
+     * These mappings correspond to the default values of the SCU registers:
+     *
+     * This configuration enables shared memory communication between the PSP
+     * and coprocessors, with address translation controlled by the SCU.
+     */
+    if (mc->default_cpus > sc->num_cpus) {
+        memory_region_init_alias(&a->ssp.sdram_remap1_alias, OBJECT(a),
+                                 "ssp.sdram.remap1", s->memory,
+                                 0x400000000ULL, 32 * MiB);
+        memory_region_init_alias(&a->ssp.sdram_remap2_alias, OBJECT(a),
+                                 "ssp.sdram.remap2", s->memory,
+                                 0x42c000000ULL, 32 * MiB);
+        memory_region_init_alias(&a->tsp.sdram_remap_alias, OBJECT(a),
+                                 "tsp.sdram.remap", s->memory,
+                                 0x42e000000, 32 * MiB);
+        object_property_set_link(OBJECT(&s->scu), "ssp-sdram-remap1",
+                                 OBJECT(&a->ssp.sdram_remap1_alias),
+                                 &error_abort);
+        object_property_set_link(OBJECT(&s->scu), "ssp-sdram-remap2",
+                                 OBJECT(&a->ssp.sdram_remap2_alias),
+                                 &error_abort);
+        object_property_set_link(OBJECT(&s->scu), "tsp-sdram-remap",
+                                 OBJECT(&a->tsp.sdram_remap_alias),
+                                 &error_abort);
+    }
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->scu), errp)) {
         return;
     }
@@ -718,6 +854,38 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
     }
     aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->scuio), 0,
                     sc->memmap[ASPEED_DEV_SCUIO]);
+
+    /*
+     * Coprocessors must be realized after the DRAM, SRAM, and SCU regions.
+     *
+     * - DRAM: Coprocessors access shared memory through MemoryRegion aliases
+     *   that point into PSP's DRAM space. These aliases are mapped into the
+     *   coprocessors' SDRAM windows at specific offsets (e.g., 0x0 and
+     *   0x2000000), and configured according to SCU register defaults.
+     *   Therefore, DRAM must be fully initialized before coprocessors can
+     *   attach aliases to it.
+     *
+     * - SRAM: Used as shared memory between the PSP and coprocessors.
+     *   Coprocessors access this memory via alias regions mapped to
+     *   different physical addresses.
+     *
+     * - SCU: A single hardware block shared across all processors.
+     *   Coprocessors access SCU registers through alias mappings.
+     *   SCU must be initialized first to allow for consistent register
+     *   state and memory remap configuration.
+     *
+     * To ensure correctness, the device realization order is explicitly
+     * managed: coprocessors are initialized only after DRAM, SRAM, and SCU
+     * are ready.
+     */
+    if (mc->default_cpus > sc->num_cpus) {
+        if (!aspeed_soc_ast2700_ssp_realize(dev, errp)) {
+            return;
+        }
+        if (!aspeed_soc_ast2700_tsp_realize(dev, errp)) {
+            return;
+        }
+    }
 
     /* UART */
     if (!aspeed_soc_uart_realize(s, errp)) {
@@ -767,26 +935,6 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
                         sc->memmap[ASPEED_DEV_EHCI1 + i]);
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->ehci[i]), 0,
                            aspeed_soc_get_irq(s, ASPEED_DEV_EHCI1 + i));
-    }
-
-    /*
-     * SDMC - SDRAM Memory Controller
-     * The SDMC controller is unlocked at SPL stage.
-     * At present, only supports to emulate booting
-     * start from u-boot stage. Set SDMC controller
-     * unlocked by default. It is a temporarily solution.
-     */
-    object_property_set_bool(OBJECT(&s->sdmc), "unlocked", true,
-                                 &error_abort);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->sdmc), errp)) {
-        return;
-    }
-    aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->sdmc), 0,
-                    sc->memmap[ASPEED_DEV_SDMC]);
-
-    /* RAM */
-    if (!aspeed_soc_ast2700_dram_init(dev, errp)) {
-        return;
     }
 
     /* Net */
