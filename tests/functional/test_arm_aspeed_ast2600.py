@@ -110,6 +110,10 @@ class AST2600Machine(AspeedTest):
             'tmp105,bus=aspeed.i2c.bus.5,address=0x4d,id=tmp-test')
         self.vm.add_args('-device',
             'ds1338,bus=aspeed.i2c.bus.5,address=0x32')
+        self.vm.add_args('-device',
+            'pcie-root-port,id=root_port0,slot=1,addr=8,bus=pcie.0')
+        self.vm.add_args('-device', 'e1000e,netdev=net0,bus=root_port0')
+        self.vm.add_args('-netdev', 'user,id=net0')
         self.do_test_arm_aspeed_sdk_start(
             self.scratch_file("ast2600-default", "image-bmc"))
 
@@ -135,6 +139,31 @@ class AST2600Machine(AspeedTest):
         year = time.strftime("%Y")
         exec_command_and_wait_for_pattern(self,
              '/sbin/hwclock -f /dev/rtc1', year)
+
+        exec_command_and_wait_for_pattern(self,
+            'lspci -s 0001:80:00.0',
+            '0001:80:00.0 Host bridge: ASPEED Technology, Inc. AST1150 PCI-to-PCI Bridge')
+        exec_command_and_wait_for_pattern(self,
+            'lspci -s 0001:80:08.0',
+            '0001:80:08.0 PCI bridge: Red Hat, Inc. QEMU PCIe Root port')
+        exec_command_and_wait_for_pattern(self,
+            'lspci -s 0001:81:00.0',
+            '0001:81:00.0 Ethernet controller: Intel Corporation 82574L Gigabit Network Connection')
+
+    ASSET_SDK_V906_AST2600_515 = Asset(
+        'https://github.com/AspeedTech-BMC/openbmc/releases/download/v09.06/ast2600-default-515-obmc.tar.gz',
+        '5501a032f79e217aeb351302da338e5d3faec45315b46e4aae9661583669ceaa')
+
+    def test_arm_ast2600_evb_sdk_515(self):
+        self.set_machine('ast2600-evb')
+
+        self.archive_extract(self.ASSET_SDK_V906_AST2600_515)
+
+        self.do_test_arm_aspeed_sdk_start(
+            self.scratch_file("ast2600-default-515", "image-bmc"))
+
+        self.wait_for_console_pattern('ast2600-default-515 login:')
+
 
 if __name__ == '__main__':
     AspeedTest.main()

@@ -18,16 +18,19 @@
 #include "hw/intc/aspeed_intc.h"
 #include "hw/misc/aspeed_scu.h"
 #include "hw/adc/aspeed_adc.h"
+#include "hw/misc/aspeed_gfx.h"
 #include "hw/misc/aspeed_sdmc.h"
 #include "hw/misc/aspeed_xdma.h"
 #include "hw/timer/aspeed_timer.h"
 #include "hw/rtc/aspeed_rtc.h"
+#include "hw/misc/aspeed_ibt.h"
 #include "hw/i2c/aspeed_i2c.h"
-#include "hw/misc/aspeed_i3c.h"
+#include "hw/i3c/aspeed_i3c.h"
 #include "hw/ssi/aspeed_smc.h"
 #include "hw/misc/aspeed_hace.h"
 #include "hw/misc/aspeed_sbc.h"
 #include "hw/misc/aspeed_sli.h"
+#include "hw/misc/aspeed_pwm.h"
 #include "hw/watchdog/wdt_aspeed.h"
 #include "hw/net/ftgmac100.h"
 #include "target/arm/cpu.h"
@@ -37,6 +40,7 @@
 #include "qom/object.h"
 #include "hw/misc/aspeed_lpc.h"
 #include "hw/misc/unimp.h"
+#include "hw/pci-host/aspeed_pcie.h"
 #include "hw/misc/aspeed_peci.h"
 #include "hw/fsi/aspeed_apb2opb.h"
 #include "hw/char/serial-mm.h"
@@ -49,6 +53,7 @@
 #define ASPEED_MACS_NUM  4
 #define ASPEED_UARTS_NUM 13
 #define ASPEED_JTAG_NUM  2
+#define ASPEED_PCIE_NUM  3
 
 struct AspeedSoCState {
     DeviceState parent;
@@ -63,6 +68,7 @@ struct AspeedSoCState {
     AddressSpace dram_as;
     AspeedRtcState rtc;
     AspeedTimerCtrlState timerctrl;
+    AspeedIBTState ibt;
     AspeedI2CState i2c;
     AspeedI3CState i3c;
     AspeedSCUState scu;
@@ -87,7 +93,10 @@ struct AspeedSoCState {
     AspeedSDHCIState sdhci;
     AspeedSDHCIState emmc;
     AspeedLPCState lpc;
+    AspeedPCIECfgState pcie[ASPEED_PCIE_NUM];
+    AspeedPCIEPhyState pcie_phy[ASPEED_PCIE_NUM];
     AspeedPECIState peci;
+    AspeedGFXState gfx;
     SerialMM uart[ASPEED_UARTS_NUM];
     Clock *sysclk;
     UnimplementedDeviceState iomem;
@@ -96,7 +105,7 @@ struct AspeedSoCState {
     UnimplementedDeviceState video;
     UnimplementedDeviceState emmc_boot_controller;
     UnimplementedDeviceState dpmcu;
-    UnimplementedDeviceState pwm;
+    AspeedPWMState pwm;
     UnimplementedDeviceState espi;
     UnimplementedDeviceState udc;
     UnimplementedDeviceState sgpiom;
@@ -128,29 +137,16 @@ struct Aspeed2600SoCState {
 #define TYPE_ASPEED2600_SOC "aspeed2600-soc"
 OBJECT_DECLARE_SIMPLE_TYPE(Aspeed2600SoCState, ASPEED2600_SOC)
 
-struct Aspeed27x0SoCState {
-    AspeedSoCState parent;
-
-    ARMCPU cpu[ASPEED_CPUS_NUM];
-    AspeedINTCState intc[2];
-    GICv3State gic;
-    MemoryRegion dram_empty;
-};
-
-#define TYPE_ASPEED27X0_SOC "aspeed27x0-soc"
-OBJECT_DECLARE_SIMPLE_TYPE(Aspeed27x0SoCState, ASPEED27X0_SOC)
-
-struct Aspeed10x0SoCState {
-    AspeedSoCState parent;
-
-    ARMv7MState armv7m;
-};
-
 struct Aspeed27x0SSPSoCState {
     AspeedSoCState parent;
     AspeedINTCState intc[2];
     UnimplementedDeviceState ipc[2];
     UnimplementedDeviceState scuio;
+    MemoryRegion memory;
+    MemoryRegion sram_mr_alias;
+    MemoryRegion scu_mr_alias;
+    MemoryRegion sdram_remap1_alias;
+    MemoryRegion sdram_remap2_alias;
 
     ARMv7MState armv7m;
 };
@@ -163,12 +159,37 @@ struct Aspeed27x0TSPSoCState {
     AspeedINTCState intc[2];
     UnimplementedDeviceState ipc[2];
     UnimplementedDeviceState scuio;
+    MemoryRegion memory;
+    MemoryRegion sram_mr_alias;
+    MemoryRegion scu_mr_alias;
+    MemoryRegion sdram_remap_alias;
 
     ARMv7MState armv7m;
 };
 
 #define TYPE_ASPEED27X0TSP_SOC "aspeed27x0tsp-soc"
 OBJECT_DECLARE_SIMPLE_TYPE(Aspeed27x0TSPSoCState, ASPEED27X0TSP_SOC)
+
+struct Aspeed27x0SoCState {
+    AspeedSoCState parent;
+
+    ARMCPU cpu[ASPEED_CPUS_NUM];
+    AspeedINTCState intc[2];
+    GICv3State gic;
+    MemoryRegion dram_empty;
+
+    Aspeed27x0SSPSoCState ssp;
+    Aspeed27x0TSPSoCState tsp;
+};
+
+#define TYPE_ASPEED27X0_SOC "aspeed27x0-soc"
+OBJECT_DECLARE_SIMPLE_TYPE(Aspeed27x0SoCState, ASPEED27X0_SOC)
+
+struct Aspeed10x0SoCState {
+    AspeedSoCState parent;
+
+    ARMv7MState armv7m;
+};
 
 #define TYPE_ASPEED10X0_SOC "aspeed10x0-soc"
 OBJECT_DECLARE_SIMPLE_TYPE(Aspeed10x0SoCState, ASPEED10X0_SOC)
@@ -181,6 +202,7 @@ struct AspeedSoCClass {
     uint32_t silicon_rev;
     uint64_t sram_size;
     uint64_t secsram_size;
+    int pcie_num;
     int spis_num;
     int ehcis_num;
     int wdts_num;
@@ -254,6 +276,15 @@ enum {
     ASPEED_DEV_LPC,
     ASPEED_DEV_IBT,
     ASPEED_DEV_I2C,
+    ASPEED_DEV_PCIE0,
+    ASPEED_DEV_PCIE1,
+    ASPEED_DEV_PCIE2,
+    ASPEED_DEV_PCIE_PHY0,
+    ASPEED_DEV_PCIE_PHY1,
+    ASPEED_DEV_PCIE_PHY2,
+    ASPEED_DEV_PCIE_MMIO0,
+    ASPEED_DEV_PCIE_MMIO1,
+    ASPEED_DEV_PCIE_MMIO2,
     ASPEED_DEV_PECI,
     ASPEED_DEV_ETH1,
     ASPEED_DEV_ETH2,
@@ -268,6 +299,7 @@ enum {
     ASPEED_DEV_EMMC,
     ASPEED_DEV_KCS,
     ASPEED_DEV_HACE,
+    ASPEED_DEV_GFX,
     ASPEED_DEV_DPMCU,
     ASPEED_DEV_DP,
     ASPEED_DEV_I3C,

@@ -34,6 +34,7 @@ test_timeouts = {
   'arm_aspeed_bletchley' : 480,
   'arm_aspeed_catalina' : 480,
   'arm_aspeed_gb200nvl_bmc' : 480,
+  'arm_aspeed_otp': 1200,
   'arm_aspeed_rainier' : 480,
   'arm_bpim2u' : 500,
   'arm_collie' : 180,
@@ -89,6 +90,7 @@ tests_aarch64_system_thorough = [
   'aarch64_device_passthrough',
   'aarch64_hotplug_pci',
   'aarch64_imx8mp_evk',
+  'aarch64_kvm',
   'aarch64_raspi3',
   'aarch64_raspi4',
   'aarch64_replay',
@@ -131,6 +133,7 @@ tests_arm_system_thorough = [
   'arm_aspeed_bletchley',
   'arm_aspeed_catalina',
   'arm_aspeed_gb200nvl_bmc',
+  'arm_aspeed_otp',
   'arm_aspeed_rainier',
   'arm_bpim2u',
   'arm_canona1100',
@@ -273,6 +276,7 @@ tests_riscv64_system_quick = [
 ]
 
 tests_riscv64_system_thorough = [
+  'riscv64_sifive_u',
   'riscv64_tuxrun',
 ]
 

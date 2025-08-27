@@ -49,8 +49,6 @@
 #include "vfio-migration-internal.h"
 #include "vfio-helpers.h"
 
-#define TYPE_VFIO_PCI_NOHOTPLUG "vfio-pci-nohotplug"
-
 /* Protected by BQL */
 static KVMRouteChange vfio_route_change;
 
@@ -415,6 +413,14 @@ bool vfio_pci_intx_enable(VFIOPCIDevice *vdev, Error **errp)
     return vfio_intx_enable(vdev, errp);
 }
 
+void vfio_pci_intx_set_handler(VFIOPCIDevice *vdev, bool enable)
+{
+    int fd = event_notifier_get_fd(&vdev->intx.interrupt);
+    IOHandler *handler = (enable ? vfio_intx_interrupt : NULL);
+
+    qemu_set_fd_handler(fd, handler, NULL, vdev);
+}
+
 /*
  * MSI/X
  */
@@ -453,12 +459,13 @@ static void vfio_msi_interrupt(void *opaque)
     notify(&vdev->pdev, nr);
 }
 
-void vfio_pci_msi_set_handler(VFIOPCIDevice *vdev, int nr)
+void vfio_pci_msi_set_handler(VFIOPCIDevice *vdev, int nr, bool enable)
 {
     VFIOMSIVector *vector = &vdev->msi_vectors[nr];
     int fd = event_notifier_get_fd(&vector->interrupt);
+    IOHandler *handler = (enable ? vfio_msi_interrupt : NULL);
 
-    qemu_set_fd_handler(fd, vfio_msi_interrupt, NULL, vector);
+    qemu_set_fd_handler(fd, handler, NULL, vector);
 }
 
 /*
@@ -2826,6 +2833,20 @@ static int vfio_pci_load_config(VFIODevice *vbasedev, QEMUFile *f)
     return ret;
 }
 
+void vfio_sub_page_bar_update_mappings(VFIOPCIDevice *vdev)
+{
+    PCIDevice *pdev = &vdev->pdev;
+    int page_size = qemu_real_host_page_size();
+    int bar;
+
+    for (bar = 0; bar < PCI_ROM_SLOT; bar++) {
+        PCIIORegion *r = &pdev->io_regions[bar];
+        if (r->addr != PCI_BAR_UNMAPPED && r->size > 0 && r->size < page_size) {
+            vfio_sub_page_bar_update_mapping(pdev, bar);
+        }
+    }
+}
+
 static VFIODeviceOps vfio_pci_ops = {
     .vfio_compute_needs_reset = vfio_pci_compute_needs_reset,
     .vfio_hot_reset_multi = vfio_pci_hot_reset_multi,
@@ -2980,6 +3001,7 @@ void vfio_pci_put_device(VFIOPCIDevice *vdev)
 {
     vfio_display_finalize(vdev);
     vfio_bars_finalize(vdev);
+    vfio_cpr_pci_unregister_device(vdev);
     g_free(vdev->emulated_config_bits);
     g_free(vdev->rom);
     /*
@@ -3150,6 +3172,15 @@ static void vfio_unregister_req_notifier(VFIOPCIDevice *vdev)
     vdev->req_enabled = false;
 }
 
+void vfio_pci_config_register_vga(VFIOPCIDevice *vdev)
+{
+    assert(vdev->vga != NULL);
+
+    pci_register_vga(&vdev->pdev, &vdev->vga->region[QEMU_PCI_VGA_MEM].mem,
+                     &vdev->vga->region[QEMU_PCI_VGA_IO_LO].mem,
+                     &vdev->vga->region[QEMU_PCI_VGA_IO_HI].mem);
+}
+
 bool vfio_pci_config_setup(VFIOPCIDevice *vdev, Error **errp)
 {
     PCIDevice *pdev = &vdev->pdev;
@@ -3271,9 +3302,7 @@ bool vfio_pci_config_setup(VFIOPCIDevice *vdev, Error **errp)
     vfio_bars_register(vdev);
 
     if (vdev->vga && vfio_is_vga(vdev)) {
-        pci_register_vga(&vdev->pdev, &vdev->vga->region[QEMU_PCI_VGA_MEM].mem,
-                         &vdev->vga->region[QEMU_PCI_VGA_IO_LO].mem,
-                         &vdev->vga->region[QEMU_PCI_VGA_IO_HI].mem);
+        vfio_pci_config_register_vga(vdev);
     }
 
     return true;
@@ -3452,6 +3481,7 @@ static void vfio_pci_realize(PCIDevice *pdev, Error **errp)
     vfio_pci_register_err_notifier(vdev);
     vfio_pci_register_req_notifier(vdev);
     vfio_setup_resetfn_quirk(vdev);
+    vfio_cpr_pci_register_device(vdev);
 
     return;
 
@@ -3849,6 +3879,8 @@ static const TypeInfo vfio_pci_dev_info = {
 
 static const Property vfio_pci_dev_nohotplug_properties[] = {
     DEFINE_PROP_BOOL("ramfb", VFIOPCIDevice, enable_ramfb, false),
+    DEFINE_PROP_BOOL("use-legacy-x86-rom", VFIOPCIDevice,
+                     use_legacy_x86_rom, false),
     DEFINE_PROP_ON_OFF_AUTO("x-ramfb-migrate", VFIOPCIDevice, ramfb_migrate,
                             ON_OFF_AUTO_AUTO),
 };
@@ -3869,6 +3901,9 @@ static void vfio_pci_nohotplug_dev_class_init(ObjectClass *klass,
                                           "x-ramfb-migrate",
                                           "Override default migration support for ramfb support "
                                           "(DEBUG)");
+    object_class_property_set_description(klass, /* 10.1 */
+                                          "use-legacy-x86-rom",
+                                          "Controls loading of a legacy VGA BIOS ROM");
 }
 
 static const TypeInfo vfio_pci_nohotplug_dev_info = {

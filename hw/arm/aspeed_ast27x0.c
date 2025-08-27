@@ -22,6 +22,8 @@
 #include "hw/intc/arm_gicv3.h"
 #include "qobject/qlist.h"
 #include "qemu/log.h"
+#include "hw/qdev-clock.h"
+#include "hw/boards.h"
 
 #define AST2700_SOC_IO_SIZE          0x00FE0000
 #define AST2700_SOC_IOMEM_SIZE       0x01000000
@@ -38,6 +40,8 @@ static const hwaddr aspeed_soc_ast2700_memmap[] = {
     [ASPEED_DEV_EHCI2]     =  0x12063000,
     [ASPEED_DEV_HACE]      =  0x12070000,
     [ASPEED_DEV_EMMC]      =  0x12090000,
+    [ASPEED_DEV_PCIE0]     =  0x120E0000,
+    [ASPEED_DEV_PCIE1]     =  0x120F0000,
     [ASPEED_DEV_INTC]      =  0x12100000,
     [ASPEED_GIC_DIST]      =  0x12200000,
     [ASPEED_GIC_REDIST]    =  0x12280000,
@@ -45,6 +49,8 @@ static const hwaddr aspeed_soc_ast2700_memmap[] = {
     [ASPEED_DEV_SCU]       =  0x12C02000,
     [ASPEED_DEV_RTC]       =  0x12C0F000,
     [ASPEED_DEV_TIMER1]    =  0x12C10000,
+    [ASPEED_DEV_PCIE_PHY0] =  0x12C15000,
+    [ASPEED_DEV_PCIE_PHY1] =  0x12C15800,
     [ASPEED_DEV_SLI]       =  0x12C17000,
     [ASPEED_DEV_UART4]     =  0x12C1A000,
     [ASPEED_DEV_IOMEM1]    =  0x14000000,
@@ -59,6 +65,7 @@ static const hwaddr aspeed_soc_ast2700_memmap[] = {
     [ASPEED_DEV_ETH2]      =  0x14060000,
     [ASPEED_DEV_ETH3]      =  0x14070000,
     [ASPEED_DEV_SDHCI]     =  0x14080000,
+    [ASPEED_DEV_PCIE2]     =  0x140D0000,
     [ASPEED_DEV_EHCI3]     =  0x14121000,
     [ASPEED_DEV_EHCI4]     =  0x14123000,
     [ASPEED_DEV_ADC]       =  0x14C00000,
@@ -66,6 +73,7 @@ static const hwaddr aspeed_soc_ast2700_memmap[] = {
     [ASPEED_DEV_GPIO]      =  0x14C0B000,
     [ASPEED_DEV_I2C]       =  0x14C0F000,
     [ASPEED_DEV_INTCIO]    =  0x14C18000,
+    [ASPEED_DEV_PCIE_PHY2] =  0x14C1C000,
     [ASPEED_DEV_SLIIO]     =  0x14C1E000,
     [ASPEED_DEV_VUART]     =  0x14C30000,
     [ASPEED_DEV_UART0]     =  0x14C33000,
@@ -81,6 +89,9 @@ static const hwaddr aspeed_soc_ast2700_memmap[] = {
     [ASPEED_DEV_UART11]    =  0x14C33A00,
     [ASPEED_DEV_UART12]    =  0x14C33B00,
     [ASPEED_DEV_WDT]       =  0x14C37000,
+    [ASPEED_DEV_PCIE_MMIO0] = 0x60000000,
+    [ASPEED_DEV_PCIE_MMIO1] = 0x80000000,
+    [ASPEED_DEV_PCIE_MMIO2] = 0xA0000000,
     [ASPEED_DEV_SPI_BOOT]  =  0x100000000,
     [ASPEED_DEV_LTPI]      =  0x300000000,
     [ASPEED_DEV_SDRAM]     =  0x400000000,
@@ -156,6 +167,8 @@ static const int aspeed_soc_ast2700a1_irqmap[] = {
     [ASPEED_DEV_DP]        = 28,
     [ASPEED_DEV_EHCI1]     = 33,
     [ASPEED_DEV_EHCI2]     = 37,
+    [ASPEED_DEV_PCIE0]     = 56,
+    [ASPEED_DEV_PCIE1]     = 57,
     [ASPEED_DEV_LPC]       = 192,
     [ASPEED_DEV_IBT]       = 192,
     [ASPEED_DEV_KCS]       = 192,
@@ -166,6 +179,7 @@ static const int aspeed_soc_ast2700a1_irqmap[] = {
     [ASPEED_DEV_WDT]       = 195,
     [ASPEED_DEV_PWM]       = 195,
     [ASPEED_DEV_I3C]       = 195,
+    [ASPEED_DEV_PCIE2]     = 196,
     [ASPEED_DEV_UART0]     = 196,
     [ASPEED_DEV_UART1]     = 196,
     [ASPEED_DEV_UART2]     = 196,
@@ -233,6 +247,7 @@ static const int ast2700_gic132_gic196_intcmap[] = {
     [ASPEED_DEV_UART12]    = 18,
     [ASPEED_DEV_EHCI3]     = 28,
     [ASPEED_DEV_EHCI4]     = 29,
+    [ASPEED_DEV_PCIE2]     = 31,
 };
 
 /* GICINT 133 */
@@ -410,6 +425,8 @@ static bool aspeed_soc_ast2700_dram_init(DeviceState *dev, Error **errp)
 
 static void aspeed_soc_ast2700_init(Object *obj)
 {
+    MachineState *ms = MACHINE(qdev_get_machine());
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
     Aspeed27x0SoCState *a = ASPEED27X0_SOC(obj);
     AspeedSoCState *s = ASPEED_SOC(obj);
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
@@ -424,6 +441,12 @@ static void aspeed_soc_ast2700_init(Object *obj)
     for (i = 0; i < sc->num_cpus; i++) {
         object_initialize_child(obj, "cpu[*]", &a->cpu[i],
                                 aspeed_soc_cpu_type(sc));
+    }
+
+    /* Coprocessors */
+    if (mc->default_cpus > sc->num_cpus) {
+        object_initialize_child(obj, "ssp", &a->ssp, TYPE_ASPEED27X0SSP_SOC);
+        object_initialize_child(obj, "tsp", &a->tsp, TYPE_ASPEED27X0TSP_SOC);
     }
 
     object_initialize_child(obj, "gic", &a->gic, gicv3_class_name());
@@ -519,6 +542,17 @@ static void aspeed_soc_ast2700_init(Object *obj)
 
     snprintf(typename, sizeof(typename), "aspeed.hace-%s", socname);
     object_initialize_child(obj, "hace", &s->hace, typename);
+
+    for (i = 0; i < sc->pcie_num; i++) {
+        snprintf(typename, sizeof(typename), "aspeed.pcie-phy-%s", socname);
+        object_initialize_child(obj, "pcie-phy[*]", &s->pcie_phy[i], typename);
+        object_property_set_int(OBJECT(&s->pcie_phy[i]), "id", i, &error_abort);
+
+        snprintf(typename, sizeof(typename), "aspeed.pcie-cfg-%s", socname);
+        object_initialize_child(obj, "pcie-cfg[*]", &s->pcie[i], typename);
+        object_property_set_int(OBJECT(&s->pcie[i]), "id", i, &error_abort);
+    }
+
     object_initialize_child(obj, "dpmcu", &s->dpmcu,
                             TYPE_UNIMPLEMENTED_DEVICE);
     object_initialize_child(obj, "ltpi", &s->ltpi,
@@ -610,15 +644,83 @@ static bool aspeed_soc_ast2700_gic_realize(DeviceState *dev, Error **errp)
     return true;
 }
 
+static bool aspeed_soc_ast2700_ssp_realize(DeviceState *dev, Error **errp)
+{
+    Aspeed27x0SoCState *a = ASPEED27X0_SOC(dev);
+    AspeedSoCState *s = ASPEED_SOC(dev);
+    MemoryRegion *mr;
+    Clock *sysclk;
+
+    sysclk = clock_new(OBJECT(s), "SSP_SYSCLK");
+    clock_set_hz(sysclk, 200000000ULL);
+    qdev_connect_clock_in(DEVICE(&a->ssp), "sysclk", sysclk);
+
+    memory_region_init(&a->ssp.memory, OBJECT(&a->ssp), "ssp-memory",
+                       UINT64_MAX);
+    if (!object_property_set_link(OBJECT(&a->ssp), "memory",
+                                  OBJECT(&a->ssp.memory), &error_abort)) {
+        return false;
+    }
+
+    mr = &s->sram;
+    memory_region_init_alias(&a->ssp.sram_mr_alias, OBJECT(s), "ssp.sram.alias",
+                             mr, 0, memory_region_size(mr));
+
+    mr = &s->scu.iomem;
+    memory_region_init_alias(&a->ssp.scu_mr_alias, OBJECT(s), "ssp.scu.alias",
+                             mr, 0, memory_region_size(mr));
+    if (!qdev_realize(DEVICE(&a->ssp), NULL, &error_abort)) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool aspeed_soc_ast2700_tsp_realize(DeviceState *dev, Error **errp)
+{
+    Aspeed27x0SoCState *a = ASPEED27X0_SOC(dev);
+    AspeedSoCState *s = ASPEED_SOC(dev);
+    MemoryRegion *mr;
+    Clock *sysclk;
+
+    sysclk = clock_new(OBJECT(s), "TSP_SYSCLK");
+    clock_set_hz(sysclk, 200000000ULL);
+    qdev_connect_clock_in(DEVICE(&a->tsp), "sysclk", sysclk);
+
+    memory_region_init(&a->tsp.memory, OBJECT(&a->tsp), "tsp-memory",
+                       UINT64_MAX);
+    if (!object_property_set_link(OBJECT(&a->tsp), "memory",
+                                  OBJECT(&a->tsp.memory), &error_abort)) {
+        return false;
+    }
+
+    mr = &s->sram;
+    memory_region_init_alias(&a->tsp.sram_mr_alias, OBJECT(s), "tsp.sram.alias",
+                             mr, 0, memory_region_size(mr));
+
+    mr = &s->scu.iomem;
+    memory_region_init_alias(&a->tsp.scu_mr_alias, OBJECT(s), "tsp.scu.alias",
+                             mr, 0, memory_region_size(mr));
+    if (!qdev_realize(DEVICE(&a->tsp), NULL, &error_abort)) {
+        return false;
+    }
+
+    return true;
+}
+
 static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
 {
     int i;
+    MachineState *ms = MACHINE(qdev_get_machine());
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
     Aspeed27x0SoCState *a = ASPEED27X0_SOC(dev);
     AspeedSoCState *s = ASPEED_SOC(dev);
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
     AspeedINTCClass *ic = ASPEED_INTC_GET_CLASS(&a->intc[0]);
     AspeedINTCClass *icio = ASPEED_INTC_GET_CLASS(&a->intc[1]);
     g_autofree char *name = NULL;
+    MemoryRegion *mmio_alias;
+    MemoryRegion *mmio_mr;
     qemu_irq irq;
 
     /* Default boot region (SPI memory or ROMs) */
@@ -689,6 +791,26 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
                            qdev_get_gpio_in(DEVICE(&a->intc[0].orgates[0]), i));
     }
 
+    /*
+     * SDMC - SDRAM Memory Controller
+     * The SDMC controller is unlocked at SPL stage.
+     * At present, only supports to emulate booting
+     * start from u-boot stage. Set SDMC controller
+     * unlocked by default. It is a temporarily solution.
+     */
+    object_property_set_bool(OBJECT(&s->sdmc), "unlocked", true,
+                                 &error_abort);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->sdmc), errp)) {
+        return;
+    }
+    aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->sdmc), 0,
+                    sc->memmap[ASPEED_DEV_SDMC]);
+
+    /* RAM */
+    if (!aspeed_soc_ast2700_dram_init(dev, errp)) {
+        return;
+    }
+
     /* SRAM */
     name = g_strdup_printf("aspeed.sram.%d", CPU(&a->cpu[0])->cpu_index);
     if (!memory_region_init_ram(&s->sram, OBJECT(s), name, sc->sram_size,
@@ -707,6 +829,46 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
                                 sc->memmap[ASPEED_DEV_VBOOTROM], &s->vbootrom);
 
     /* SCU */
+    /*
+     * The SSP coprocessor uses two memory aliases (remap1 and remap2)
+     * to access shared memory regions in the PSP DRAM:
+     *
+     *   - remap1 maps PSP DRAM at 0x400000000 (size: 32MB) to SSP SDRAM
+     *     offset 0x2000000
+     *   - remap2 maps PSP DRAM at 0x42c000000 (size: 32MB) to SSP SDRAM
+     *     offset 0x0
+     *
+     * The TSP coprocessor uses one memory alias (remap) to access a shared
+     * region in the PSP DRAM:
+     *
+     *   - remap maps PSP DRAM at 0x42e000000 (size: 32MB) to TSP SDRAM
+     *     offset 0x0
+     *
+     * These mappings correspond to the default values of the SCU registers:
+     *
+     * This configuration enables shared memory communication between the PSP
+     * and coprocessors, with address translation controlled by the SCU.
+     */
+    if (mc->default_cpus > sc->num_cpus) {
+        memory_region_init_alias(&a->ssp.sdram_remap1_alias, OBJECT(a),
+                                 "ssp.sdram.remap1", s->memory,
+                                 0x400000000ULL, 32 * MiB);
+        memory_region_init_alias(&a->ssp.sdram_remap2_alias, OBJECT(a),
+                                 "ssp.sdram.remap2", s->memory,
+                                 0x42c000000ULL, 32 * MiB);
+        memory_region_init_alias(&a->tsp.sdram_remap_alias, OBJECT(a),
+                                 "tsp.sdram.remap", s->memory,
+                                 0x42e000000, 32 * MiB);
+        object_property_set_link(OBJECT(&s->scu), "ssp-sdram-remap1",
+                                 OBJECT(&a->ssp.sdram_remap1_alias),
+                                 &error_abort);
+        object_property_set_link(OBJECT(&s->scu), "ssp-sdram-remap2",
+                                 OBJECT(&a->ssp.sdram_remap2_alias),
+                                 &error_abort);
+        object_property_set_link(OBJECT(&s->scu), "tsp-sdram-remap",
+                                 OBJECT(&a->tsp.sdram_remap_alias),
+                                 &error_abort);
+    }
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->scu), errp)) {
         return;
     }
@@ -718,6 +880,38 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
     }
     aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->scuio), 0,
                     sc->memmap[ASPEED_DEV_SCUIO]);
+
+    /*
+     * Coprocessors must be realized after the DRAM, SRAM, and SCU regions.
+     *
+     * - DRAM: Coprocessors access shared memory through MemoryRegion aliases
+     *   that point into PSP's DRAM space. These aliases are mapped into the
+     *   coprocessors' SDRAM windows at specific offsets (e.g., 0x0 and
+     *   0x2000000), and configured according to SCU register defaults.
+     *   Therefore, DRAM must be fully initialized before coprocessors can
+     *   attach aliases to it.
+     *
+     * - SRAM: Used as shared memory between the PSP and coprocessors.
+     *   Coprocessors access this memory via alias regions mapped to
+     *   different physical addresses.
+     *
+     * - SCU: A single hardware block shared across all processors.
+     *   Coprocessors access SCU registers through alias mappings.
+     *   SCU must be initialized first to allow for consistent register
+     *   state and memory remap configuration.
+     *
+     * To ensure correctness, the device realization order is explicitly
+     * managed: coprocessors are initialized only after DRAM, SRAM, and SCU
+     * are ready.
+     */
+    if (mc->default_cpus > sc->num_cpus) {
+        if (!aspeed_soc_ast2700_ssp_realize(dev, errp)) {
+            return;
+        }
+        if (!aspeed_soc_ast2700_tsp_realize(dev, errp)) {
+            return;
+        }
+    }
 
     /* UART */
     if (!aspeed_soc_uart_realize(s, errp)) {
@@ -767,26 +961,6 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
                         sc->memmap[ASPEED_DEV_EHCI1 + i]);
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->ehci[i]), 0,
                            aspeed_soc_get_irq(s, ASPEED_DEV_EHCI1 + i));
-    }
-
-    /*
-     * SDMC - SDRAM Memory Controller
-     * The SDMC controller is unlocked at SPL stage.
-     * At present, only supports to emulate booting
-     * start from u-boot stage. Set SDMC controller
-     * unlocked by default. It is a temporarily solution.
-     */
-    object_property_set_bool(OBJECT(&s->sdmc), "unlocked", true,
-                                 &error_abort);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->sdmc), errp)) {
-        return;
-    }
-    aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->sdmc), 0,
-                    sc->memmap[ASPEED_DEV_SDMC]);
-
-    /* RAM */
-    if (!aspeed_soc_ast2700_dram_init(dev, errp)) {
-        return;
     }
 
     /* Net */
@@ -936,6 +1110,39 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->hace), 0,
                        aspeed_soc_get_irq(s, ASPEED_DEV_HACE));
 
+    /* PCIe */
+    for (i = 0; i < sc->pcie_num; i++) {
+        if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie_phy[i]), errp)) {
+            return;
+        }
+        aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->pcie_phy[i]), 0,
+                        sc->memmap[ASPEED_DEV_PCIE_PHY0 + i]);
+
+        object_property_set_int(OBJECT(&s->pcie[i]), "dram-base",
+                                sc->memmap[ASPEED_DEV_SDRAM],
+                                &error_abort);
+        object_property_set_link(OBJECT(&s->pcie[i]), "dram",
+                                 OBJECT(s->dram_mr), &error_abort);
+        if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie[i]), errp)) {
+            return;
+        }
+        aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->pcie[i]), 0,
+                        sc->memmap[ASPEED_DEV_PCIE0 + i]);
+        irq = aspeed_soc_get_irq(s, ASPEED_DEV_PCIE0 + i);
+        sysbus_connect_irq(SYS_BUS_DEVICE(&s->pcie[i].rc), 0, irq);
+
+        name = g_strdup_printf("aspeed.pcie-mmio.%d", i);
+        mmio_alias = g_new0(MemoryRegion, 1);
+        mmio_mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie[i].rc), 1);
+
+        memory_region_init_alias(mmio_alias, OBJECT(&s->pcie[i].rc), name,
+                                 mmio_mr, sc->memmap[ASPEED_DEV_PCIE_MMIO0 + i],
+                                 0x20000000);
+        memory_region_add_subregion(s->memory,
+                                    sc->memmap[ASPEED_DEV_PCIE_MMIO0 + i],
+                                    mmio_alias);
+    }
+
     aspeed_mmio_map_unimplemented(s, SYS_BUS_DEVICE(&s->dpmcu),
                                   "aspeed.dpmcu",
                                   sc->memmap[ASPEED_DEV_DPMCU],
@@ -974,6 +1181,7 @@ static void aspeed_soc_ast2700a0_class_init(ObjectClass *oc, const void *data)
     sc->valid_cpu_types = valid_cpu_types;
     sc->silicon_rev  = AST2700_A0_SILICON_REV;
     sc->sram_size    = 0x20000;
+    sc->pcie_num     = 0;
     sc->spis_num     = 3;
     sc->ehcis_num    = 2;
     sc->wdts_num     = 8;
@@ -1002,6 +1210,7 @@ static void aspeed_soc_ast2700a1_class_init(ObjectClass *oc, const void *data)
     sc->valid_cpu_types = valid_cpu_types;
     sc->silicon_rev  = AST2700_A1_SILICON_REV;
     sc->sram_size    = 0x20000;
+    sc->pcie_num     = 3;
     sc->spis_num     = 3;
     sc->ehcis_num    = 4;
     sc->wdts_num     = 8;

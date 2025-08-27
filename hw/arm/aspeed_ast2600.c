@@ -45,14 +45,17 @@ static const hwaddr aspeed_soc_ast2600_memmap[] = {
     [ASPEED_DEV_HACE]      = 0x1E6D0000,
     [ASPEED_DEV_SDMC]      = 0x1E6E0000,
     [ASPEED_DEV_SCU]       = 0x1E6E2000,
+    [ASPEED_DEV_GFX]       = 0x1E6E6000,
     [ASPEED_DEV_XDMA]      = 0x1E6E7000,
     [ASPEED_DEV_ADC]       = 0x1E6E9000,
     [ASPEED_DEV_DP]        = 0x1E6EB000,
+    [ASPEED_DEV_PCIE_PHY1] = 0x1E6ED200,
     [ASPEED_DEV_SBC]       = 0x1E6F2000,
     [ASPEED_DEV_EMMC_BC]   = 0x1E6f5000,
     [ASPEED_DEV_VIDEO]     = 0x1E700000,
     [ASPEED_DEV_SDHCI]     = 0x1E740000,
     [ASPEED_DEV_EMMC]      = 0x1E750000,
+    [ASPEED_DEV_PCIE0]     = 0x1E770000,
     [ASPEED_DEV_GPIO]      = 0x1E780000,
     [ASPEED_DEV_GPIO_1_8V] = 0x1E780800,
     [ASPEED_DEV_RTC]       = 0x1E781000,
@@ -79,6 +82,7 @@ static const hwaddr aspeed_soc_ast2600_memmap[] = {
     [ASPEED_DEV_FSI1]      = 0x1E79B000,
     [ASPEED_DEV_FSI2]      = 0x1E79B100,
     [ASPEED_DEV_I3C]       = 0x1E7A0000,
+    [ASPEED_DEV_PCIE_MMIO1] = 0x70000000,
     [ASPEED_DEV_SDRAM]     = 0x80000000,
 };
 
@@ -106,6 +110,7 @@ static const int aspeed_soc_ast2600_irqmap[] = {
     [ASPEED_DEV_SDMC]      = 0,
     [ASPEED_DEV_SCU]       = 12,
     [ASPEED_DEV_ADC]       = 78,
+    [ASPEED_DEV_GFX]       = 14,
     [ASPEED_DEV_XDMA]      = 6,
     [ASPEED_DEV_SDHCI]     = 43,
     [ASPEED_DEV_EHCI1]     = 5,
@@ -127,6 +132,7 @@ static const int aspeed_soc_ast2600_irqmap[] = {
     [ASPEED_DEV_LPC]       = 35,
     [ASPEED_DEV_IBT]       = 143,
     [ASPEED_DEV_I2C]       = 110,   /* 110 -> 125 */
+    [ASPEED_DEV_PCIE0]     = 168,
     [ASPEED_DEV_PECI]      = 38,
     [ASPEED_DEV_ETH1]      = 2,
     [ASPEED_DEV_ETH2]      = 3,
@@ -190,6 +196,10 @@ static void aspeed_soc_ast2600_init(Object *obj)
 
     snprintf(typename, sizeof(typename), "aspeed.i2c-%s", socname);
     object_initialize_child(obj, "i2c", &s->i2c, typename);
+
+    object_initialize_child(obj, "pcie-cfg", &s->pcie[0], TYPE_ASPEED_PCIE_CFG);
+    object_initialize_child(obj, "pcie-phy[*]", &s->pcie_phy[0],
+                            TYPE_ASPEED_PCIE_PHY);
 
     object_initialize_child(obj, "peci", &s->peci, TYPE_ASPEED_PECI);
 
@@ -256,12 +266,14 @@ static void aspeed_soc_ast2600_init(Object *obj)
 
     object_initialize_child(obj, "lpc", &s->lpc, TYPE_ASPEED_LPC);
 
+    object_initialize_child(obj, "ibt", &s->ibt, TYPE_ASPEED_IBT);
+
     snprintf(typename, sizeof(typename), "aspeed.hace-%s", socname);
     object_initialize_child(obj, "hace", &s->hace, typename);
 
     object_initialize_child(obj, "i3c", &s->i3c, TYPE_ASPEED_I3C);
 
-    object_initialize_child(obj, "sbc", &s->sbc, TYPE_ASPEED_SBC);
+    object_initialize_child(obj, "sbc", &s->sbc, TYPE_ASPEED_AST2600_SBC);
 
     object_initialize_child(obj, "iomem", &s->iomem, TYPE_UNIMPLEMENTED_DEVICE);
     object_initialize_child(obj, "video", &s->video, TYPE_UNIMPLEMENTED_DEVICE);
@@ -273,6 +285,10 @@ static void aspeed_soc_ast2600_init(Object *obj)
     for (i = 0; i < ASPEED_FSI_NUM; i++) {
         object_initialize_child(obj, "fsi[*]", &s->fsi[i], TYPE_ASPEED_APB2OPB);
     }
+
+    object_initialize_child(obj, "gfx", &s->gfx, TYPE_ASPEED_GFX);
+
+    object_initialize_child(obj, "pwm", &s->pwm, TYPE_ASPEED_PWM);
 }
 
 /*
@@ -292,7 +308,9 @@ static void aspeed_soc_ast2600_realize(DeviceState *dev, Error **errp)
     AspeedSoCState *s = ASPEED_SOC(dev);
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
     qemu_irq irq;
-    g_autofree char *sram_name = NULL;
+    g_autofree char *name = NULL;
+    MemoryRegion *mmio_alias;
+    MemoryRegion *mmio_mr;
 
     /* Default boot region (SPI memory or ROMs) */
     memory_region_init(&s->spi_boot_container, OBJECT(s),
@@ -362,8 +380,8 @@ static void aspeed_soc_ast2600_realize(DeviceState *dev, Error **errp)
     }
 
     /* SRAM */
-    sram_name = g_strdup_printf("aspeed.sram.%d", CPU(&a->cpu[0])->cpu_index);
-    if (!memory_region_init_ram(&s->sram, OBJECT(s), sram_name, sc->sram_size,
+    name = g_strdup_printf("aspeed.sram.%d", CPU(&a->cpu[0])->cpu_index);
+    if (!memory_region_init_ram(&s->sram, OBJECT(s), name, sc->sram_size,
                                 errp)) {
         return;
     }
@@ -437,6 +455,59 @@ static void aspeed_soc_ast2600_realize(DeviceState *dev, Error **errp)
                     sc->memmap[ASPEED_DEV_PECI]);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->peci), 0,
                        aspeed_soc_get_irq(s, ASPEED_DEV_PECI));
+
+    /*
+     * PCIe Root Complex (RC)
+     *
+     * H2X register space (single block 0x00-0xFF):
+     *   0x00-0x7F : shared by RC_L (PCIe0) and RC_H (PCIe1)
+     *   0x80-0xBF : RC_L only
+     *   0xC0-0xFF : RC_H only
+     *
+     * Model scope / limitations:
+     *   - Firmware supports RC_H only; this QEMU model does not support RC_L.
+     *   - RC_H uses PHY1 and the MMIO window [0x70000000, 0x80000000]
+     *     (aka MMIO1).
+     *
+     * Indexing convention (this model):
+     *   - Expose a single logical instance at index 0.
+     *   - pcie[0] -> hardware RC_H (PCIe1)
+     *   - phy[0]  -> hardware PHY1
+     *   - mmio.0 -> guest address range MMIO1: 0x70000000-0x80000000
+     *   - RC_L / PCIe0 is not created and mapped.
+     */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie_phy[0]), errp)) {
+        return;
+    }
+    aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->pcie_phy[0]), 0,
+                    sc->memmap[ASPEED_DEV_PCIE_PHY1]);
+
+    object_property_set_int(OBJECT(&s->pcie[0]), "dram-base",
+                            sc->memmap[ASPEED_DEV_SDRAM],
+                            &error_abort);
+    object_property_set_link(OBJECT(&s->pcie[0]), "dram", OBJECT(s->dram_mr),
+                             &error_abort);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie[0]), errp)) {
+        return;
+    }
+    aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->pcie[0]), 0,
+                    sc->memmap[ASPEED_DEV_PCIE0]);
+
+    irq = qdev_get_gpio_in(DEVICE(&a->a7mpcore),
+                           sc->irqmap[ASPEED_DEV_PCIE0]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->pcie[0].rc), 0, irq);
+
+    name = g_strdup_printf("aspeed.pcie-mmio.0");
+
+    mmio_alias = g_new0(MemoryRegion, 1);
+    mmio_mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie[0].rc), 1);
+
+    memory_region_init_alias(mmio_alias, OBJECT(&s->pcie[0].rc), name,
+                             mmio_mr, sc->memmap[ASPEED_DEV_PCIE_MMIO1],
+                             0x10000000);
+    memory_region_add_subregion(s->memory,
+                                sc->memmap[ASPEED_DEV_PCIE_MMIO1],
+                                mmio_alias);
 
     /* FMC, The number of CS is set at the board level */
     object_property_set_link(OBJECT(&s->fmc), "dram", OBJECT(s->dram_mr),
@@ -605,6 +676,16 @@ static void aspeed_soc_ast2600_realize(DeviceState *dev, Error **errp)
                        qdev_get_gpio_in(DEVICE(&a->a7mpcore),
                                 sc->irqmap[ASPEED_DEV_KCS] + aspeed_lpc_kcs_4));
 
+    /* iBT */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->ibt), errp)) {
+        return;
+    }
+    memory_region_add_subregion(&s->lpc.iomem,
+                   sc->memmap[ASPEED_DEV_IBT] - sc->memmap[ASPEED_DEV_LPC],
+                   &s->ibt.iomem);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->ibt), 0,
+                       aspeed_soc_get_irq(s, ASPEED_DEV_IBT));
+
     /* HACE */
     object_property_set_link(OBJECT(&s->hace), "dram", OBJECT(s->dram_mr),
                              &error_abort);
@@ -644,6 +725,22 @@ static void aspeed_soc_ast2600_realize(DeviceState *dev, Error **errp)
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->fsi[i]), 0,
                            aspeed_soc_get_irq(s, ASPEED_DEV_FSI1 + i));
     }
+
+    /* GFX */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->gfx), errp)) {
+        return;
+    }
+    aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->gfx), 0, sc->memmap[ASPEED_DEV_GFX]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->gfx), 0,
+                       aspeed_soc_get_irq(s, ASPEED_DEV_GFX));
+
+    /* PWM */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pwm), errp)) {
+        return;
+    }
+    aspeed_mmio_map(s, SYS_BUS_DEVICE(&s->pwm), 0, sc->memmap[ASPEED_DEV_PWM]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->pwm), 0,
+                       aspeed_soc_get_irq(s, ASPEED_DEV_PWM));
 }
 
 static bool aspeed_soc_ast2600_boot_from_emmc(AspeedSoCState *s)
