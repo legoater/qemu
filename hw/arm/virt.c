@@ -2917,7 +2917,7 @@ static void virt_memory_pre_plug(HotplugHandler *hotplug_dev, DeviceState *dev,
     const MachineState *ms = MACHINE(hotplug_dev);
     const bool is_nvdimm = object_dynamic_cast(OBJECT(dev), TYPE_NVDIMM);
 
-    if (!vms->acpi_dev) {
+    if (!vms->acpi_dev && !(is_nvdimm && !dev->hotplugged)) {
         error_setg(errp,
                    "memory hotplug is not enabled: missing acpi-ged device");
         return;
@@ -2949,8 +2949,10 @@ static void virt_memory_plug(HotplugHandler *hotplug_dev,
         nvdimm_plug(ms->nvdimms_state);
     }
 
-    hotplug_handler_plug(HOTPLUG_HANDLER(vms->acpi_dev),
-                         dev, &error_abort);
+    if (vms->acpi_dev) {
+        hotplug_handler_plug(HOTPLUG_HANDLER(vms->acpi_dev),
+                             dev, &error_abort);
+    }
 }
 
 static void virt_machine_device_pre_plug_cb(HotplugHandler *hotplug_dev,
@@ -3455,10 +3457,17 @@ static void machvirt_machine_init(void)
 }
 type_init(machvirt_machine_init);
 
-static void virt_machine_10_1_options(MachineClass *mc)
+static void virt_machine_10_2_options(MachineClass *mc)
 {
 }
-DEFINE_VIRT_MACHINE_AS_LATEST(10, 1)
+DEFINE_VIRT_MACHINE_AS_LATEST(10, 2)
+
+static void virt_machine_10_1_options(MachineClass *mc)
+{
+    virt_machine_10_2_options(mc);
+    compat_props_add(mc->compat_props, hw_compat_10_1, hw_compat_10_1_len);
+}
+DEFINE_VIRT_MACHINE(10, 1)
 
 static void virt_machine_10_0_options(MachineClass *mc)
 {
