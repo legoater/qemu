@@ -27,6 +27,7 @@ struct VFIOIOMMUFDContainer {
 
     IOMMUFDBackend *be;
     uint32_t ioas_id;
+    uint64_t dirty_tracking_flags;
     QLIST_HEAD(, VFIOIOASHwpt) hwpt_list;
 };
 
