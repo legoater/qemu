@@ -7885,8 +7885,7 @@ void cpu_x86_cpuid(CPUX86State *env, uint32_t index, uint32_t count,
              * count, but Intel needs maximum number of addressable IDs for
              * logical processors per package.
              */
-            if (cpu->vendor_cpuid_only_v2 &&
-                (IS_INTEL_CPU(env) || IS_ZHAOXIN_CPU(env))) {
+            if ((IS_INTEL_CPU(env) || IS_ZHAOXIN_CPU(env))) {
                 num = 1 << apicid_pkg_offset(topo_info);
             } else {
                 num = threads_per_pkg;
@@ -8947,9 +8946,6 @@ void x86_cpu_expand_features(X86CPU *cpu, Error **errp)
 
     /* PDCM is fixed1 bit for TDX */
     if (!cpu->enable_pmu && !is_tdx_vm()) {
-        mark_unavailable_features(cpu, FEAT_1_ECX,
-                                  env->user_features[FEAT_1_ECX] & CPUID_EXT_PDCM,
-                                  "This feature is not available due to PMU being disabled");
         env->features[FEAT_1_ECX] &= ~CPUID_EXT_PDCM;
     }
 

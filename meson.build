@@ -709,11 +709,7 @@ hardening_flags = [
 #
 # NB: Clang 17 is broken and SEGVs
 # https://github.com/llvm/llvm-project/issues/75168
-#
-# NB2: This clashes with the "retguard" extension of OpenBSD's Clang
-# https://gitlab.com/qemu-project/qemu/-/issues/2278
-if host_os != 'openbsd' and \
-   cc.compiles('extern struct { void (*cb)(void); } s; void f(void) { s.cb(); }',
+if cc.compiles('extern struct { void (*cb)(void); } s; void f(void) { s.cb(); }',
                name: '-fzero-call-used-regs=used-gpr',
                args: ['-O2', '-fzero-call-used-regs=used-gpr'])
     hardening_flags += '-fzero-call-used-regs=used-gpr'
@@ -1586,9 +1582,11 @@ if not get_option('brlapi').auto() or have_system
   brlapi = cc.find_library('brlapi', has_headers: ['brlapi.h'],
                          required: get_option('brlapi'))
   if brlapi.found() and not cc.links('''
-     #include <brlapi.h>
-     #include <stddef.h>
-     int main(void) { return brlapi__openConnection (NULL, NULL, NULL); }''', dependencies: brlapi)
+    #include <brlapi.h>
+    #include <stddef.h>
+    int main(void) {
+      return brlapi__openConnection(NULL, NULL, NULL) == BRLAPI_INVALID_FILE_DESCRIPTOR;
+    }''', dependencies: brlapi)
     brlapi = not_found
     if get_option('brlapi').enabled()
       error('could not link brlapi')
@@ -1809,6 +1807,7 @@ endif
 
 gnutls = not_found
 gnutls_crypto = not_found
+gnutls_bug1717_workaround = false
 if get_option('gnutls').enabled() or (get_option('gnutls').auto() and have_system)
   # For general TLS support our min gnutls matches
   # that implied by our platform support matrix
@@ -1834,6 +1833,12 @@ if get_option('gnutls').enabled() or (get_option('gnutls').auto() and have_syste
                         method: 'pkg-config',
                         required: get_option('gnutls'))
   endif
+
+  #if gnutls.found() and not get_option('gnutls-bug1717-workaround').disabled()
+    # XXX: when bug 1717 is resolved, add logic to probe for
+    # the GNUTLS fixed version number to handle the 'auto' case
+  #  gnutls_bug1717_workaround = true
+  #endif
 endif
 
 # We prefer use of gnutls for crypto, unless the options
@@ -2585,6 +2590,7 @@ config_host_data.set('CONFIG_KEYUTILS', keyutils.found())
 config_host_data.set('CONFIG_GETTID', has_gettid)
 config_host_data.set('CONFIG_GNUTLS', gnutls.found())
 config_host_data.set('CONFIG_GNUTLS_CRYPTO', gnutls_crypto.found())
+config_host_data.set('CONFIG_GNUTLS_BUG1717_WORKAROUND', gnutls_bug1717_workaround)
 config_host_data.set('CONFIG_TASN1', tasn1.found())
 config_host_data.set('CONFIG_GCRYPT', gcrypt.found())
 config_host_data.set('CONFIG_NETTLE', nettle.found())
@@ -3866,7 +3872,8 @@ if have_block
 endif
 
 common_ss.add(files('cpu-common.c'))
-specific_ss.add(files('cpu-target.c'))
+user_ss.add(files('cpu-target.c'))
+system_ss.add(files('cpu-target.c'))
 
 subdir('system')
 
@@ -3888,7 +3895,7 @@ if get_option('b_lto')
   pagevary = declare_dependency(link_with: pagevary)
 endif
 common_ss.add(pagevary)
-specific_ss.add(files('page-target.c', 'page-vary-target.c'))
+specific_ss.add(files('page-vary-target.c'))
 
 common_ss.add(files('target-info.c'))
 specific_ss.add(files('target-info-stub.c'))
@@ -4317,7 +4324,11 @@ foreach target : target_dirs
     )
     if 'CONFIG_LINUX_USER' in config_target
       dir = base_dir / abi
-      arch_srcs += files(dir / 'signal.c', dir / 'cpu_loop.c')
+      arch_srcs += files(
+        dir / 'cpu_loop.c',
+        dir / 'elfload.c',
+        dir / 'signal.c',
+      )
       if config_target.has_key('TARGET_SYSTBL_ABI')
         arch_srcs += \
           syscall_nr_generators[abi].process(base_dir / abi / config_target['TARGET_SYSTBL'],
@@ -4869,6 +4880,7 @@ summary_info += {'TLS priority':      get_option('tls_priority')}
 summary_info += {'GNUTLS support':    gnutls}
 if gnutls.found()
   summary_info += {'  GNUTLS crypto':   gnutls_crypto.found()}
+  summary_info += {'  GNUTLS bug 1717 workaround': gnutls_bug1717_workaround }
 endif
 summary_info += {'libgcrypt':         gcrypt}
 summary_info += {'nettle':            nettle}

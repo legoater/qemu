@@ -49,7 +49,7 @@ static void svm_save_seg(CPUX86State *env, int mmu_idx, hwaddr addr,
 static inline void svm_canonicalization(CPUX86State *env, target_ulong *seg_base)
 {
     uint16_t shift_amt = 64 - cpu_x86_virtual_addr_width(env);
-    *seg_base = ((((long) *seg_base) << shift_amt) >> shift_amt);
+    *seg_base = (((int64_t) *seg_base) << shift_amt) >> shift_amt;
 }
 
 static void svm_load_seg(CPUX86State *env, int mmu_idx, hwaddr addr,
@@ -403,7 +403,7 @@ void helper_vmrun(CPUX86State *env, int aflag, int next_eip_addend)
     env->hflags2 |= HF2_GIF_MASK;
 
     if (ctl_has_irq(env)) {
-        cs->interrupt_request |= CPU_INTERRUPT_VIRQ;
+        cpu_set_interrupt(cs, CPU_INTERRUPT_VIRQ);
     }
 
     if (virtual_gif_set(env)) {

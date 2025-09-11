@@ -571,6 +571,14 @@ The ``-singlestep`` option has been given a name that better reflects
 what it actually does. For both linux-user and bsd-user, use the
 ``-one-insn-per-tb`` option instead.
 
+``-p`` (removed in 10.2)
+''''''''''''''''''''''''
+
+The ``-p`` option pretends to control the host page size.  However,
+it is not possible to change the host page size; we stopped trying
+to do anything with the option except print a warning from 9.0,
+and now the option is removed entirely.
+
 
 QEMU Machine Protocol (QMP) commands
 ------------------------------------
@@ -722,8 +730,8 @@ Use ``multifd-channels`` instead.
 
 Use ``multifd-compression`` instead.
 
-Incorrectly typed ``device_add`` arguments (since 9.2)
-''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Incorrectly typed ``device_add`` arguments (removed in 9.2)
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 Due to shortcomings in the internal implementation of ``device_add``,
 QEMU used to incorrectly accept certain invalid arguments. Any object
@@ -1099,6 +1107,11 @@ were added for little endian CPUs. Big endian support was never tested
 and likely never worked. Starting with QEMU v10.1, the machines are now
 only available as little-endian machines.
 
+Mips ``mipssim`` machine (removed in 10.2)
+''''''''''''''''''''''''''''''''''''''''''
+
+Linux dropped support for this virtual machine type in kernel v3.7, and
+there was also no binary available online to use with that board.
 
 linux-user mode CPUs
 --------------------
@@ -1177,6 +1190,11 @@ by using ``-machine graphics=off``.
 ''''''''''''''''''''''''''''''''''''''''''''''''''
 
 The 'pvrdma' device and the whole RDMA subsystem have been removed.
+
+``-device sd-card,spec_version=1`` (since 10.2)
+'''''''''''''''''''''''''''''''''''''''''''''''
+
+SD physical layer specification v2.00 supersedes the v1.10 one.
 
 Related binaries
 ----------------
@@ -1261,6 +1279,31 @@ The VXHS code did not compile since v2.12.0. It was removed in 5.1.
 The corresponding upstream server project is no longer maintained.
 Users are recommended to switch to an alternative distributed block
 device driver such as RBD.
+
+VFIO devices
+------------
+
+``-device vfio-calxeda-xgmac`` (since 10.2)
+'''''''''''''''''''''''''''''''''''''''''''
+The vfio-calxeda-xgmac device allows to assign a host Calxeda Highbank
+10Gb XGMAC Ethernet controller device ("calxeda,hb-xgmac" compatibility
+string) to a guest. Calxeda HW has been ewasted now and there is no point
+keeping that device.
+
+``-device vfio-amd-xgbe`` (since 10.2)
+''''''''''''''''''''''''''''''''''''''
+The vfio-amd-xgbe device allows to assign a host AMD 10GbE controller
+to a guest ("amd,xgbe-seattle-v1a" compatibility string). AMD "Seattle"
+is not supported anymore and there is no point keeping that device.
+
+``-device vfio-platform`` (since 10.2)
+''''''''''''''''''''''''''''''''''''''
+The vfio-platform device allows to assign a host platform device
+to a guest in a generic manner. Integrating a new device into
+the vfio-platform infrastructure requires some adaptation at
+both kernel and qemu level. No such attempt has been done for years
+and the conclusion is that vfio-platform has not got any traction.
+PCIe passthrough shall be the mainline solution.
 
 Tools
 -----
