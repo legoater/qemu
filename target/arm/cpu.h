@@ -337,10 +337,10 @@ typedef struct CPUArchState {
             };
             uint64_t sctlr_el[4];
         };
+        uint64_t sctlr2_el[4]; /* Extension to System control register. */
         uint64_t vsctlr; /* Virtualization System control register. */
         uint64_t cpacr_el1; /* Architectural feature access control register */
         uint64_t cptr_el[4];  /* ARMv8 feature trap registers */
-        uint32_t c1_xscaleauxcr; /* XScale auxiliary control register.  */
         uint64_t sder; /* Secure debug enable register. */
         uint32_t nsacr; /* Non-secure access control register. */
         union { /* MMU translation table base 0. */
@@ -365,6 +365,7 @@ typedef struct CPUArchState {
         uint64_t vsttbr_el2; /* Secure Virtualization Translation Table. */
         /* MMU translation table base control. */
         uint64_t tcr_el[4];
+        uint64_t tcr2_el[3];
         uint64_t vtcr_el2; /* Virtualization Translation Control.  */
         uint64_t vstcr_el2; /* Secure Virtualization Translation Control. */
         uint32_t c2_data; /* MPU data cacheable bits.  */
@@ -511,7 +512,6 @@ typedef struct CPUArchState {
         uint64_t cntvoff_el2; /* Counter Virtual Offset register */
         uint64_t cntpoff_el2; /* Counter Physical Offset register */
         ARMGenericTimer c14_timer[NUM_GTIMERS];
-        uint32_t c15_cpar; /* XScale Coprocessor Access Register */
         uint32_t c15_ticonfig; /* TI925T configuration byte.  */
         uint32_t c15_i_max; /* Maximum D-cache dirty line index.  */
         uint32_t c15_i_min; /* Minimum D-cache dirty line index.  */
@@ -696,14 +696,6 @@ typedef struct CPUArchState {
      * semantics of these fields are baked into the migration format.
      */
     uint64_t exclusive_high;
-
-    /* iwMMXt coprocessor state.  */
-    struct {
-        uint64_t regs[16];
-        uint64_t val;
-
-        uint32_t cregs[16];
-    } iwmmxt;
 
     struct {
         ARMPACKey apia;
@@ -933,6 +925,7 @@ struct ArchCPU {
 
     DynamicGDBFeatureInfo dyn_sysreg_feature;
     DynamicGDBFeatureInfo dyn_svereg_feature;
+    DynamicGDBFeatureInfo dyn_smereg_feature;
     DynamicGDBFeatureInfo dyn_m_systemreg_feature;
     DynamicGDBFeatureInfo dyn_m_secextreg_feature;
 
@@ -1420,6 +1413,19 @@ void pmu_init(ARMCPU *cpu);
 #define SCTLR_SPINTMASK (1ULL << 62) /* FEAT_NMI */
 #define SCTLR_TIDCP   (1ULL << 63) /* FEAT_TIDCP1 */
 
+#define SCTLR2_EMEC (1ULL << 1) /* FEAT_MEC */
+#define SCTLR2_NMEA (1ULL << 2) /* FEAT_DoubleFault2 */
+#define SCTLR2_ENADERR (1ULL << 3) /* FEAT_ADERR */
+#define SCTLR2_ENANERR (1ULL << 4) /* FEAT_ANERR */
+#define SCTLR2_EASE (1ULL << 5) /* FEAT_DoubleFault2 */
+#define SCTLR2_ENIDCP128 (1ULL << 6) /* FEAT_SYSREG128 */
+#define SCTLR2_ENPACM (1ULL << 7) /* FEAT_PAuth_LR */
+#define SCTLR2_ENPACM0 (1ULL << 8) /* FEAT_PAuth_LR */
+#define SCTLR2_CPTA (1ULL << 9) /* FEAT_CPA2 */
+#define SCTLR2_CPTA0 (1ULL << 10) /* FEAT_CPA2 */
+#define SCTLR2_CPTM (1ULL << 11) /* FEAT_CPA2 */
+#define SCTLR2_CPTM0 (1ULL << 12) /* FEAT_CAP2 */
+
 #define CPSR_M (0x1fU)
 #define CPSR_T (1U << 5)
 #define CPSR_F (1U << 6)
@@ -1712,6 +1718,8 @@ static inline void xpsr_write(CPUARMState *env, uint32_t val, uint32_t mask)
 #define SCR_HXEN              (1ULL << 38)
 #define SCR_TRNDR             (1ULL << 40)
 #define SCR_ENTP2             (1ULL << 41)
+#define SCR_TCR2EN            (1ULL << 43)
+#define SCR_SCTLR2EN          (1ULL << 44)
 #define SCR_GPF               (1ULL << 48)
 #define SCR_NSE               (1ULL << 62)
 
@@ -1847,16 +1855,6 @@ enum arm_cpu_mode {
 
 /* QEMU-internal value meaning "FPSCR, but we care only about NZCV" */
 #define QEMU_VFP_FPSCR_NZCV 0xffff
-
-/* iwMMXt coprocessor control registers.  */
-#define ARM_IWMMXT_wCID  0
-#define ARM_IWMMXT_wCon  1
-#define ARM_IWMMXT_wCSSF 2
-#define ARM_IWMMXT_wCASF 3
-#define ARM_IWMMXT_wCGR0 8
-#define ARM_IWMMXT_wCGR1 9
-#define ARM_IWMMXT_wCGR2 10
-#define ARM_IWMMXT_wCGR3 11
 
 /* V7M CCR bits */
 FIELD(V7M_CCR, NONBASETHRDENA, 0, 1)
@@ -2427,8 +2425,6 @@ QEMU_BUILD_BUG_ON(ARRAY_SIZE(((ARMCPU *)0)->ccsidr) <= R_V7M_CSSELR_INDEX_MASK);
  */
 enum arm_features {
     ARM_FEATURE_AUXCR,  /* ARM1026 Auxiliary control register.  */
-    ARM_FEATURE_XSCALE, /* Intel XScale extensions.  */
-    ARM_FEATURE_IWMMXT, /* Intel iwMMXt extension.  */
     ARM_FEATURE_V6,
     ARM_FEATURE_V6K,
     ARM_FEATURE_V7,
@@ -3008,13 +3004,6 @@ FIELD(TBFLAG_AM32, THUMB, 23, 1)         /* Not cached. */
  */
 FIELD(TBFLAG_A32, VECLEN, 0, 3)         /* Not cached. */
 FIELD(TBFLAG_A32, VECSTRIDE, 3, 2)     /* Not cached. */
-/*
- * We store the bottom two bits of the CPAR as TB flags and handle
- * checks on the other bits at runtime. This shares the same bits as
- * VECSTRIDE, which is OK as no XScale CPU has VFP.
- * Not cached, because VECLEN+VECSTRIDE are not cached.
- */
-FIELD(TBFLAG_A32, XSCALE_CPAR, 5, 2)
 FIELD(TBFLAG_A32, VFPEN, 7, 1)         /* Partially cached, minus FPEXC. */
 FIELD(TBFLAG_A32, SCTLR__B, 8, 1)      /* Cannot overlap with SCTLR_B */
 FIELD(TBFLAG_A32, HSTR_ACTIVE, 9, 1)

@@ -741,6 +741,12 @@ static void scr_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
         if (cpu_isar_feature(aa64_ecv, cpu)) {
             valid_mask |= SCR_ECVEN;
         }
+        if (cpu_isar_feature(aa64_tcr2, cpu)) {
+            valid_mask |= SCR_TCR2EN;
+        }
+        if (cpu_isar_feature(aa64_sctlr2, cpu)) {
+            valid_mask |= SCR_SCTLR2EN;
+        }
     } else {
         valid_mask &= ~(SCR_RW | SCR_ST);
         if (cpu_isar_feature(aa32_ras, cpu)) {
@@ -833,40 +839,40 @@ static uint64_t isr_read(CPUARMState *env, const ARMCPRegInfo *ri)
     uint64_t ret = 0;
 
     if (hcr_el2 & HCR_IMO) {
-        if (cs->interrupt_request & CPU_INTERRUPT_VIRQ) {
+        if (cpu_test_interrupt(cs, CPU_INTERRUPT_VIRQ)) {
             ret |= CPSR_I;
         }
-        if (cs->interrupt_request & CPU_INTERRUPT_VINMI) {
+        if (cpu_test_interrupt(cs, CPU_INTERRUPT_VINMI)) {
             ret |= ISR_IS;
             ret |= CPSR_I;
         }
     } else {
-        if (cs->interrupt_request & CPU_INTERRUPT_HARD) {
+        if (cpu_test_interrupt(cs, CPU_INTERRUPT_HARD)) {
             ret |= CPSR_I;
         }
 
-        if (cs->interrupt_request & CPU_INTERRUPT_NMI) {
+        if (cpu_test_interrupt(cs, CPU_INTERRUPT_NMI)) {
             ret |= ISR_IS;
             ret |= CPSR_I;
         }
     }
 
     if (hcr_el2 & HCR_FMO) {
-        if (cs->interrupt_request & CPU_INTERRUPT_VFIQ) {
+        if (cpu_test_interrupt(cs, CPU_INTERRUPT_VFIQ)) {
             ret |= CPSR_F;
         }
-        if (cs->interrupt_request & CPU_INTERRUPT_VFNMI) {
+        if (cpu_test_interrupt(cs, CPU_INTERRUPT_VFNMI)) {
             ret |= ISR_FS;
             ret |= CPSR_F;
         }
     } else {
-        if (cs->interrupt_request & CPU_INTERRUPT_FIQ) {
+        if (cpu_test_interrupt(cs, CPU_INTERRUPT_FIQ)) {
             ret |= CPSR_F;
         }
     }
 
     if (hcr_el2 & HCR_AMO) {
-        if (cs->interrupt_request & CPU_INTERRUPT_VSERR) {
+        if (cpu_test_interrupt(cs, CPU_INTERRUPT_VSERR)) {
             ret |= CPSR_A;
         }
     }
@@ -2862,8 +2868,12 @@ static void omap_threadid_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void omap_wfi_write(CPUARMState *env, const ARMCPRegInfo *ri,
                            uint64_t value)
 {
+#ifdef CONFIG_USER_ONLY
+    g_assert_not_reached();
+#else
     /* Wait-for-interrupt (deprecated) */
     cpu_interrupt(env_cpu(env), CPU_INTERRUPT_HALT);
+#endif
 }
 
 static void omap_cachemaint_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -2915,39 +2925,6 @@ static const ARMCPRegInfo omap_cp_reginfo[] = {
     { .name = "C9", .cp = 15, .crn = 9,
       .crm = CP_ANY, .opc1 = CP_ANY, .opc2 = CP_ANY, .access = PL1_RW,
       .type = ARM_CP_CONST | ARM_CP_OVERRIDE, .resetvalue = 0 },
-};
-
-static void xscale_cpar_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                              uint64_t value)
-{
-    env->cp15.c15_cpar = value & 0x3fff;
-}
-
-static const ARMCPRegInfo xscale_cp_reginfo[] = {
-    { .name = "XSCALE_CPAR",
-      .cp = 15, .crn = 15, .crm = 1, .opc1 = 0, .opc2 = 0, .access = PL1_RW,
-      .fieldoffset = offsetof(CPUARMState, cp15.c15_cpar), .resetvalue = 0,
-      .writefn = xscale_cpar_write, },
-    { .name = "XSCALE_AUXCR",
-      .cp = 15, .crn = 1, .crm = 0, .opc1 = 0, .opc2 = 1, .access = PL1_RW,
-      .fieldoffset = offsetof(CPUARMState, cp15.c1_xscaleauxcr),
-      .resetvalue = 0, },
-    /*
-     * XScale specific cache-lockdown: since we have no cache we NOP these
-     * and hope the guest does not really rely on cache behaviour.
-     */
-    { .name = "XSCALE_LOCK_ICACHE_LINE",
-      .cp = 15, .opc1 = 0, .crn = 9, .crm = 1, .opc2 = 0,
-      .access = PL1_W, .type = ARM_CP_NOP },
-    { .name = "XSCALE_UNLOCK_ICACHE",
-      .cp = 15, .opc1 = 0, .crn = 9, .crm = 1, .opc2 = 1,
-      .access = PL1_W, .type = ARM_CP_NOP },
-    { .name = "XSCALE_DCACHE_LOCK",
-      .cp = 15, .opc1 = 0, .crn = 9, .crm = 2, .opc2 = 0,
-      .access = PL1_RW, .type = ARM_CP_NOP },
-    { .name = "XSCALE_UNLOCK_DCACHE",
-      .cp = 15, .opc1 = 0, .crn = 9, .crm = 2, .opc2 = 1,
-      .access = PL1_W, .type = ARM_CP_NOP },
 };
 
 static const ARMCPRegInfo dummy_c15_cp_reginfo[] = {
@@ -3340,16 +3317,6 @@ static void sctlr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 
     /* This may enable/disable the MMU, so do a TLB flush.  */
     tlb_flush(CPU(cpu));
-
-    if (tcg_enabled() && ri->type & ARM_CP_SUPPRESS_TB_END) {
-        /*
-         * Normally we would always end the TB on an SCTLR write; see the
-         * comment in ARMCPRegInfo sctlr initialization below for why Xscale
-         * is special.  Setting ARM_CP_SUPPRESS_TB_END also stops the rebuild
-         * of hflags from the translator, so do it here.
-         */
-        arm_rebuild_hflags(env);
-    }
 }
 
 static void mdcr_el3_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -3907,22 +3874,23 @@ static void hcrx_write(CPUARMState *env, const ARMCPRegInfo *ri,
     ARMCPU *cpu = env_archcpu(env);
     uint64_t valid_mask = 0;
 
-    /* FEAT_MOPS adds MSCEn and MCE2 */
     if (cpu_isar_feature(aa64_mops, cpu)) {
         valid_mask |= HCRX_MSCEN | HCRX_MCE2;
     }
-
-    /* FEAT_NMI adds TALLINT, VINMI and VFNMI */
     if (cpu_isar_feature(aa64_nmi, cpu)) {
         valid_mask |= HCRX_TALLINT | HCRX_VINMI | HCRX_VFNMI;
     }
-    /* FEAT_CMOW adds CMOW */
     if (cpu_isar_feature(aa64_cmow, cpu)) {
         valid_mask |= HCRX_CMOW;
     }
-    /* FEAT_XS adds FGTnXS, FnXS */
     if (cpu_isar_feature(aa64_xs, cpu)) {
         valid_mask |= HCRX_FGTNXS | HCRX_FNXS;
+    }
+    if (cpu_isar_feature(aa64_tcr2, cpu)) {
+        valid_mask |= HCRX_TCR2EN;
+    }
+    if (cpu_isar_feature(aa64_sctlr2, cpu)) {
+        valid_mask |= HCRX_SCTLR2EN;
     }
 
     /* Clear RES0 bits.  */
@@ -3981,10 +3949,18 @@ uint64_t arm_hcrx_el2_eff(CPUARMState *env)
      * This may need to be revisited for future bits.
      */
     if (!arm_is_el2_enabled(env)) {
+        ARMCPU *cpu = env_archcpu(env);
         uint64_t hcrx = 0;
-        if (cpu_isar_feature(aa64_mops, env_archcpu(env))) {
-            /* MSCEn behaves as 1 if EL2 is not enabled */
+
+        /* Bits which whose effective value is 1 if el2 not enabled. */
+        if (cpu_isar_feature(aa64_mops, cpu)) {
             hcrx |= HCRX_MSCEN;
+        }
+        if (cpu_isar_feature(aa64_tcr2, cpu)) {
+            hcrx |= HCRX_TCR2EN;
+        }
+        if (cpu_isar_feature(aa64_sctlr2, cpu)) {
+            hcrx |= HCRX_SCTLR2EN;
         }
         return hcrx;
     }
@@ -4513,6 +4489,8 @@ static void define_arm_vh_e2h_redirects_aliases(ARMCPU *cpu)
     static const struct E2HAlias aliases[] = {
         { K(3, 0,  1, 0, 0), K(3, 4,  1, 0, 0), K(3, 5, 1, 0, 0),
           "SCTLR", "SCTLR_EL2", "SCTLR_EL12" },
+        { K(3, 0,  1, 0, 3), K(3, 4,  1, 0, 3), K(3, 5, 1, 0, 3),
+          "SCTLR2_EL1", "SCTLR2_EL2", "SCTLR2_EL12", isar_feature_aa64_sctlr2 },
         { K(3, 0,  1, 0, 2), K(3, 4,  1, 1, 2), K(3, 5, 1, 0, 2),
           "CPACR", "CPTR_EL2", "CPACR_EL12" },
         { K(3, 0,  2, 0, 0), K(3, 4,  2, 0, 0), K(3, 5, 2, 0, 0),
@@ -4521,6 +4499,8 @@ static void define_arm_vh_e2h_redirects_aliases(ARMCPU *cpu)
           "TTBR1_EL1", "TTBR1_EL2", "TTBR1_EL12" },
         { K(3, 0,  2, 0, 2), K(3, 4,  2, 0, 2), K(3, 5, 2, 0, 2),
           "TCR_EL1", "TCR_EL2", "TCR_EL12" },
+        { K(3, 0,  2, 0, 3), K(3, 4,  2, 0, 3), K(3, 5, 2, 0, 3),
+          "TCR2_EL1", "TCR2_EL2", "TCR2_EL12", isar_feature_aa64_tcr2 },
         { K(3, 0,  4, 0, 0), K(3, 4,  4, 0, 0), K(3, 5, 4, 0, 0),
           "SPSR_EL1", "SPSR_EL2", "SPSR_EL12" },
         { K(3, 0,  4, 0, 1), K(3, 4,  4, 0, 1), K(3, 5, 4, 0, 1),
@@ -4544,11 +4524,6 @@ static void define_arm_vh_e2h_redirects_aliases(ARMCPU *cpu)
         { K(3, 0, 14, 1, 0), K(3, 4, 14, 1, 0), K(3, 5, 14, 1, 0),
           "CNTKCTL", "CNTHCTL_EL2", "CNTKCTL_EL12" },
 
-        /*
-         * Note that redirection of ZCR is mentioned in the description
-         * of ZCR_EL2, and aliasing in the description of ZCR_EL1, but
-         * not in the summary table.
-         */
         { K(3, 0,  1, 2, 0), K(3, 4,  1, 2, 0), K(3, 5, 1, 2, 0),
           "ZCR_EL1", "ZCR_EL2", "ZCR_EL12", isar_feature_aa64_sve },
         { K(3, 0,  1, 2, 6), K(3, 4,  1, 2, 6), K(3, 5, 1, 2, 6),
@@ -5994,6 +5969,133 @@ static const ARMCPRegInfo actlr2_hactlr2_reginfo[] = {
       .resetvalue = 0 },
 };
 
+static CPAccessResult sctlr2_el2_access(CPUARMState *env,
+                                        const ARMCPRegInfo *ri,
+                                        bool isread)
+{
+    if (arm_current_el(env) < 3
+        && arm_feature(env, ARM_FEATURE_EL3)
+        && !(env->cp15.scr_el3 & SCR_SCTLR2EN)) {
+        return CP_ACCESS_TRAP_EL3;
+    }
+    return CP_ACCESS_OK;
+}
+
+static CPAccessResult sctlr2_el1_access(CPUARMState *env,
+                                        const ARMCPRegInfo *ri,
+                                        bool isread)
+{
+    CPAccessResult ret = access_tvm_trvm(env, ri, isread);
+    if (ret != CP_ACCESS_OK) {
+        return ret;
+    }
+    if (arm_current_el(env) < 2 && !(arm_hcrx_el2_eff(env) & HCRX_SCTLR2EN)) {
+        return CP_ACCESS_TRAP_EL2;
+    }
+    return sctlr2_el2_access(env, ri, isread);
+}
+
+static void sctlr2_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                             uint64_t value)
+{
+    uint64_t valid_mask = 0;
+
+    value &= valid_mask;
+    raw_write(env, ri, value);
+}
+
+static void sctlr2_el2_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                             uint64_t value)
+{
+    uint64_t valid_mask = 0;
+
+    value &= valid_mask;
+    raw_write(env, ri, value);
+}
+
+static void sctlr2_el3_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                             uint64_t value)
+{
+    uint64_t valid_mask = 0;
+
+    value &= valid_mask;
+    raw_write(env, ri, value);
+}
+
+static const ARMCPRegInfo sctlr2_reginfo[] = {
+    { .name = "SCTLR2_EL1", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 0, .opc2 = 3, .crn = 1, .crm = 0,
+      .access = PL1_RW, .accessfn = sctlr2_el1_access,
+      .writefn = sctlr2_el1_write, .fgt = FGT_SCTLR_EL1,
+      .nv2_redirect_offset = 0x278 | NV2_REDIR_NV1,
+      .fieldoffset = offsetof(CPUARMState, cp15.sctlr2_el[1]) },
+    { .name = "SCTLR2_EL2", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 4, .opc2 = 3, .crn = 1, .crm = 0,
+      .access = PL2_RW, .accessfn = sctlr2_el2_access,
+      .writefn = sctlr2_el2_write,
+      .fieldoffset = offsetof(CPUARMState, cp15.sctlr2_el[2]) },
+    { .name = "SCTLR2_EL3", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .opc2 = 3, .crn = 1, .crm = 0,
+      .access = PL3_RW, .writefn = sctlr2_el3_write,
+      .fieldoffset = offsetof(CPUARMState, cp15.sctlr2_el[3]) },
+};
+
+static CPAccessResult tcr2_el2_access(CPUARMState *env, const ARMCPRegInfo *ri,
+                                      bool isread)
+{
+    if (arm_current_el(env) < 3
+        && arm_feature(env, ARM_FEATURE_EL3)
+        && !(env->cp15.scr_el3 & SCR_TCR2EN)) {
+        return CP_ACCESS_TRAP_EL3;
+    }
+    return CP_ACCESS_OK;
+}
+
+static CPAccessResult tcr2_el1_access(CPUARMState *env, const ARMCPRegInfo *ri,
+                                      bool isread)
+{
+    CPAccessResult ret = access_tvm_trvm(env, ri, isread);
+    if (ret != CP_ACCESS_OK) {
+        return ret;
+    }
+    if (arm_current_el(env) < 2 && !(arm_hcrx_el2_eff(env) & HCRX_TCR2EN)) {
+        return CP_ACCESS_TRAP_EL2;
+    }
+    return tcr2_el2_access(env, ri, isread);
+}
+
+static void tcr2_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                           uint64_t value)
+{
+    uint64_t valid_mask = 0;
+
+    value &= valid_mask;
+    raw_write(env, ri, value);
+}
+
+static void tcr2_el2_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                           uint64_t value)
+{
+    uint64_t valid_mask = 0;
+
+    value &= valid_mask;
+    raw_write(env, ri, value);
+}
+
+static const ARMCPRegInfo tcr2_reginfo[] = {
+    { .name = "TCR2_EL1", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 0, .opc2 = 3, .crn = 2, .crm = 0,
+      .access = PL1_RW, .accessfn = tcr2_el1_access,
+      .writefn = tcr2_el1_write, .fgt = FGT_TCR_EL1,
+      .nv2_redirect_offset = 0x270 | NV2_REDIR_NV1,
+      .fieldoffset = offsetof(CPUARMState, cp15.tcr2_el[1]) },
+    { .name = "TCR2_EL2", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 4, .opc2 = 3, .crn = 2, .crm = 0,
+      .access = PL2_RW, .accessfn = tcr2_el2_access,
+      .writefn = tcr2_el2_write,
+      .fieldoffset = offsetof(CPUARMState, cp15.tcr2_el[2]) },
+};
+
 void register_cp_regs_for_features(ARMCPU *cpu)
 {
     /* Register all the coprocessor registers based on feature bits */
@@ -6753,9 +6855,6 @@ void register_cp_regs_for_features(ARMCPU *cpu)
     if (arm_feature(env, ARM_FEATURE_STRONGARM)) {
         define_arm_cp_regs(cpu, strongarm_cp_reginfo);
     }
-    if (arm_feature(env, ARM_FEATURE_XSCALE)) {
-        define_arm_cp_regs(cpu, xscale_cp_reginfo);
-    }
     if (arm_feature(env, ARM_FEATURE_DUMMY_C15_REGS)) {
         define_arm_cp_regs(cpu, dummy_c15_cp_reginfo);
     }
@@ -7104,14 +7203,6 @@ void register_cp_regs_for_features(ARMCPU *cpu)
             .writefn = sctlr_write, .resetvalue = cpu->reset_sctlr,
             .raw_writefn = raw_write,
         };
-        if (arm_feature(env, ARM_FEATURE_XSCALE)) {
-            /*
-             * Normally we would always end the TB on an SCTLR write, but Linux
-             * arch/arm/mach-pxa/sleep.S expects two instructions following
-             * an MMU enable to execute from cache.  Imitate this behaviour.
-             */
-            sctlr.type |= ARM_CP_SUPPRESS_TB_END;
-        }
         define_one_arm_cp_reg(cpu, &sctlr);
 
         if (arm_feature(env, ARM_FEATURE_PMSA) &&
@@ -7221,6 +7312,14 @@ void register_cp_regs_for_features(ARMCPU *cpu)
 
     if (cpu_isar_feature(aa64_nmi, cpu)) {
         define_arm_cp_regs(cpu, nmi_reginfo);
+    }
+
+    if (cpu_isar_feature(aa64_sctlr2, cpu)) {
+        define_arm_cp_regs(cpu, sctlr2_reginfo);
+    }
+
+    if (cpu_isar_feature(aa64_tcr2, cpu)) {
+        define_arm_cp_regs(cpu, tcr2_reginfo);
     }
 
     if (cpu_isar_feature(any_predinv, cpu)) {
@@ -9147,7 +9246,7 @@ void arm_cpu_do_interrupt(CPUState *cs)
     arm_call_el_change_hook(cpu);
 
     if (!kvm_enabled()) {
-        cs->interrupt_request |= CPU_INTERRUPT_EXITTB;
+        cpu_set_interrupt(cs, CPU_INTERRUPT_EXITTB);
     }
 }
 #endif /* !CONFIG_USER_ONLY */

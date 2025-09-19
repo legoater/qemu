@@ -4,26 +4,22 @@
 
 use std::{ffi::CStr, mem::size_of};
 
-use qemu_api::{
-    chardev::{CharBackend, Chardev, Event},
-    impl_vmstate_forward,
-    irq::{IRQState, InterruptSource},
-    log::Log,
-    log_mask_ln,
-    memory::{hwaddr, MemoryRegion, MemoryRegionOps, MemoryRegionOpsBuilder},
-    prelude::*,
-    qdev::{Clock, ClockEvent, DeviceImpl, DeviceState, Property, ResetType, ResettablePhasesImpl},
-    qom::{ObjectImpl, Owned, ParentField, ParentInit},
-    static_assert,
-    sysbus::{SysBusDevice, SysBusDeviceImpl},
-    uninit_field_mut,
-    vmstate::VMStateDescription,
+use bql::BqlRefCell;
+use chardev::{CharBackend, Chardev, Event};
+use common::{static_assert, uninit_field_mut};
+use hwcore::{
+    Clock, ClockEvent, DeviceImpl, DeviceMethods, DeviceState, IRQState, InterruptSource,
+    ResetType, ResettablePhasesImpl, SysBusDevice, SysBusDeviceImpl, SysBusDeviceMethods,
 };
+use migration::{
+    self, impl_vmstate_forward, impl_vmstate_struct, vmstate_fields, vmstate_of,
+    vmstate_subsections, vmstate_unused, VMStateDescription, VMStateDescriptionBuilder,
+};
+use qom::{prelude::*, ObjectImpl, Owned, ParentField, ParentInit};
+use system::{hwaddr, MemoryRegion, MemoryRegionOps, MemoryRegionOpsBuilder};
+use util::{log::Log, log_mask_ln};
 
-use crate::{
-    device_class,
-    registers::{self, Interrupt, RegisterOffset},
-};
+use crate::registers::{self, Interrupt, RegisterOffset};
 
 // TODO: You must disable the UART before any of the control registers are
 // reprogrammed. When the UART is disabled in the middle of transmission or
@@ -101,12 +97,13 @@ pub struct PL011Registers {
 }
 
 #[repr(C)]
-#[derive(qemu_api_macros::Object)]
+#[derive(qom::Object, hwcore::Device)]
 /// PL011 Device Model in QEMU
 pub struct PL011State {
     pub parent_obj: ParentField<SysBusDevice>,
     pub iomem: MemoryRegion,
     #[doc(alias = "chr")]
+    #[property(rename = "chardev")]
     pub char_backend: CharBackend,
     pub regs: BqlRefCell<PL011Registers>,
     /// QEMU interrupts
@@ -125,6 +122,7 @@ pub struct PL011State {
     #[doc(alias = "clk")]
     pub clock: Owned<Clock>,
     #[doc(alias = "migrate_clk")]
+    #[property(rename = "migrate-clk", default = true)]
     pub migrate_clock: bool,
 }
 
@@ -132,7 +130,7 @@ pub struct PL011State {
 // structs, so the size of the Rust version must not be any larger
 // than the size of the C one. If this assert triggers you need to
 // expand the padding_for_rust[] array in the C PL011State struct.
-static_assert!(size_of::<PL011State>() <= size_of::<qemu_api::bindings::PL011State>());
+static_assert!(size_of::<PL011State>() <= size_of::<crate::bindings::PL011State>());
 
 qom_isa!(PL011State : SysBusDevice, DeviceState, Object);
 
@@ -172,13 +170,8 @@ impl ObjectImpl for PL011State {
 }
 
 impl DeviceImpl for PL011State {
-    fn properties() -> &'static [Property] {
-        &device_class::PL011_PROPERTIES
-    }
-    fn vmsd() -> Option<&'static VMStateDescription> {
-        Some(&device_class::VMSTATE_PL011)
-    }
-    const REALIZE: Option<fn(&Self) -> qemu_api::Result<()>> = Some(Self::realize);
+    const VMSTATE: Option<VMStateDescription<Self>> = Some(VMSTATE_PL011);
+    const REALIZE: Option<fn(&Self) -> util::Result<()>> = Some(Self::realize);
 }
 
 impl ResettablePhasesImpl for PL011State {
@@ -465,10 +458,10 @@ impl PL011Registers {
         false
     }
 
-    pub fn post_load(&mut self) -> Result<(), ()> {
+    pub fn post_load(&mut self) -> Result<(), migration::InvalidError> {
         /* Sanity-check input state */
         if self.read_pos >= self.read_fifo.len() || self.read_count > self.read_fifo.len() {
-            return Err(());
+            return Err(migration::InvalidError);
         }
 
         if !self.fifo_enabled() && self.read_count > 0 && self.read_pos > 0 {
@@ -525,6 +518,10 @@ impl PL011State {
 
     const fn clock_update(&self, _event: ClockEvent) {
         /* pl011_trace_baudrate_change(s); */
+    }
+
+    pub fn clock_needed(&self) -> bool {
+        self.migrate_clock
     }
 
     fn post_init(&self) {
@@ -625,7 +622,7 @@ impl PL011State {
         }
     }
 
-    fn realize(&self) -> qemu_api::Result<()> {
+    fn realize(&self) -> util::Result<()> {
         self.char_backend
             .enable_handlers(self, Self::can_receive, Self::receive, Self::event);
         Ok(())
@@ -643,7 +640,7 @@ impl PL011State {
         }
     }
 
-    pub fn post_load(&self, _version_id: u32) -> Result<(), ()> {
+    pub fn post_load(&self, _version_id: u8) -> Result<(), migration::InvalidError> {
         self.regs.borrow_mut().post_load()
     }
 }
@@ -686,7 +683,7 @@ pub unsafe extern "C" fn pl011_create(
 }
 
 #[repr(C)]
-#[derive(qemu_api_macros::Object)]
+#[derive(qom::Object, hwcore::Device)]
 /// PL011 Luminary device model.
 pub struct PL011Luminary {
     parent_obj: ParentField<PL011State>,
@@ -712,3 +709,56 @@ impl PL011Impl for PL011Luminary {
 impl DeviceImpl for PL011Luminary {}
 impl ResettablePhasesImpl for PL011Luminary {}
 impl SysBusDeviceImpl for PL011Luminary {}
+
+/// Migration subsection for [`PL011State`] clock.
+static VMSTATE_PL011_CLOCK: VMStateDescription<PL011State> =
+    VMStateDescriptionBuilder::<PL011State>::new()
+        .name(c"pl011/clock")
+        .version_id(1)
+        .minimum_version_id(1)
+        .needed(&PL011State::clock_needed)
+        .fields(vmstate_fields! {
+             vmstate_of!(PL011State, clock),
+        })
+        .build();
+
+impl_vmstate_struct!(
+    PL011Registers,
+    VMStateDescriptionBuilder::<PL011Registers>::new()
+        .name(c"pl011/regs")
+        .version_id(2)
+        .minimum_version_id(2)
+        .fields(vmstate_fields! {
+            vmstate_of!(PL011Registers, flags),
+            vmstate_of!(PL011Registers, line_control),
+            vmstate_of!(PL011Registers, receive_status_error_clear),
+            vmstate_of!(PL011Registers, control),
+            vmstate_of!(PL011Registers, dmacr),
+            vmstate_of!(PL011Registers, int_enabled),
+            vmstate_of!(PL011Registers, int_level),
+            vmstate_of!(PL011Registers, read_fifo),
+            vmstate_of!(PL011Registers, ilpr),
+            vmstate_of!(PL011Registers, ibrd),
+            vmstate_of!(PL011Registers, fbrd),
+            vmstate_of!(PL011Registers, ifl),
+            vmstate_of!(PL011Registers, read_pos),
+            vmstate_of!(PL011Registers, read_count),
+            vmstate_of!(PL011Registers, read_trigger),
+        })
+        .build()
+);
+
+pub const VMSTATE_PL011: VMStateDescription<PL011State> =
+    VMStateDescriptionBuilder::<PL011State>::new()
+        .name(c"pl011")
+        .version_id(2)
+        .minimum_version_id(2)
+        .post_load(&PL011State::post_load)
+        .fields(vmstate_fields! {
+            vmstate_unused!(core::mem::size_of::<u32>()),
+            vmstate_of!(PL011State, regs),
+        })
+        .subsections(vmstate_subsections! {
+             VMSTATE_PL011_CLOCK
+        })
+        .build();

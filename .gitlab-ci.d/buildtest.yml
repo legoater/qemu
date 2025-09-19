@@ -39,9 +39,9 @@ build-system-ubuntu:
     job: amd64-ubuntu2204-container
   variables:
     IMAGE: ubuntu2204
-    CONFIGURE_ARGS: --enable-docs --enable-rust
+    CONFIGURE_ARGS: --enable-docs
     TARGETS: alpha-softmmu microblazeel-softmmu mips64el-softmmu
-    MAKE_CHECK_ARGS: check-build check-doc
+    MAKE_CHECK_ARGS: check-build
 
 check-system-ubuntu:
   extends: .native_test_job_template
@@ -613,9 +613,9 @@ gcov:
     when: always
     expire_in: 2 days
     paths:
-      - build/meson-logs/testlog.txt
+      - build/meson-logs
     reports:
-      junit: build/meson-logs/testlog.junit.xml
+      junit: build/meson-logs/*.junit.xml
       coverage_report:
         coverage_format: cobertura
         path: build/coverage.xml
