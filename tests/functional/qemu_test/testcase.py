@@ -19,6 +19,7 @@ import shutil
 from subprocess import run
 import sys
 import tempfile
+import warnings
 import unittest
 import uuid
 
@@ -204,6 +205,10 @@ class QemuBaseTest(unittest.TestCase):
         self.outputdir = self.build_file('tests', 'functional',
                                          self.arch, self.id())
         self.workdir = os.path.join(self.outputdir, 'scratch')
+        if os.path.exists(self.workdir):
+            # Purge as safety net in case of unclean termination of
+            # previous test, or use of QEMU_TEST_KEEP_SCRATCH
+            shutil.rmtree(self.workdir)
         os.makedirs(self.workdir, exist_ok=True)
 
         self.log_filename = self.log_file('base.log')
@@ -232,8 +237,13 @@ class QemuBaseTest(unittest.TestCase):
             self.socketdir = None
         self.machinelog.removeHandler(self._log_fh)
         self.log.removeHandler(self._log_fh)
+        self._log_fh.close()
 
+    @staticmethod
     def main():
+        warnings.simplefilter("default")
+        os.environ["PYTHONWARNINGS"] = "default"
+
         path = os.path.basename(sys.argv[0])[:-3]
 
         cache = os.environ.get("QEMU_TEST_PRECACHE", None)
@@ -244,14 +254,15 @@ class QemuBaseTest(unittest.TestCase):
         tr = pycotap.TAPTestRunner(message_log = pycotap.LogMode.LogToError,
                                    test_output_log = pycotap.LogMode.LogToError)
         res = unittest.main(module = None, testRunner = tr, exit = False,
-                            argv=["__dummy__", path])
+                            argv=[sys.argv[0], path] + sys.argv[1:])
+        failed = {}
         for (test, message) in res.result.errors + res.result.failures:
-
-            if hasattr(test, "log_filename"):
+            if hasattr(test, "log_filename") and not test.id() in failed:
                 print('More information on ' + test.id() + ' could be found here:'
                       '\n %s' % test.log_filename, file=sys.stderr)
                 if hasattr(test, 'console_log_name'):
                     print(' %s' % test.console_log_name, file=sys.stderr)
+                failed[test.id()] = True
         sys.exit(not res.result.wasSuccessful())
 
 
@@ -397,6 +408,10 @@ class QemuSystemTest(QemuBaseTest):
 
     def tearDown(self):
         for vm in self._vms.values():
-            vm.shutdown()
+            try:
+                vm.shutdown()
+            except Exception as ex:
+                self.log.error("Failed to teardown VM: %s" % ex)
         logging.getLogger('console').removeHandler(self._console_log_fh)
+        self._console_log_fh.close()
         super().tearDown()

@@ -13,18 +13,27 @@ libc_rs = dependency('libc-0.2-rs')
 subproject('proc-macro2-1-rs', required: true)
 subproject('quote-1-rs', required: true)
 subproject('syn-2-rs', required: true)
+subproject('attrs-0.2-rs', required: true)
 
 quote_rs_native = dependency('quote-1-rs', native: true)
 syn_rs_native = dependency('syn-2-rs', native: true)
 proc_macro2_rs_native = dependency('proc-macro2-1-rs', native: true)
-
-qemuutil_rs = qemuutil.partial_dependency(link_args: true, links: true)
+attrs_rs_native = dependency('attrs-0.2-rs', native: true)
 
 genrs = []
 
-subdir('qemu-api-macros')
+subdir('qemu-macros')
+
+subdir('common')
 subdir('bits')
-subdir('qemu-api')
+subdir('util')
+subdir('migration')
+subdir('bql')
+subdir('qom')
+subdir('system')
+subdir('chardev')
+subdir('hw/core')
+subdir('tests')
 
 subdir('hw')
 

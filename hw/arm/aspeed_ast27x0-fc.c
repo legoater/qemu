@@ -35,6 +35,7 @@ struct Ast2700FCState {
 
     MemoryRegion ca35_memory;
     MemoryRegion ca35_dram;
+    MemoryRegion ca35_boot_rom;
     MemoryRegion ssp_memory;
     MemoryRegion tsp_memory;
 
@@ -44,8 +45,6 @@ struct Ast2700FCState {
     Aspeed27x0SoCState ca35;
     Aspeed27x0SSPSoCState ssp;
     Aspeed27x0TSPSoCState tsp;
-
-    bool mmio_exec;
 };
 
 #define AST2700FC_BMC_RAM_SIZE (1 * GiB)
@@ -56,11 +55,15 @@ struct Ast2700FCState {
 #define AST2700FC_FMC_MODEL "w25q01jvq"
 #define AST2700FC_SPI_MODEL "w25q512jv"
 
-static void ast2700fc_ca35_init(MachineState *machine)
+static bool ast2700fc_ca35_init(MachineState *machine, Error **errp)
 {
     Ast2700FCState *s = AST2700A1FC(machine);
     AspeedSoCState *soc;
     AspeedSoCClass *sc;
+    const char *bios_name = NULL;
+    BlockBackend *fmc0 = NULL;
+    DeviceState *dev = NULL;
+    uint64_t rom_size;
 
     object_initialize_child(OBJECT(s), "ca35", &s->ca35, "ast2700-a1");
     soc = ASPEED_SOC(&s->ca35);
@@ -71,22 +74,15 @@ static void ast2700fc_ca35_init(MachineState *machine)
     memory_region_add_subregion(get_system_memory(), 0, &s->ca35_memory);
 
     if (!memory_region_init_ram(&s->ca35_dram, OBJECT(&s->ca35), "ca35-dram",
-                                AST2700FC_BMC_RAM_SIZE, &error_abort)) {
-        return;
+                                AST2700FC_BMC_RAM_SIZE, errp)) {
+        return false;
     }
-    if (!object_property_set_link(OBJECT(&s->ca35), "memory",
-                                  OBJECT(&s->ca35_memory),
-                                  &error_abort)) {
-        return;
-    };
-    if (!object_property_set_link(OBJECT(&s->ca35), "dram",
-                                  OBJECT(&s->ca35_dram), &error_abort)) {
-        return;
-    }
-    if (!object_property_set_int(OBJECT(&s->ca35), "ram-size",
-                                 AST2700FC_BMC_RAM_SIZE, &error_abort)) {
-        return;
-    }
+    object_property_set_link(OBJECT(&s->ca35), "memory",
+                             OBJECT(&s->ca35_memory), &error_abort);
+    object_property_set_link(OBJECT(&s->ca35), "dram", OBJECT(&s->ca35_dram),
+                             &error_abort);
+    object_property_set_int(OBJECT(&s->ca35), "ram-size",
+                            AST2700FC_BMC_RAM_SIZE, &error_abort);
 
     for (int i = 0; i < sc->macs_num; i++) {
         if (!qemu_configure_nic_device(DEVICE(&soc->ftgmac100[i]),
@@ -94,17 +90,13 @@ static void ast2700fc_ca35_init(MachineState *machine)
             break;
         }
     }
-    if (!object_property_set_int(OBJECT(&s->ca35), "hw-strap1",
-                                 AST2700FC_HW_STRAP1, &error_abort)) {
-        return;
-    }
-    if (!object_property_set_int(OBJECT(&s->ca35), "hw-strap2",
-                                 AST2700FC_HW_STRAP2, &error_abort)) {
-        return;
-    }
+    object_property_set_int(OBJECT(&s->ca35), "hw-strap1",
+                            AST2700FC_HW_STRAP1, &error_abort);
+    object_property_set_int(OBJECT(&s->ca35), "hw-strap2",
+                            AST2700FC_HW_STRAP2, &error_abort);
     aspeed_soc_uart_set_chr(soc, ASPEED_DEV_UART12, serial_hd(0));
-    if (!qdev_realize(DEVICE(&s->ca35), NULL, &error_abort)) {
-        return;
+    if (!qdev_realize(DEVICE(&s->ca35), NULL, errp)) {
+        return false;
     }
 
     /*
@@ -118,10 +110,24 @@ static void ast2700fc_ca35_init(MachineState *machine)
     ast2700fc_board_info.ram_size = machine->ram_size;
     ast2700fc_board_info.loader_start = sc->memmap[ASPEED_DEV_SDRAM];
 
+    dev = ssi_get_cs(soc->fmc.spi, 0);
+    fmc0 = dev ? m25p80_get_blk(dev) : NULL;
+
+    if (fmc0) {
+        rom_size = memory_region_size(&soc->spi_boot);
+        aspeed_install_boot_rom(soc, fmc0, &s->ca35_boot_rom, rom_size);
+    }
+
+    /* VBOOTROM */
+    bios_name = machine->firmware ?: VBOOTROM_FILE_NAME;
+    aspeed_load_vbootrom(soc, bios_name, errp);
+
     arm_load_kernel(ARM_CPU(first_cpu), machine, &ast2700fc_board_info);
+
+    return true;
 }
 
-static void ast2700fc_ssp_init(MachineState *machine)
+static bool ast2700fc_ssp_init(MachineState *machine, Error **errp)
 {
     AspeedSoCState *soc;
     Ast2700FCState *s = AST2700A1FC(machine);
@@ -133,19 +139,19 @@ static void ast2700fc_ssp_init(MachineState *machine)
                        UINT64_MAX);
 
     qdev_connect_clock_in(DEVICE(&s->ssp), "sysclk", s->ssp_sysclk);
-    if (!object_property_set_link(OBJECT(&s->ssp), "memory",
-                                  OBJECT(&s->ssp_memory), &error_abort)) {
-        return;
-    }
+    object_property_set_link(OBJECT(&s->ssp), "memory",
+                             OBJECT(&s->ssp_memory), &error_abort);
 
     soc = ASPEED_SOC(&s->ssp);
     aspeed_soc_uart_set_chr(soc, ASPEED_DEV_UART4, serial_hd(1));
-    if (!qdev_realize(DEVICE(&s->ssp), NULL, &error_abort)) {
-        return;
+    if (!qdev_realize(DEVICE(&s->ssp), NULL, errp)) {
+        return false;
     }
+
+    return true;
 }
 
-static void ast2700fc_tsp_init(MachineState *machine)
+static bool ast2700fc_tsp_init(MachineState *machine, Error **errp)
 {
     AspeedSoCState *soc;
     Ast2700FCState *s = AST2700A1FC(machine);
@@ -157,23 +163,23 @@ static void ast2700fc_tsp_init(MachineState *machine)
                        UINT64_MAX);
 
     qdev_connect_clock_in(DEVICE(&s->tsp), "sysclk", s->tsp_sysclk);
-    if (!object_property_set_link(OBJECT(&s->tsp), "memory",
-                                  OBJECT(&s->tsp_memory), &error_abort)) {
-        return;
-    }
+    object_property_set_link(OBJECT(&s->tsp), "memory",
+                             OBJECT(&s->tsp_memory), &error_abort);
 
     soc = ASPEED_SOC(&s->tsp);
     aspeed_soc_uart_set_chr(soc, ASPEED_DEV_UART7, serial_hd(2));
-    if (!qdev_realize(DEVICE(&s->tsp), NULL, &error_abort)) {
-        return;
+    if (!qdev_realize(DEVICE(&s->tsp), NULL, errp)) {
+        return false;
     }
+
+    return true;
 }
 
 static void ast2700fc_init(MachineState *machine)
 {
-    ast2700fc_ca35_init(machine);
-    ast2700fc_ssp_init(machine);
-    ast2700fc_tsp_init(machine);
+    ast2700fc_ca35_init(machine, &error_abort);
+    ast2700fc_ssp_init(machine, &error_abort);
+    ast2700fc_tsp_init(machine, &error_abort);
 }
 
 static void ast2700fc_class_init(ObjectClass *oc, const void *data)

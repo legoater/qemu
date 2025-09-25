@@ -68,29 +68,6 @@ configurations (e.g. -smp drawers=1,books=1,clusters=1 for x86 PC machine) is
 marked deprecated since 9.0, users have to ensure that all the topology members
 described with -smp are supported by the target machine.
 
-``-old-param`` option for booting Arm kernels via param_struct (since 10.0)
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-
-The ``-old-param`` command line option is specific to Arm targets:
-it is used when directly booting a guest kernel to pass it the
-command line and other information via the old ``param_struct`` ABI,
-rather than the newer ATAGS or DTB mechanisms. This option was only
-ever needed to support ancient kernels on some old board types
-like the ``akita`` or ``terrier``; it has been deprecated in the
-kernel since 2001. None of the board types QEMU supports need
-``param_struct`` support, so this option has been deprecated and will
-be removed in a future QEMU version.
-
-User-mode emulator command line arguments
------------------------------------------
-
-``-p`` (since 9.0)
-''''''''''''''''''
-
-The ``-p`` option pretends to control the host page size.  However,
-it is not possible to change the host page size, and using the
-option only causes failures.
-
 QEMU Machine Protocol (QMP) commands
 ------------------------------------
 
@@ -246,27 +223,6 @@ Keeping 32-bit host support alive is a substantial burden for the
 QEMU project.  Thus QEMU will in future drop the support for all
 32-bit host systems.
 
-linux-user mode CPUs
---------------------
-
-iwMMXt emulation and the ``pxa`` CPUs (since 10.0)
-''''''''''''''''''''''''''''''''''''''''''''''''''
-
-The ``pxa`` CPU family (``pxa250``, ``pxa255``, ``pxa260``,
-``pxa261``, ``pxa262``, ``pxa270-a0``, ``pxa270-a1``, ``pxa270``,
-``pxa270-b0``, ``pxa270-b1``, ``pxa270-c0``, ``pxa270-c5``) are no
-longer used in system emulation, because all the machine types which
-used these CPUs were removed in the QEMU 9.2 release. These CPUs can
-now only be used in linux-user mode, and to do that you would have to
-explicitly select one of these CPUs with the ``-cpu`` command line
-option or the ``QEMU_CPU`` environment variable.
-
-We don't believe that anybody is using the iwMMXt emulation, and we do
-not have any tests to validate it or any real hardware or similar
-known-good implementation to test against. GCC is in the process of
-dropping their support for iwMMXt codegen. These CPU types are
-therefore deprecated in QEMU, and will be removed in a future release.
-
 System emulator CPUs
 --------------------
 
@@ -322,18 +278,6 @@ The ``ast2700a0-evb`` machine represents the first revision of the AST2700
 and serves as the initial engineering sample rather than a production version.
 A newer revision, A1, is now supported, and the ``ast2700a1-evb`` should
 replace the older A0 version.
-
-Mips ``mipssim`` machine (since 10.0)
-'''''''''''''''''''''''''''''''''''''
-
-Linux dropped support for this virtual machine type in kernel v3.7, and
-there does not seem to be anybody around who is still using this board
-in QEMU: Most former MIPS-related people are working on other architectures
-in their everyday job nowadays, and we are also not aware of anybody still
-using old binaries with this board (i.e. there is also no binary available
-online to check that this board did not completely bitrot yet). It is
-recommended to use another MIPS machine for future MIPS code development
-instead.
 
 RISC-V default machine option (since 10.0)
 ''''''''''''''''''''''''''''''''''''''''''
@@ -444,12 +388,6 @@ recommending to switch to their stable counterparts:
 - "Zve64f" should be replaced with "zve64f"
 - "Zve64d" should be replaced with "zve64d"
 
-``-device sd-card,spec_version=1`` (since 9.1)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-SD physical layer specification v2.00 supersedes the v1.10 one.
-v2.00 is the default since QEMU 3.0.0.
-
 Block device options
 ''''''''''''''''''''
 
@@ -515,31 +453,6 @@ Stream ``reconnect`` (since 9.2)
 
 The ``reconnect`` option only allows specifying second granularity timeouts,
 which is not enough for all types of use cases, use ``reconnect-ms`` instead.
-
-VFIO device options
-'''''''''''''''''''
-
-``-device vfio-calxeda-xgmac`` (since 10.0)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-The vfio-calxeda-xgmac device allows to assign a host Calxeda Highbank
-10Gb XGMAC Ethernet controller device ("calxeda,hb-xgmac" compatibility
-string) to a guest. Calxeda HW has been ewasted now and there is no point
-keeping that device.
-
-``-device vfio-amd-xgbe`` (since 10.0)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-The vfio-amd-xgbe device allows to assign a host AMD 10GbE controller
-to a guest ("amd,xgbe-seattle-v1a" compatibility string). AMD "Seattle"
-is not supported anymore and there is no point keeping that device.
-
-``-device vfio-platform`` (since 10.0)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-The vfio-platform device allows to assign a host platform device
-to a guest in a generic manner. Integrating a new device into
-the vfio-platform infrastructure requires some adaptation at
-both kernel and qemu level. No such attempt has been done for years
-and the conclusion is that vfio-platform has not got any traction.
-PCIe passthrough shall be the mainline solution.
 
 CPU device properties
 '''''''''''''''''''''

@@ -4468,21 +4468,14 @@ static void spapr_pic_print_info(InterruptStatsProvider *obj, GString *buf)
 /*
  * This is a XIVE only operation
  */
-static int spapr_match_nvt(XiveFabric *xfb, uint8_t format,
-                           uint8_t nvt_blk, uint32_t nvt_idx,
-                           bool crowd, bool cam_ignore, uint8_t priority,
-                           uint32_t logic_serv, XiveTCTXMatch *match)
+static bool spapr_match_nvt(XiveFabric *xfb, uint8_t format,
+                            uint8_t nvt_blk, uint32_t nvt_idx,
+                            bool crowd, bool cam_ignore, uint8_t priority,
+                            uint32_t logic_serv, XiveTCTXMatch *match)
 {
     SpaprMachineState *spapr = SPAPR_MACHINE(xfb);
     XivePresenter *xptr = XIVE_PRESENTER(spapr->active_intc);
     XivePresenterClass *xpc = XIVE_PRESENTER_GET_CLASS(xptr);
-    int count;
-
-    count = xpc->match_nvt(xptr, format, nvt_blk, nvt_idx, crowd, cam_ignore,
-                           priority, logic_serv, match);
-    if (count < 0) {
-        return count;
-    }
 
     /*
      * When we implement the save and restore of the thread interrupt
@@ -4493,12 +4486,14 @@ static int spapr_match_nvt(XiveFabric *xfb, uint8_t format,
      * Until this is done, the sPAPR machine should find at least one
      * matching context always.
      */
-    if (count == 0) {
+    if (!xpc->match_nvt(xptr, format, nvt_blk, nvt_idx, crowd, cam_ignore,
+                           priority, logic_serv, match)) {
         qemu_log_mask(LOG_GUEST_ERROR, "XIVE: NVT %x/%x is not dispatched\n",
                       nvt_blk, nvt_idx);
+        return false;
     }
 
-    return count;
+    return true;
 }
 
 int spapr_get_vcpu_id(PowerPCCPU *cpu)
@@ -4767,14 +4762,25 @@ static void spapr_machine_latest_class_options(MachineClass *mc)
     DEFINE_SPAPR_MACHINE_IMPL(false, major, minor)
 
 /*
- * pseries-10.1
+ * pseries-10.2
  */
-static void spapr_machine_10_1_class_options(MachineClass *mc)
+static void spapr_machine_10_2_class_options(MachineClass *mc)
 {
     /* Defaults for the latest behaviour inherited from the base class */
 }
 
-DEFINE_SPAPR_MACHINE_AS_LATEST(10, 1);
+DEFINE_SPAPR_MACHINE_AS_LATEST(10, 2);
+
+/*
+ * pseries-10.1
+ */
+static void spapr_machine_10_1_class_options(MachineClass *mc)
+{
+    spapr_machine_10_2_class_options(mc);
+    compat_props_add(mc->compat_props, hw_compat_10_1, hw_compat_10_1_len);
+}
+
+DEFINE_SPAPR_MACHINE(10, 1);
 
 /*
  * pseries-10.0
