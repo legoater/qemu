@@ -19,8 +19,12 @@
 
 [meson]
 # The install key should match the version in python/wheels/
-meson = { accepted = ">=1.5.0", installed = "1.8.1", canary = "meson" }
+meson = { accepted = ">=1.5.0", installed = "1.9.0", canary = "meson" }
 pycotap = { accepted = ">=1.1.0", installed = "1.3.1" }
+
+[meson-rust]
+# The install key should match the version in python/wheels/
+meson = { accepted = ">=1.9.0", installed = "1.9.0", canary = "meson" }
 
 [docs]
 # Please keep the installed versions in sync with docs/requirements.txt
@@ -29,3 +33,4 @@ sphinx_rtd_theme = { accepted = ">=0.5", installed = "1.2.2" }
 
 [testdeps]
 qemu.qmp = { accepted = ">=0.0.3", installed = "0.0.3" }
+pygdbmi = { accepted = ">=0.11.0.0", installed = "0.11.0.0" }
