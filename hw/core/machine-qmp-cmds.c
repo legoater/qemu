@@ -28,6 +28,30 @@
 #include "system/runstate.h"
 #include "system/system.h"
 #include "hw/s390x/storage-keys.h"
+#include <sys/stat.h>
+
+/*
+ * QMP query for enabled and present accelerators
+ */
+AcceleratorInfo *qmp_query_accelerators(Error **errp)
+{
+    AcceleratorInfo *info = g_malloc0(sizeof(*info));
+    AccelClass *current_class = ACCEL_GET_CLASS(current_accel());
+    int i;
+
+    for (i = ACCELERATOR__MAX; i-- > 0; ) {
+        const char *s = Accelerator_str(i);
+        AccelClass *this_class = accel_find(s);
+
+        if (this_class) {
+            QAPI_LIST_PREPEND(info->present, i);
+            if (this_class == current_class) {
+                info->enabled = i;
+            }
+        }
+    }
+    return info;
+}
 
 /*
  * fast means: we NEVER interrupt vCPU threads to retrieve

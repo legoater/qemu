@@ -14,6 +14,7 @@
 
 #include "system/memory.h"
 #include "hw/pci/pci_device.h"
+#include "hw/vfio/types.h"
 #include "hw/vfio/vfio-device.h"
 #include "hw/vfio/vfio-region.h"
 #include "qemu/event_notifier.h"
@@ -119,19 +120,11 @@ typedef struct VFIOMSIXInfo {
     MemoryRegion *pba_region;
 } VFIOMSIXInfo;
 
-/*
- * TYPE_VFIO_PCI_BASE is an abstract type used to share code
- * between VFIO implementations that use a kernel driver
- * with those that use user sockets.
- */
-#define TYPE_VFIO_PCI_BASE "vfio-pci-base"
-OBJECT_DECLARE_SIMPLE_TYPE(VFIOPCIDevice, VFIO_PCI_BASE)
-
-#define TYPE_VFIO_PCI "vfio-pci"
-/* TYPE_VFIO_PCI shares struct VFIOPCIDevice. */
+OBJECT_DECLARE_SIMPLE_TYPE(VFIOPCIDevice, VFIO_PCI_DEVICE)
 
 struct VFIOPCIDevice {
-    PCIDevice pdev;
+    PCIDevice parent_obj;
+
     VFIODevice vbasedev;
     VFIOINTx intx;
     unsigned int config_size;
@@ -189,12 +182,14 @@ struct VFIOPCIDevice {
     bool no_kvm_ioeventfd;
     bool no_vfio_ioeventfd;
     bool enable_ramfb;
+    bool use_legacy_x86_rom;
     OnOffAuto ramfb_migrate;
     bool defer_kvm_irq_routing;
     bool clear_parent_atomics_on_exit;
     bool skip_vsc_check;
     VFIODisplay *dpy;
     Notifier irqchip_change_notifier;
+    VFIOPCICPR cpr;
 };
 
 /* Use uin32_t for vendor & device so PCI_ANY_ID expands and cannot match hw */
@@ -209,6 +204,11 @@ static inline bool vfio_is_vga(VFIOPCIDevice *vdev)
     return (vdev->class_code >> 8) == PCI_CLASS_DISPLAY_VGA;
 }
 
+static inline bool vfio_is_base_display(VFIOPCIDevice *vdev)
+{
+    return (vdev->class_code >> 16) == PCI_BASE_CLASS_DISPLAY;
+}
+
 /* MSI/MSI-X/INTx */
 void vfio_pci_vector_init(VFIOPCIDevice *vdev, int nr);
 void vfio_pci_add_kvm_msi_virq(VFIOPCIDevice *vdev, VFIOMSIVector *vector,
@@ -216,8 +216,9 @@ void vfio_pci_add_kvm_msi_virq(VFIOPCIDevice *vdev, VFIOMSIVector *vector,
 void vfio_pci_prepare_kvm_msi_virq_batch(VFIOPCIDevice *vdev);
 void vfio_pci_commit_kvm_msi_virq_batch(VFIOPCIDevice *vdev);
 bool vfio_pci_intx_enable(VFIOPCIDevice *vdev, Error **errp);
+void vfio_pci_intx_set_handler(VFIOPCIDevice *vdev, bool enable);
 void vfio_pci_msix_set_notifiers(VFIOPCIDevice *vdev);
-void vfio_pci_msi_set_handler(VFIOPCIDevice *vdev, int nr);
+void vfio_pci_msi_set_handler(VFIOPCIDevice *vdev, int nr, bool enable);
 
 uint32_t vfio_pci_read_config(PCIDevice *pdev, uint32_t addr, int len);
 void vfio_pci_write_config(PCIDevice *pdev,
@@ -226,6 +227,19 @@ void vfio_pci_write_config(PCIDevice *pdev,
 uint64_t vfio_vga_read(void *opaque, hwaddr addr, unsigned size);
 void vfio_vga_write(void *opaque, hwaddr addr, uint64_t data, unsigned size);
 
+/**
+ * vfio_pci_from_vfio_device: Transform from VFIODevice to
+ * VFIOPCIDevice
+ *
+ * This function checks if the given @vbasedev is a VFIO PCI device.
+ * If it is, it returns the containing VFIOPCIDevice.
+ *
+ * @vbasedev: The VFIODevice to transform
+ *
+ * Return: The VFIOPCIDevice on success, NULL on failure.
+ */
+VFIOPCIDevice *vfio_pci_from_vfio_device(VFIODevice *vbasedev);
+void vfio_sub_page_bar_update_mappings(VFIOPCIDevice *vdev);
 bool vfio_opt_rom_in_denylist(VFIOPCIDevice *vdev);
 bool vfio_config_quirk_setup(VFIOPCIDevice *vdev, Error **errp);
 void vfio_vga_quirk_setup(VFIOPCIDevice *vdev);
@@ -259,6 +273,7 @@ extern const VMStateDescription vfio_display_vmstate;
 
 void vfio_pci_bars_exit(VFIOPCIDevice *vdev);
 bool vfio_pci_add_capabilities(VFIOPCIDevice *vdev, Error **errp);
+void vfio_pci_config_register_vga(VFIOPCIDevice *vdev);
 bool vfio_pci_config_setup(VFIOPCIDevice *vdev, Error **errp);
 bool vfio_pci_interrupt_setup(VFIOPCIDevice *vdev, Error **errp);
 void vfio_pci_intx_eoi(VFIODevice *vbasedev);

@@ -271,12 +271,12 @@ ERST
         .name       = "accel",
         .args_type  = "",
         .params     = "",
-        .help       = "show accelerator info",
+        .help       = "show accelerator statistics",
     },
 
 SRST
   ``info accel``
-    Show accelerator info.
+    Show accelerator statistics.
 ERST
 
 SRST
@@ -305,6 +305,24 @@ ERST
 SRST
   ``info kvm``
     Show KVM information.
+ERST
+
+    {
+        .name       = "accelerators",
+        .args_type  = "",
+        .params     = "",
+        .help       = "show present and enabled information",
+        .cmd        = hmp_info_accelerators,
+    },
+
+SRST
+  ``info accelerators``
+    Show which accelerators are compiled into a QEMU binary, and what accelerator
+    is in use. For example::
+
+        kvm qtest [tcg]
+
+    indicates that TCG in use, and that KVM and qtest are also available.
 ERST
 
     {
