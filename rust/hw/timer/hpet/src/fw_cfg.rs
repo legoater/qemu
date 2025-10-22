@@ -4,7 +4,7 @@
 
 use std::ptr::addr_of_mut;
 
-use qemu_api::{cell::bql_locked, zeroable::Zeroable};
+use common::Zeroable;
 
 /// Each `HPETState` represents a Event Timer Block. The v1 spec supports
 /// up to 8 blocks. QEMU only uses 1 block (in PC machine).
@@ -37,10 +37,10 @@ pub static mut hpet_fw_cfg: HPETFwConfig = HPETFwConfig {
 
 impl HPETFwConfig {
     pub(crate) fn assign_hpet_id() -> Result<usize, &'static str> {
-        assert!(bql_locked());
+        assert!(bql::is_locked());
         // SAFETY: all accesses go through these methods, which guarantee
         // that the accesses are protected by the BQL.
-        let mut fw_cfg = unsafe { *addr_of_mut!(hpet_fw_cfg) };
+        let fw_cfg = unsafe { &mut *addr_of_mut!(hpet_fw_cfg) };
 
         if fw_cfg.count == u8::MAX {
             // first instance
@@ -57,10 +57,10 @@ impl HPETFwConfig {
     }
 
     pub(crate) fn update_hpet_cfg(hpet_id: usize, timer_block_id: u32, address: u64) {
-        assert!(bql_locked());
+        assert!(bql::is_locked());
         // SAFETY: all accesses go through these methods, which guarantee
         // that the accesses are protected by the BQL.
-        let mut fw_cfg = unsafe { *addr_of_mut!(hpet_fw_cfg) };
+        let fw_cfg = unsafe { &mut *addr_of_mut!(hpet_fw_cfg) };
 
         fw_cfg.hpet[hpet_id].event_timer_block_id = timer_block_id;
         fw_cfg.hpet[hpet_id].address = address;

@@ -28,7 +28,7 @@
 #include "hw/intc/loongarch_extioi.h"
 #include "hw/intc/loongarch_pch_pic.h"
 #include "hw/intc/loongarch_pch_msi.h"
-#include "hw/pci-host/ls7a.h"
+#include "hw/intc/loongarch_dintc.h"
 #include "hw/pci-host/gpex.h"
 #include "hw/misc/unimp.h"
 #include "hw/loongarch/fw_cfg.h"
@@ -46,6 +46,31 @@
 #include "hw/block/flash.h"
 #include "hw/virtio/virtio-iommu.h"
 #include "qemu/error-report.h"
+#include "kvm/kvm_loongarch.h"
+
+static void virt_get_dmsi(Object *obj, Visitor *v, const char *name,
+                             void *opaque, Error **errp)
+{
+    LoongArchVirtMachineState *lvms = LOONGARCH_VIRT_MACHINE(obj);
+    OnOffAuto dmsi = lvms->dmsi;
+
+    visit_type_OnOffAuto(v, name, &dmsi, errp);
+
+}
+static void virt_set_dmsi(Object *obj, Visitor *v, const char *name,
+                              void *opaque, Error **errp)
+{
+    LoongArchVirtMachineState *lvms = LOONGARCH_VIRT_MACHINE(obj);
+
+    visit_type_OnOffAuto(v, name, &lvms->dmsi, errp);
+
+    if (lvms->dmsi == ON_OFF_AUTO_OFF) {
+        lvms->misc_feature &= ~BIT(IOCSRF_DMSI);
+        lvms->misc_status &= ~BIT_ULL(IOCSRM_DMSI_EN);
+    } else if (lvms->dmsi == ON_OFF_AUTO_ON) {
+        lvms->misc_feature = BIT(IOCSRF_DMSI);
+    }
+}
 
 static void virt_get_veiointc(Object *obj, Visitor *v, const char *name,
                               void *opaque, Error **errp)
@@ -355,13 +380,17 @@ static void virt_cpu_irq_init(LoongArchVirtMachineState *lvms)
                              &error_abort);
         hotplug_handler_plug(HOTPLUG_HANDLER(lvms->extioi), DEVICE(cs),
                              &error_abort);
+	if (lvms->dintc) {
+            hotplug_handler_plug(HOTPLUG_HANDLER(lvms->dintc), DEVICE(cs),
+                                 &error_abort);
+        }
     }
 }
 
 static void virt_irq_init(LoongArchVirtMachineState *lvms)
 {
     DeviceState *pch_pic, *pch_msi;
-    DeviceState *ipi, *extioi;
+    DeviceState *ipi, *extioi, *dintc;
     SysBusDevice *d;
     int i, start, num;
 
@@ -407,12 +436,47 @@ static void virt_irq_init(LoongArchVirtMachineState *lvms)
      *    +--------+ +---------+ +---------+
      *    | UARTs  | | Devices | | Devices |
      *    +--------+ +---------+ +---------+
+     *
+     *
+     *  Advanced Extended IRQ model
+     *
+     *  +-----+     +---------------------------------+     +-------+
+     *  | IPI | --> |        CPUINTC                  | <-- | Timer |
+     *  +-----+     +---------------------------------+     +-------+
+     *                      ^            ^          ^
+     *                      |            |          |
+     *             +-------------+ +----------+ +---------+     +-------+
+     *             |   EIOINTC   | |   DINTC  | | LIOINTC | <-- | UARTs |
+     *             +-------------+ +----------+ +---------+     +-------+
+     *             ^            ^       ^
+     *             |            |       |
+     *        +---------+  +---------+  |
+     *        | PCH-PIC |  | PCH-MSI |  |
+     *        +---------+  +---------+  |
+     *          ^     ^           ^     |
+     *          |     |           |     |
+     *  +---------+ +---------+ +---------+
+     *  | Devices | | PCH-LPC | | Devices |
+     *  +---------+ +---------+ +---------+
+     *                  ^
+     *                  |
+     *             +---------+
+     *             | Devices |
+     *             +---------+
      */
 
     /* Create IPI device */
     ipi = qdev_new(TYPE_LOONGARCH_IPI);
     lvms->ipi = ipi;
     sysbus_realize_and_unref(SYS_BUS_DEVICE(ipi), &error_fatal);
+
+    /* Create DINTC device*/
+    if (virt_has_dmsi(lvms)) {
+        dintc = qdev_new(TYPE_LOONGARCH_DINTC);
+        lvms->dintc = dintc;
+        sysbus_realize_and_unref(SYS_BUS_DEVICE(dintc), &error_fatal);
+        sysbus_mmio_map(SYS_BUS_DEVICE(dintc), 0, VIRT_DINTC_BASE);
+    }
 
     /* Create EXTIOI device */
     extioi = qdev_new(TYPE_LOONGARCH_EXTIOI);
@@ -456,7 +520,7 @@ static void virt_irq_init(LoongArchVirtMachineState *lvms)
         }
 
         /* PCH_PIC memory region */
-        memory_region_add_subregion(get_system_memory(), VIRT_IOAPIC_REG_BASE,
+        memory_region_add_subregion(get_system_memory(), VIRT_PCH_REG_BASE,
                     sysbus_mmio_get_region(SYS_BUS_DEVICE(pch_pic), 0));
 
         /* Connect pch_pic irqs to extioi */
@@ -539,6 +603,10 @@ static MemTxResult virt_iocsr_misc_write(void *opaque, hwaddr addr,
             return MEMTX_OK;
         }
 
+        if (virt_has_dmsi(lvms) && val & BIT_ULL(IOCSRM_DMSI_EN)) {
+            lvms->misc_status |= BIT_ULL(IOCSRM_DMSI_EN);
+        }
+
         features = address_space_ldl(&lvms->as_iocsr,
                                      EXTIOI_VIRT_BASE + EXTIOI_VIRT_CONFIG,
                                      attrs, NULL);
@@ -574,6 +642,9 @@ static MemTxResult virt_iocsr_misc_read(void *opaque, hwaddr addr,
         break;
     case FEATURE_REG:
         ret = BIT(IOCSRF_MSI) | BIT(IOCSRF_EXTIOI) | BIT(IOCSRF_CSRIPI);
+        if (virt_has_dmsi(lvms)) {
+            ret |= BIT(IOCSRF_DMSI);
+        }
         if (kvm_enabled()) {
             ret |= BIT(IOCSRF_VM);
         }
@@ -602,6 +673,10 @@ static MemTxResult virt_iocsr_misc_read(void *opaque, hwaddr addr,
         }
         if (features & BIT(EXTIOI_ENABLE_INT_ENCODE)) {
             ret |= BIT_ULL(IOCSRM_EXTIOI_INT_ENCODE);
+        }
+        if (virt_has_dmsi(lvms) &&
+            (lvms->misc_status & BIT_ULL(IOCSRM_DMSI_EN))) {
+            ret |= BIT_ULL(IOCSRM_DMSI_EN);
         }
         break;
     default:
@@ -682,6 +757,25 @@ static void fw_cfg_add_memory(MachineState *ms)
     }
 }
 
+static void virt_check_dmsi(MachineState *machine)
+{
+    LoongArchCPU *cpu;
+    LoongArchVirtMachineState *lvms = LOONGARCH_VIRT_MACHINE(machine);
+
+    cpu = LOONGARCH_CPU(first_cpu);
+    if (lvms->dmsi == ON_OFF_AUTO_AUTO) {
+        if (cpu->msgint != ON_OFF_AUTO_OFF) {
+            lvms->misc_feature = BIT(IOCSRF_DMSI);
+        }
+    }
+
+    if (lvms->dmsi == ON_OFF_AUTO_ON && cpu->msgint == ON_OFF_AUTO_OFF) {
+        error_report("Fail to enable dmsi , cpu msgint is off "
+                     "pleass add cpu feature mesgint=on.");
+        exit(EXIT_FAILURE);
+    }
+}
+
 static void virt_init(MachineState *machine)
 {
     const char *cpu_model = machine->cpu_type;
@@ -716,6 +810,7 @@ static void virt_init(MachineState *machine)
         }
         qdev_realize_and_unref(DEVICE(cpuobj), NULL, &error_fatal);
     }
+    virt_check_dmsi(machine);
     fw_cfg_add_memory(machine);
 
     /* Node0 memory */
@@ -846,6 +941,8 @@ static void virt_initfn(Object *obj)
     if (tcg_enabled()) {
         lvms->veiointc = ON_OFF_AUTO_OFF;
     }
+
+    lvms->dmsi = ON_OFF_AUTO_AUTO;
     lvms->acpi = ON_OFF_AUTO_AUTO;
     lvms->oem_id = g_strndup(ACPI_BUILD_APPNAME6, 6);
     lvms->oem_table_id = g_strndup(ACPI_BUILD_APPNAME8, 8);
@@ -1009,10 +1106,14 @@ static void virt_cpu_unplug(HotplugHandler *hotplug_dev,
     /* Notify ipi and extioi irqchip to remove interrupt routing to CPU */
     hotplug_handler_unplug(HOTPLUG_HANDLER(lvms->ipi), dev, &error_abort);
     hotplug_handler_unplug(HOTPLUG_HANDLER(lvms->extioi), dev, &error_abort);
+    if (lvms->dintc) {
+        hotplug_handler_unplug(HOTPLUG_HANDLER(lvms->dintc), dev, &error_abort);
+    }
 
     /* Notify acpi ged CPU removed */
     hotplug_handler_unplug(HOTPLUG_HANDLER(lvms->acpi_ged), dev, &error_abort);
 
+    qemu_unregister_resettable(OBJECT(dev));
     cpu_slot = virt_find_cpu_slot(MACHINE(lvms), cpu->phy_id);
     cpu_slot->cpu = NULL;
 }
@@ -1032,11 +1133,16 @@ static void virt_cpu_plug(HotplugHandler *hotplug_dev,
         hotplug_handler_plug(HOTPLUG_HANDLER(lvms->extioi), dev, &error_abort);
     }
 
+    if (lvms->dintc) {
+        hotplug_handler_plug(HOTPLUG_HANDLER(lvms->dintc), dev, &error_abort);
+    }
+
     if (lvms->acpi_ged) {
         hotplug_handler_plug(HOTPLUG_HANDLER(lvms->acpi_ged), dev,
                              &error_abort);
     }
 
+    qemu_register_resettable(OBJECT(dev));
     cpu_slot = virt_find_cpu_slot(MACHINE(lvms), cpu->phy_id);
     cpu_slot->cpu = CPU(dev);
 }
@@ -1238,6 +1344,10 @@ static void virt_class_init(ObjectClass *oc, const void *data)
         NULL, NULL);
     object_class_property_set_description(oc, "v-eiointc",
                             "Enable Virt Extend I/O Interrupt Controller.");
+    object_class_property_add(oc, "dmsi", "OnOffAuto",
+        virt_get_dmsi, virt_set_dmsi, NULL, NULL);
+    object_class_property_set_description(oc, "dmsi",
+                            "Enable direct Message-interrupts Controller.");
     machine_class_allow_dynamic_sysbus_dev(mc, TYPE_RAMFB_DEVICE);
     machine_class_allow_dynamic_sysbus_dev(mc, TYPE_UEFI_VARS_SYSBUS);
 #ifdef CONFIG_TPM

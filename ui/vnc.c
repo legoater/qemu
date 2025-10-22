@@ -2309,6 +2309,25 @@ static void set_pixel_format(VncState *vs, int bits_per_pixel,
     vs->client_pf.bytes_per_pixel = bits_per_pixel / 8;
     vs->client_pf.depth = bits_per_pixel == 32 ? 24 : bits_per_pixel;
     vs->client_endian = big_endian_flag ? G_BIG_ENDIAN : G_LITTLE_ENDIAN;
+    trace_vnc_client_pixel_format(vs, vs->ioc,
+                                  vs->client_pf.bits_per_pixel,
+                                  vs->client_pf.depth,
+                                  vs->client_endian);
+    trace_vnc_client_pixel_format_red(vs, vs->ioc,
+                                      vs->client_pf.rmax,
+                                      vs->client_pf.rbits,
+                                      vs->client_pf.rshift,
+                                      vs->client_pf.rmask);
+    trace_vnc_client_pixel_format_green(vs, vs->ioc,
+                                        vs->client_pf.gmax,
+                                        vs->client_pf.gbits,
+                                        vs->client_pf.gshift,
+                                        vs->client_pf.gmask);
+    trace_vnc_client_pixel_format_blue(vs, vs->ioc,
+                                       vs->client_pf.bmax,
+                                       vs->client_pf.bbits,
+                                       vs->client_pf.bshift,
+                                       vs->client_pf.bmask);
 
     if (!true_color_flag) {
         send_color_map(vs);
@@ -2324,6 +2343,7 @@ static void pixel_format_message (VncState *vs) {
     char pad[3] = { 0, 0, 0 };
 
     vs->client_pf = qemu_default_pixelformat(32);
+    vs->client_endian = G_BYTE_ORDER;
 
     vnc_write_u8(vs, vs->client_pf.bits_per_pixel); /* bits-per-pixel */
     vnc_write_u8(vs, vs->client_pf.depth); /* depth */
@@ -2382,6 +2402,17 @@ static int protocol_client_msg(VncState *vs, uint8_t *data, size_t len)
         if (len == 1)
             return 20;
 
+        trace_vnc_msg_client_set_pixel_format(vs, vs->ioc,
+                                              read_u8(data, 4),
+                                              read_u8(data, 6),
+                                              read_u8(data, 7));
+        trace_vnc_msg_client_set_pixel_format_rgb(vs, vs->ioc,
+                                                  read_u16(data, 8),
+                                                  read_u16(data, 10),
+                                                  read_u16(data, 12),
+                                                  read_u8(data, 14),
+                                                  read_u8(data, 15),
+                                                  read_u8(data, 16));
         set_pixel_format(vs, read_u8(data, 4),
                          read_u8(data, 6), read_u8(data, 7),
                          read_u16(data, 8), read_u16(data, 10),
@@ -2404,12 +2435,19 @@ static int protocol_client_msg(VncState *vs, uint8_t *data, size_t len)
             memcpy(data + 4 + (i * 4), &val, sizeof(val));
         }
 
+        trace_vnc_msg_client_set_encodings(vs, vs->ioc, limit);
         set_encodings(vs, (int32_t *)(data + 4), limit);
         break;
     case VNC_MSG_CLIENT_FRAMEBUFFER_UPDATE_REQUEST:
         if (len == 1)
             return 10;
 
+        trace_vnc_msg_client_framebuffer_update_request(vs, vs->ioc,
+                                                        read_u8(data, 1),
+                                                        read_u16(data, 2),
+                                                        read_u16(data, 4),
+                                                        read_u16(data, 6),
+                                                        read_u16(data, 8));
         framebuffer_update_request(vs,
                                    read_u8(data, 1), read_u16(data, 2), read_u16(data, 4),
                                    read_u16(data, 6), read_u16(data, 8));
@@ -2418,12 +2456,19 @@ static int protocol_client_msg(VncState *vs, uint8_t *data, size_t len)
         if (len == 1)
             return 8;
 
+        trace_vnc_msg_client_key_event(vs, vs->ioc,
+                                       read_u8(data, 1),
+                                       read_u32(data, 4));
         key_event(vs, read_u8(data, 1), read_u32(data, 4));
         break;
     case VNC_MSG_CLIENT_POINTER_EVENT:
         if (len == 1)
             return 6;
 
+        trace_vnc_msg_client_pointer_event(vs, vs->ioc,
+                                           read_u8(data, 1),
+                                           read_u16(data, 2),
+                                           read_u16(data, 4));
         pointer_event(vs, read_u8(data, 1), read_u16(data, 2), read_u16(data, 4));
         break;
     case VNC_MSG_CLIENT_CUT_TEXT:
@@ -2455,9 +2500,12 @@ static int protocol_client_msg(VncState *vs, uint8_t *data, size_t len)
                 vnc_client_error(vs);
                 break;
             }
+            trace_vnc_msg_client_cut_text_ext(vs, vs->ioc,
+                                              dlen, read_u32(data, 8));
             vnc_client_cut_text_ext(vs, dlen, read_u32(data, 8), data + 12);
             break;
         }
+        trace_vnc_msg_client_cut_text(vs, vs->ioc, read_u32(data, 4));
         vnc_client_cut_text(vs, read_u32(data, 4), data + 8);
         break;
     case VNC_MSG_CLIENT_XVP:
@@ -2472,6 +2520,7 @@ static int protocol_client_msg(VncState *vs, uint8_t *data, size_t len)
         if (len == 4) {
             uint8_t version = read_u8(data, 2);
             uint8_t action = read_u8(data, 3);
+            trace_vnc_msg_client_xvp(vs, vs->ioc, version, action);
 
             if (version != 1) {
                 error_report("vnc: xvp client message version %d != 1",
@@ -2505,6 +2554,10 @@ static int protocol_client_msg(VncState *vs, uint8_t *data, size_t len)
             if (len == 2)
                 return 12;
 
+            trace_vnc_msg_client_ext_key_event(vs, vs->ioc,
+                                               read_u16(data, 2),
+                                               read_u32(data, 4),
+                                               read_u32(data, 8));
             ext_key_event(vs, read_u16(data, 2),
                           read_u32(data, 4), read_u32(data, 8));
             break;
@@ -3284,7 +3337,7 @@ static void vnc_connect(VncDisplay *vd, QIOChannelSocket *sioc,
 
     VNC_DEBUG("New client on socket %p\n", vs->sioc);
     update_displaychangelistener(&vd->dcl, VNC_REFRESH_INTERVAL_BASE);
-    qio_channel_set_blocking(vs->ioc, false, NULL);
+    qio_channel_set_blocking(vs->ioc, false, &error_abort);
     if (vs->ioc_tag) {
         g_source_remove(vs->ioc_tag);
     }
@@ -4256,8 +4309,9 @@ void vnc_display_add_client(const char *id, int csock, bool skipauth)
     }
 }
 
-static void vnc_auto_assign_id(QemuOptsList *olist, QemuOpts *opts)
+static char *vnc_auto_assign_id(QemuOpts *opts)
 {
+    QemuOptsList *olist = qemu_find_opts("vnc");
     int i = 2;
     char *id;
 
@@ -4267,22 +4321,17 @@ static void vnc_auto_assign_id(QemuOptsList *olist, QemuOpts *opts)
         id = g_strdup_printf("vnc%d", i++);
     }
     qemu_opts_set_id(opts, id);
+
+    return id;
 }
 
 void vnc_parse(const char *str)
 {
     QemuOptsList *olist = qemu_find_opts("vnc");
     QemuOpts *opts = qemu_opts_parse_noisily(olist, str, !is_help_option(str));
-    const char *id;
 
     if (!opts) {
         exit(1);
-    }
-
-    id = qemu_opts_id(opts);
-    if (!id) {
-        /* auto-assign id if not present */
-        vnc_auto_assign_id(olist, opts);
     }
 }
 
@@ -4291,7 +4340,11 @@ int vnc_init_func(void *opaque, QemuOpts *opts, Error **errp)
     Error *local_err = NULL;
     char *id = (char *)qemu_opts_id(opts);
 
-    assert(id);
+    if (!id) {
+        /* auto-assign id if not present */
+        id = vnc_auto_assign_id(opts);
+    }
+
     vnc_display_init(id, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);

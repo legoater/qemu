@@ -77,7 +77,6 @@
 #include "hw/virtio/virtio-scsi.h"
 #include "hw/virtio/vhost-scsi-common.h"
 
-#include "system/ram_addr.h"
 #include "system/confidential-guest-support.h"
 #include "hw/usb.h"
 #include "qemu/config-file.h"
@@ -907,6 +906,7 @@ static void spapr_dt_rtas(SpaprMachineState *spapr, void *fdt)
     int rtas;
     GString *hypertas = g_string_sized_new(256);
     GString *qemu_hypertas = g_string_sized_new(256);
+    uint64_t max_device_addr = 0;
     uint32_t lrdr_capacity[] = {
         0,
         0,
@@ -917,12 +917,14 @@ static void spapr_dt_rtas(SpaprMachineState *spapr, void *fdt)
 
     /* Do we have device memory? */
     if (MACHINE(spapr)->device_memory) {
-        uint64_t max_device_addr = MACHINE(spapr)->device_memory->base +
+        max_device_addr = MACHINE(spapr)->device_memory->base +
             memory_region_size(&MACHINE(spapr)->device_memory->mr);
-
-        lrdr_capacity[0] = cpu_to_be32(max_device_addr >> 32);
-        lrdr_capacity[1] = cpu_to_be32(max_device_addr & 0xffffffff);
+    } else if (ms->ram_size == ms->maxram_size) {
+        max_device_addr = ms->ram_size;
     }
+
+    lrdr_capacity[0] = cpu_to_be32(max_device_addr >> 32);
+    lrdr_capacity[1] = cpu_to_be32(max_device_addr & 0xffffffff);
 
     _FDT(rtas = fdt_add_subnode(fdt, 0, "rtas"));
 
@@ -2815,7 +2817,7 @@ static void spapr_machine_init(MachineState *machine)
     int i;
     MemoryRegion *sysmem = get_system_memory();
     long load_limit, fw_size;
-    Error *resize_hpt_err = NULL;
+    Error *errp = NULL;
     NICInfo *nd;
 
     if (!filename) {
@@ -2843,7 +2845,7 @@ static void spapr_machine_init(MachineState *machine)
     /* Determine capabilities to run with */
     spapr_caps_init(spapr);
 
-    kvmppc_check_papr_resize_hpt(&resize_hpt_err);
+    kvmppc_check_papr_resize_hpt(&errp);
     if (spapr->resize_hpt == SPAPR_RESIZE_HPT_DEFAULT) {
         /*
          * If the user explicitly requested a mode we should either
@@ -2851,10 +2853,10 @@ static void spapr_machine_init(MachineState *machine)
          * it's not set explicitly, we reset our mode to something
          * that works
          */
-        if (resize_hpt_err) {
+        if (errp) {
             spapr->resize_hpt = SPAPR_RESIZE_HPT_DISABLED;
-            error_free(resize_hpt_err);
-            resize_hpt_err = NULL;
+            error_free(errp);
+            errp = NULL;
         } else {
             spapr->resize_hpt = smc->resize_hpt_default;
         }
@@ -2862,14 +2864,14 @@ static void spapr_machine_init(MachineState *machine)
 
     assert(spapr->resize_hpt != SPAPR_RESIZE_HPT_DEFAULT);
 
-    if ((spapr->resize_hpt != SPAPR_RESIZE_HPT_DISABLED) && resize_hpt_err) {
+    if ((spapr->resize_hpt != SPAPR_RESIZE_HPT_DISABLED) && errp) {
         /*
          * User requested HPT resize, but this host can't supply it.  Bail out
          */
-        error_report_err(resize_hpt_err);
+        error_report_err(errp);
         exit(1);
     }
-    error_free(resize_hpt_err);
+    error_free(errp);
 
     spapr->rma_size = spapr_rma_size(spapr, &error_fatal);
 
@@ -4468,21 +4470,14 @@ static void spapr_pic_print_info(InterruptStatsProvider *obj, GString *buf)
 /*
  * This is a XIVE only operation
  */
-static int spapr_match_nvt(XiveFabric *xfb, uint8_t format,
-                           uint8_t nvt_blk, uint32_t nvt_idx,
-                           bool crowd, bool cam_ignore, uint8_t priority,
-                           uint32_t logic_serv, XiveTCTXMatch *match)
+static bool spapr_match_nvt(XiveFabric *xfb, uint8_t format,
+                            uint8_t nvt_blk, uint32_t nvt_idx,
+                            bool crowd, bool cam_ignore, uint8_t priority,
+                            uint32_t logic_serv, XiveTCTXMatch *match)
 {
     SpaprMachineState *spapr = SPAPR_MACHINE(xfb);
     XivePresenter *xptr = XIVE_PRESENTER(spapr->active_intc);
     XivePresenterClass *xpc = XIVE_PRESENTER_GET_CLASS(xptr);
-    int count;
-
-    count = xpc->match_nvt(xptr, format, nvt_blk, nvt_idx, crowd, cam_ignore,
-                           priority, logic_serv, match);
-    if (count < 0) {
-        return count;
-    }
 
     /*
      * When we implement the save and restore of the thread interrupt
@@ -4493,12 +4488,14 @@ static int spapr_match_nvt(XiveFabric *xfb, uint8_t format,
      * Until this is done, the sPAPR machine should find at least one
      * matching context always.
      */
-    if (count == 0) {
+    if (!xpc->match_nvt(xptr, format, nvt_blk, nvt_idx, crowd, cam_ignore,
+                           priority, logic_serv, match)) {
         qemu_log_mask(LOG_GUEST_ERROR, "XIVE: NVT %x/%x is not dispatched\n",
                       nvt_blk, nvt_idx);
+        return false;
     }
 
-    return count;
+    return true;
 }
 
 int spapr_get_vcpu_id(PowerPCCPU *cpu)
@@ -4767,14 +4764,25 @@ static void spapr_machine_latest_class_options(MachineClass *mc)
     DEFINE_SPAPR_MACHINE_IMPL(false, major, minor)
 
 /*
- * pseries-10.1
+ * pseries-10.2
  */
-static void spapr_machine_10_1_class_options(MachineClass *mc)
+static void spapr_machine_10_2_class_options(MachineClass *mc)
 {
     /* Defaults for the latest behaviour inherited from the base class */
 }
 
-DEFINE_SPAPR_MACHINE_AS_LATEST(10, 1);
+DEFINE_SPAPR_MACHINE_AS_LATEST(10, 2);
+
+/*
+ * pseries-10.1
+ */
+static void spapr_machine_10_1_class_options(MachineClass *mc)
+{
+    spapr_machine_10_2_class_options(mc);
+    compat_props_add(mc->compat_props, hw_compat_10_1, hw_compat_10_1_len);
+}
+
+DEFINE_SPAPR_MACHINE(10, 1);
 
 /*
  * pseries-10.0

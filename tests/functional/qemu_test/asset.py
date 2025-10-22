@@ -10,12 +10,13 @@ import logging
 import os
 import stat
 import sys
+import time
 import unittest
 import urllib.request
 from time import sleep
 from pathlib import Path
 from shutil import copyfileobj
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 class AssetError(Exception):
     def __init__(self, asset, msg, transient=False):
@@ -72,6 +73,10 @@ class Asset:
         return self.hash == hl.hexdigest()
 
     def valid(self):
+        if os.getenv("QEMU_TEST_REFRESH_CACHE", None) is not None:
+            self.log.info("Force refresh of asset %s", self.url)
+            return False
+
         return self.cache_file.exists() and self._check(self.cache_file)
 
     def fetchable(self):
@@ -109,6 +114,16 @@ class Asset:
         self.log.debug("Time out while waiting for %s!", tmp_cache_file)
         raise
 
+    def _save_time_stamp(self):
+        '''
+        Update the time stamp of the asset in the cache. Unfortunately, we
+        cannot use the modification or access time of the asset file itself,
+        since e.g. the functional jobs in the gitlab CI reload the files
+        from the gitlab cache and thus always have recent file time stamps,
+        so we have to save our asset time stamp to a separate file instead.
+        '''
+        self.cache_file.with_suffix(".stamp").write_text(f"{int(time.time())}")
+
     def fetch(self):
         if not self.cache_dir.exists():
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -116,6 +131,7 @@ class Asset:
         if self.valid():
             self.log.debug("Using cached asset %s for %s",
                            self.cache_file, self.url)
+            self._save_time_stamp()
             return str(self.cache_file)
 
         if not self.fetchable():
@@ -167,9 +183,25 @@ class Asset:
                     raise AssetError(self, "Unable to download: "
                                      "HTTP error %d" % e.code)
                 continue
+            except URLError as e:
+                # This is typically a network/service level error
+                # eg urlopen error [Errno 110] Connection timed out>
+                tmp_cache_file.unlink()
+                self.log.error("Unable to download %s: URL error %s",
+                               self.url, e.reason)
+                raise AssetError(self, "Unable to download: URL error %s" %
+                                 e.reason, transient=True)
+            except ConnectionError as e:
+                # A socket connection failure, such as dropped conn
+                # or refused conn
+                tmp_cache_file.unlink()
+                self.log.error("Unable to download %s: Connection error %s",
+                               self.url, e)
+                continue
             except Exception as e:
                 tmp_cache_file.unlink()
-                raise AssetError(self, "Unable to download: " % e)
+                raise AssetError(self, "Unable to download: %s" % e,
+                                 transient=True)
 
         if not os.path.exists(tmp_cache_file):
             raise AssetError(self, "Download retries exceeded", transient=True)
@@ -188,6 +220,7 @@ class Asset:
             tmp_cache_file.unlink()
             raise AssetError(self, "Hash does not match %s" % self.hash)
         tmp_cache_file.replace(self.cache_file)
+        self._save_time_stamp()
         # Remove write perms to stop tests accidentally modifying them
         os.chmod(self.cache_file, stat.S_IRUSR | stat.S_IRGRP)
 
@@ -205,7 +238,6 @@ class Asset:
         log.addHandler(handler)
         for name, asset in vars(test.__class__).items():
             if name.startswith("ASSET_") and type(asset) == Asset:
-                log.info("Attempting to cache '%s'" % asset)
                 try:
                     asset.fetch()
                 except AssetError as e:

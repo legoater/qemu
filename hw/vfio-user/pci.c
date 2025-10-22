@@ -20,7 +20,8 @@
 OBJECT_DECLARE_SIMPLE_TYPE(VFIOUserPCIDevice, VFIO_USER_PCI)
 
 struct VFIOUserPCIDevice {
-    VFIOPCIDevice device;
+    VFIOPCIDevice parent_obj;
+
     SocketAddress *socket;
     bool send_queued;   /* all sends are queued */
     uint32_t wait_time; /* timeout for message replies */
@@ -64,7 +65,7 @@ static void vfio_user_msix_setup(VFIOPCIDevice *vdev)
     vdev->msix->pba_region = pba_reg;
 
     vfio_reg = vdev->bars[vdev->msix->pba_bar].mr;
-    msix_reg = &vdev->pdev.msix_pba_mmio;
+    msix_reg = &PCI_DEVICE(vdev)->msix_pba_mmio;
     memory_region_init_io(pba_reg, OBJECT(vdev), &vfio_user_pba_ops, vdev,
                           "VFIO MSIX PBA", int128_get64(msix_reg->size));
     memory_region_add_subregion_overlap(vfio_reg, vdev->msix->pba_offset,
@@ -85,7 +86,7 @@ static void vfio_user_msix_teardown(VFIOPCIDevice *vdev)
 
 static void vfio_user_dma_read(VFIOPCIDevice *vdev, VFIOUserDMARW *msg)
 {
-    PCIDevice *pdev = &vdev->pdev;
+    PCIDevice *pdev = PCI_DEVICE(vdev);
     VFIOUserProxy *proxy = vdev->vbasedev.proxy;
     VFIOUserDMARW *res;
     MemTxResult r;
@@ -133,7 +134,7 @@ static void vfio_user_dma_read(VFIOPCIDevice *vdev, VFIOUserDMARW *msg)
 
 static void vfio_user_dma_write(VFIOPCIDevice *vdev, VFIOUserDMARW *msg)
 {
-    PCIDevice *pdev = &vdev->pdev;
+    PCIDevice *pdev = PCI_DEVICE(vdev);
     VFIOUserProxy *proxy = vdev->vbasedev.proxy;
     MemTxResult r;
 
@@ -213,8 +214,9 @@ static void vfio_user_compute_needs_reset(VFIODevice *vbasedev)
 
 static Object *vfio_user_pci_get_object(VFIODevice *vbasedev)
 {
-    VFIOUserPCIDevice *vdev = container_of(vbasedev, VFIOUserPCIDevice,
-                                           device.vbasedev);
+    VFIOUserPCIDevice *vdev = VFIO_USER_PCI(container_of(vbasedev,
+                                                         VFIOPCIDevice,
+                                                         vbasedev));
 
     return OBJECT(vdev);
 }
@@ -232,9 +234,10 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
 {
     ERRP_GUARD();
     VFIOUserPCIDevice *udev = VFIO_USER_PCI(pdev);
-    VFIOPCIDevice *vdev = VFIO_PCI_BASE(pdev);
+    VFIOPCIDevice *vdev = VFIO_PCI_DEVICE(pdev);
     VFIODevice *vbasedev = &vdev->vbasedev;
     const char *sock_name;
+
     AddressSpace *as;
     SocketAddress addr;
     VFIOUserProxy *proxy;
@@ -341,10 +344,10 @@ error:
     vfio_pci_put_device(vdev);
 }
 
-static void vfio_user_instance_init(Object *obj)
+static void vfio_user_pci_init(Object *obj)
 {
     PCIDevice *pci_dev = PCI_DEVICE(obj);
-    VFIOPCIDevice *vdev = VFIO_PCI_BASE(obj);
+    VFIOPCIDevice *vdev = VFIO_PCI_DEVICE(obj);
     VFIODevice *vbasedev = &vdev->vbasedev;
 
     device_add_bootindex_property(obj, &vdev->bootindex,
@@ -367,9 +370,9 @@ static void vfio_user_instance_init(Object *obj)
     pci_dev->cap_present |= QEMU_PCI_CAP_EXPRESS;
 }
 
-static void vfio_user_instance_finalize(Object *obj)
+static void vfio_user_pci_finalize(Object *obj)
 {
-    VFIOPCIDevice *vdev = VFIO_PCI_BASE(obj);
+    VFIOPCIDevice *vdev = VFIO_PCI_DEVICE(obj);
     VFIODevice *vbasedev = &vdev->vbasedev;
 
     if (vdev->msix != NULL) {
@@ -385,7 +388,7 @@ static void vfio_user_instance_finalize(Object *obj)
 
 static void vfio_user_pci_reset(DeviceState *dev)
 {
-    VFIOPCIDevice *vdev = VFIO_PCI_BASE(dev);
+    VFIOPCIDevice *vdev = VFIO_PCI_DEVICE(dev);
     VFIODevice *vbasedev = &vdev->vbasedev;
 
     vfio_pci_pre_reset(vdev);
@@ -397,7 +400,7 @@ static void vfio_user_pci_reset(DeviceState *dev)
     vfio_pci_post_reset(vdev);
 }
 
-static const Property vfio_user_pci_dev_properties[] = {
+static const Property vfio_user_pci_properties[] = {
     DEFINE_PROP_UINT32("x-pci-vendor-id", VFIOPCIDevice,
                        vendor_id, PCI_ANY_ID),
     DEFINE_PROP_UINT32("x-pci-device-id", VFIOPCIDevice,
@@ -406,6 +409,8 @@ static const Property vfio_user_pci_dev_properties[] = {
                        sub_vendor_id, PCI_ANY_ID),
     DEFINE_PROP_UINT32("x-pci-sub-device-id", VFIOPCIDevice,
                        sub_device_id, PCI_ANY_ID),
+    DEFINE_PROP_UINT32("x-pci-class-code", VFIOPCIDevice,
+                       class_code, PCI_ANY_ID),
     DEFINE_PROP_BOOL("x-send-queued", VFIOUserPCIDevice, send_queued, false),
     DEFINE_PROP_UINT32("x-msg-timeout", VFIOUserPCIDevice, wait_time, 5000),
     DEFINE_PROP_BOOL("x-no-posted-writes", VFIOUserPCIDevice, no_post, false),
@@ -417,7 +422,7 @@ static void vfio_user_pci_set_socket(Object *obj, Visitor *v, const char *name,
     VFIOUserPCIDevice *udev = VFIO_USER_PCI(obj);
     bool success;
 
-    if (udev->device.vbasedev.proxy) {
+    if (VFIO_PCI_DEVICE(udev)->vbasedev.proxy) {
         error_setg(errp, "Proxy is connected");
         return;
     }
@@ -441,13 +446,13 @@ static void vfio_user_pci_set_socket(Object *obj, Visitor *v, const char *name,
     }
 }
 
-static void vfio_user_pci_dev_class_init(ObjectClass *klass, const void *data)
+static void vfio_user_pci_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *pdc = PCI_DEVICE_CLASS(klass);
 
     device_class_set_legacy_reset(dc, vfio_user_pci_reset);
-    device_class_set_props(dc, vfio_user_pci_dev_properties);
+    device_class_set_props(dc, vfio_user_pci_properties);
 
     object_class_property_add(klass, "socket", "SocketAddress", NULL,
                               vfio_user_pci_set_socket, NULL, NULL);
@@ -458,18 +463,18 @@ static void vfio_user_pci_dev_class_init(ObjectClass *klass, const void *data)
     pdc->realize = vfio_user_pci_realize;
 }
 
-static const TypeInfo vfio_user_pci_dev_info = {
+static const TypeInfo vfio_user_pci_info = {
     .name = TYPE_VFIO_USER_PCI,
-    .parent = TYPE_VFIO_PCI_BASE,
+    .parent = TYPE_VFIO_PCI_DEVICE,
     .instance_size = sizeof(VFIOUserPCIDevice),
-    .class_init = vfio_user_pci_dev_class_init,
-    .instance_init = vfio_user_instance_init,
-    .instance_finalize = vfio_user_instance_finalize,
+    .class_init = vfio_user_pci_class_init,
+    .instance_init = vfio_user_pci_init,
+    .instance_finalize = vfio_user_pci_finalize,
 };
 
 static void register_vfio_user_dev_type(void)
 {
-    type_register_static(&vfio_user_pci_dev_info);
+    type_register_static(&vfio_user_pci_info);
 }
 
- type_init(register_vfio_user_dev_type)
+type_init(register_vfio_user_dev_type)

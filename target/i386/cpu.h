@@ -27,6 +27,7 @@
 #include "exec/cpu-defs.h"
 #include "exec/cpu-interrupt.h"
 #include "exec/memop.h"
+#include "hw/i386/apic.h"
 #include "hw/i386/topology.h"
 #include "qapi/qapi-types-common.h"
 #include "qemu/cpu-float.h"
@@ -435,9 +436,11 @@ typedef enum X86Seg {
 #define MSR_SMI_COUNT                   0x34
 #define MSR_CORE_THREAD_COUNT           0x35
 #define MSR_MTRRcap                     0xfe
+#define MSR_MTRR_MEM_TYPE_WB            0x06
 #define MSR_MTRRcap_VCNT                8
 #define MSR_MTRRcap_FIXRANGE_SUPPORT    (1 << 8)
 #define MSR_MTRRcap_WC_SUPPORTED        (1 << 10)
+#define MSR_MTRR_ENABLE                 (1 << 11)
 
 #define MSR_IA32_SYSENTER_CS            0x174
 #define MSR_IA32_SYSENTER_ESP           0x175
@@ -641,6 +644,7 @@ typedef enum FeatureWord {
     FEAT_8000_0008_EBX, /* CPUID[8000_0008].EBX */
     FEAT_8000_0021_EAX, /* CPUID[8000_0021].EAX */
     FEAT_8000_0021_EBX, /* CPUID[8000_0021].EBX */
+    FEAT_8000_0021_ECX, /* CPUID[8000_0021].ECX */
     FEAT_8000_0022_EAX, /* CPUID[8000_0022].EAX */
     FEAT_C000_0001_EDX, /* CPUID[C000_0001].EDX */
     FEAT_KVM,           /* CPUID[4000_0001].EAX (KVM_CPUID_FEATURES) */
@@ -1101,6 +1105,8 @@ uint64_t x86_cpu_get_supported_feature_word(X86CPU *cpu, FeatureWord w);
 #define CPUID_8000_0021_EAX_FS_GS_BASE_NS                (1U << 1)
 /* LFENCE is always serializing */
 #define CPUID_8000_0021_EAX_LFENCE_ALWAYS_SERIALIZING    (1U << 2)
+/* Memory form of VERW mitigates TSA */
+#define CPUID_8000_0021_EAX_VERW_CLEAR                   (1U << 5)
 /* Null Selector Clears Base */
 #define CPUID_8000_0021_EAX_NULL_SEL_CLR_BASE            (1U << 6)
 /* Automatic IBRS */
@@ -1123,6 +1129,11 @@ uint64_t x86_cpu_get_supported_feature_word(X86CPU *cpu, FeatureWord w);
  * CALL instructions software needs to execute to flush the RAP.
  */
 #define CPUID_8000_0021_EBX_RAPSIZE    (8U << 16)
+
+/* CPU is not vulnerable TSA SA-SQ attack */
+#define CPUID_8000_0021_ECX_TSA_SQ_NO  (1U << 1)
+/* CPU is not vulnerable TSA SA-L1 attack */
+#define CPUID_8000_0021_ECX_TSA_L1_NO  (1U << 2)
 
 /* Performance Monitoring Version 2 */
 #define CPUID_8000_0022_EAX_PERFMON_V2  (1U << 0)
@@ -2126,7 +2137,7 @@ typedef struct CPUArchState {
     QEMUTimer *xen_periodic_timer;
     QemuMutex xen_timers_lock;
 #endif
-#if defined(CONFIG_HVF)
+#if defined(CONFIG_HVF) || defined(CONFIG_MSHV)
     void *emu_mmio_buf;
 #endif
 
@@ -2314,6 +2325,18 @@ struct ArchCPU {
     /* Forcefully disable KVM PV features not exposed in guest CPUIDs */
     bool kvm_pv_enforce_cpuid;
 
+    /*
+     * Expose arch-capabilities unconditionally even on AMD models, for backwards
+     * compatibility with QEMU <10.1.
+     */
+    bool arch_cap_always_on;
+
+    /*
+     * Backwards compatibility with QEMU <10.1. The PDCM feature is now disabled when
+     * PMU is not available, but prior to 10.1 it was enabled even if PMU is off.
+     */
+    bool pdcm_on_even_without_pmu;
+
     /* Number of physical address bits supported */
     uint32_t phys_bits;
 
@@ -2327,7 +2350,7 @@ struct ArchCPU {
 
     /* in order to simplify APIC support, we leave this pointer to the
        user */
-    struct DeviceState *apic_state;
+    APICCommonState *apic_state;
     struct MemoryRegion *cpu_as_root, *cpu_as_mem, *smram;
     Notifier machine_done;
 
@@ -2574,6 +2597,11 @@ static inline bool x86_has_cpuid_0x1f(X86CPU *cpu)
 void x86_cpu_set_a20(X86CPU *cpu, int a20_state);
 void cpu_sync_avx_hflag(CPUX86State *env);
 
+typedef enum X86ASIdx {
+    X86ASIdx_MEM = 0,
+    X86ASIdx_SMM = 1,
+} X86ASIdx;
+
 #ifndef CONFIG_USER_ONLY
 static inline int x86_asidx_from_attrs(CPUState *cs, MemTxAttrs attrs)
 {
@@ -2803,7 +2831,7 @@ bool cpu_svm_has_intercept(CPUX86State *env, uint32_t type);
 
 /* apic.c */
 void cpu_report_tpr_access(CPUX86State *env, TPRAccess access);
-void apic_handle_tpr_access_report(DeviceState *d, target_ulong ip,
+void apic_handle_tpr_access_report(APICCommonState *s, target_ulong ip,
                                    TPRAccess access);
 
 /* Special values for X86CPUVersion: */
