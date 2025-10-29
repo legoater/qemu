@@ -391,21 +391,15 @@ elif check_define __sparc__ ; then
   else
     cpu="sparc"
   fi
-elif check_define _ARCH_PPC ; then
-  if check_define _ARCH_PPC64 ; then
-    if check_define _LITTLE_ENDIAN ; then
-      cpu="ppc64le"
-    else
-      cpu="ppc64"
-    fi
+elif check_define _ARCH_PPC64 ; then
+  if check_define _LITTLE_ENDIAN ; then
+    cpu="ppc64le"
   else
-    cpu="ppc"
+    cpu="ppc64"
   fi
 elif check_define __mips__ ; then
   if check_define __mips64 ; then
     cpu="mips64"
-  else
-    cpu="mips"
   fi
 elif check_define __s390__ ; then
   if check_define __s390x__ ; then
@@ -453,7 +447,6 @@ case "$cpu" in
   armv*b|armv*l|arm)
     cpu=arm
     host_arch=arm
-    linux_arch=arm
     ;;
 
   i386|i486|i586|i686)
@@ -474,17 +467,7 @@ case "$cpu" in
     host_arch=mips
     linux_arch=mips
     ;;
-  mips*)
-    cpu=mips
-    host_arch=mips
-    linux_arch=mips
-    ;;
 
-  ppc)
-    host_arch=ppc
-    linux_arch=powerpc
-    CPU_CFLAGS="-m32"
-    ;;
   ppc64)
     host_arch=ppc64
     linux_arch=powerpc
@@ -1001,7 +984,19 @@ $mkvenv ensuregroup --dir "${source_path}/python/wheels" \
 # We ignore PATH completely here: we want to use the venv's Meson
 # *exclusively*.
 
-meson="$(cd pyvenv/bin; pwd)/meson"
+# for msys2
+get_pwd() {
+    if pwd -W >/dev/null 2>&1; then
+        pwd -W
+    else
+        pwd
+    fi
+}
+
+meson="$(cd pyvenv/bin; get_pwd)/meson"
+if [ -f "$meson$EXESUF" ]; then
+  meson="$meson$EXESUF"
+fi
 
 # Conditionally ensure Sphinx is installed.
 
@@ -1185,12 +1180,14 @@ fi
 # detect rust triple
 
 meson_version=$($meson --version)
-if test "$rust" != disabled && ! version_ge "$meson_version" 1.8.1; then
+if test "$rust" != disabled && ! version_ge "$meson_version" 1.9.0; then
   if test "$rust" = enabled; then
-    error_exit "Rust support needs Meson 1.8.1 or newer"
+    $mkvenv ensuregroup --dir "${source_path}/python/wheels" \
+         ${source_path}/pythondeps.toml meson-rust || exit 1
+  else
+    echo "Rust needs Meson 1.9.0, disabling" 2>&1
+    rust=disabled
   fi
-  echo "Rust needs Meson 1.8.1, disabling" 2>&1
-  rust=disabled
 fi
 if test "$rust" != disabled && has "$rustc" && $rustc -vV > "${TMPDIR1}/${TMPB}.out"; then
   rust_host_triple=$(sed -n 's/^host: //p' "${TMPDIR1}/${TMPB}.out")
@@ -1203,8 +1200,9 @@ fi
 if test "$rust" != disabled && test -z "$rust_target_triple"; then
   # arch and os generally matches between meson and rust
   rust_arch=$host_arch
+  # default to host vendor
+  rust_vendor=$(echo "$rust_host_triple" | cut -d'-' -f2)
   rust_os=$host_os
-  rust_machine=unknown
   rust_osvariant=
 
   # tweak rust_os if needed; also, machine and variant depend on the OS
@@ -1212,7 +1210,7 @@ if test "$rust" != disabled && test -z "$rust_target_triple"; then
   case "$host_os" in
   darwin)
     # e.g. aarch64-apple-darwin
-    rust_machine=apple
+    rust_vendor=apple
     ;;
 
   linux)
@@ -1260,13 +1258,13 @@ EOF
     ;;
 
   sunos)
-    rust_machine=pc
+    rust_vendor=pc
     rust_os=solaris
     ;;
 
   windows)
     # e.g. aarch64-pc-windows-gnullvm, x86_64-pc-windows-gnu (MSVC not supported)
-    rust_machine=pc
+    rust_vendor=pc
     if test "$host_arch" = aarch64; then
       rust_osvariant=gnullvm
     else
@@ -1297,7 +1295,7 @@ EOF
   sparc64)
     if test "$rust_os" = solaris; then
       rust_arch=sparcv9
-      rust_machine=sun
+      rust_vendor=sun
     fi
     ;;
 
@@ -1311,7 +1309,7 @@ EOF
     # e.g. aarch64-linux-android
     rust_target_triple=$rust_arch-$rust_os-$rust_osvariant
   else
-    rust_target_triple=$rust_arch-$rust_machine-$rust_os${rust_osvariant:+-$rust_osvariant}
+    rust_target_triple=$rust_arch-$rust_vendor-$rust_os${rust_osvariant:+-$rust_osvariant}
   fi
 fi
 
@@ -1464,7 +1462,7 @@ probe_target_compiler() {
         container_image=debian-all-test-cross
         container_cross_prefix=mips64-linux-gnuabi64-
         ;;
-      ppc|ppc64|ppc64le)
+      ppc64|ppc64le)
         container_image=debian-all-test-cross
         container_cross_prefix=powerpc${target_arch#ppc}-linux-gnu-
         ;;
@@ -1801,6 +1799,7 @@ echo "SRC_PATH=$source_path" >> tests/tcg/$config_host_mak
 if test "$plugins" = "yes" ; then
     echo "CONFIG_PLUGIN=y" >> tests/tcg/$config_host_mak
 fi
+echo "PYTHON=$python" >> tests/tcg/$config_host_mak
 
 tcg_tests_targets=
 for target in $target_list; do
@@ -1837,6 +1836,12 @@ for target in $target_list; do
           echo "GDB=$gdb_bin" >> $config_target_mak
       fi
 
+      if test "${gdb_arches#*$arch}" != "$gdb_arches" && version_ge $gdb_version 14.1; then
+          echo "GDB_HAS_SME_TILES=y" >> $config_target_mak
+      else
+          echo "GDB_HAS_SME_TILES=n" >> $config_target_mak
+      fi
+
       if test "${gdb_arches#*aarch64}" != "$gdb_arches" && version_ge $gdb_version 15.1; then
           echo "GDB_HAS_MTE=y" >> $config_target_mak
       fi
@@ -1870,6 +1875,13 @@ if test "$skip_meson" = no; then
       eval "c=\$devices_${a}"
       echo "${a}-softmmu = '$c'" >> $cross
   done
+  if test "$rust" != disabled; then
+      if test "$cross_compile" = "yes"; then
+          . "$source_path/scripts/rust-to-clang-target.sh"
+          clang_target=$(rust_to_clang_target "$rust_target_triple")
+          echo "bindgen_clang_arguments = [$(meson_quote --target="$clang_target")]" >> $cross
+      fi
+  fi
 
   echo "[built-in options]" >> $cross
   echo "c_args = [$(meson_quote $CFLAGS $EXTRA_CFLAGS)]" >> $cross
@@ -1950,7 +1962,7 @@ if test "$skip_meson" = no; then
     echo "[binaries]" >> $native
     echo "c = [$(meson_quote $host_cc)]" >> $native
     if test "$rust" != disabled; then
-      echo "rust = [$(meson_quote $rustc)]" >> $cross
+      echo "rust = [$(meson_quote $rustc)]" >> $native
     fi
     mv $native config-meson.native
     meson_option_add --native-file
@@ -1976,6 +1988,8 @@ if test "$skip_meson" = no; then
   test -n "${LIB_FUZZING_ENGINE+xxx}" && meson_option_add "-Dfuzzing_engine=$LIB_FUZZING_ENGINE"
   test "$plugins" = yes && meson_option_add "-Dplugins=true"
   test "$tcg" != enabled && meson_option_add "-Dtcg=$tcg"
+  test -n "$gdb_bin" && meson_option_add "-Dgdb=$gdb_bin"
+
   run_meson() {
     NINJA=$ninja $meson setup "$@" "$PWD" "$source_path"
   }

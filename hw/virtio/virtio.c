@@ -31,6 +31,8 @@
 #include "hw/qdev-properties.h"
 #include "hw/virtio/virtio-access.h"
 #include "system/dma.h"
+#include "system/iothread.h"
+#include "system/memory.h"
 #include "system/runstate.h"
 #include "virtio-qmp.h"
 
@@ -256,7 +258,10 @@ void virtio_init_region_cache(VirtIODevice *vdev, int n)
     len = address_space_cache_init(&new->desc, vdev->dma_as,
                                    addr, size, packed);
     if (len < size) {
-        virtio_error(vdev, "Cannot map desc");
+        virtio_error(vdev,
+                "Failed to map descriptor ring for device %s: "
+                "invalid guest physical address or corrupted queue setup",
+                qdev_get_printable_name(DEVICE(vdev)));
         goto err_desc;
     }
 
@@ -264,7 +269,10 @@ void virtio_init_region_cache(VirtIODevice *vdev, int n)
     len = address_space_cache_init(&new->used, vdev->dma_as,
                                    vq->vring.used, size, true);
     if (len < size) {
-        virtio_error(vdev, "Cannot map used");
+        virtio_error(vdev,
+                "Failed to map used ring for device %s: "
+                "possible guest misconfiguration or insufficient memory",
+                qdev_get_printable_name(DEVICE(vdev)));
         goto err_used;
     }
 
@@ -272,7 +280,10 @@ void virtio_init_region_cache(VirtIODevice *vdev, int n)
     len = address_space_cache_init(&new->avail, vdev->dma_as,
                                    vq->vring.avail, size, false);
     if (len < size) {
-        virtio_error(vdev, "Cannot map avail");
+        virtio_error(vdev,
+                "Failed to map avalaible ring for device %s: "
+                "possible queue misconfiguration or overlapping memory region",
+                qdev_get_printable_name(DEVICE(vdev)));
         goto err_avail;
     }
 
@@ -938,18 +949,18 @@ static void virtqueue_packed_fill(VirtQueue *vq, const VirtQueueElement *elem,
 static void virtqueue_ordered_fill(VirtQueue *vq, const VirtQueueElement *elem,
                                    unsigned int len)
 {
-    unsigned int i, steps, max_steps;
+    unsigned int i, steps, max_steps, ndescs;
 
     i = vq->used_idx % vq->vring.num;
     steps = 0;
     /*
-     * We shouldn't need to increase 'i' by more than the distance
-     * between used_idx and last_avail_idx.
+     * We shouldn't need to increase 'i' by more than or equal to
+     * the distance between used_idx and last_avail_idx (max_steps).
      */
     max_steps = (vq->last_avail_idx - vq->used_idx) % vq->vring.num;
 
     /* Search for element in vq->used_elems */
-    while (steps <= max_steps) {
+    while (steps < max_steps) {
         /* Found element, set length and mark as filled */
         if (vq->used_elems[i].index == elem->index) {
             vq->used_elems[i].len = len;
@@ -957,8 +968,18 @@ static void virtqueue_ordered_fill(VirtQueue *vq, const VirtQueueElement *elem,
             break;
         }
 
-        i += vq->used_elems[i].ndescs;
-        steps += vq->used_elems[i].ndescs;
+        ndescs = vq->used_elems[i].ndescs;
+
+        /* Defensive sanity check */
+        if (unlikely(ndescs == 0 || ndescs > vq->vring.num)) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "%s: %s invalid ndescs %u at position %u\n",
+                          __func__, vq->vdev->name, ndescs, i);
+            return;
+        }
+
+        i += ndescs;
+        steps += ndescs;
 
         if (i >= vq->vring.num) {
             i -= vq->vring.num;
@@ -1612,7 +1633,8 @@ out:
  * virtqueue_unmap_sg() can't be used).  Assumes buffers weren't written to
  * yet.
  */
-static void virtqueue_undo_map_desc(unsigned int out_num, unsigned int in_num,
+static void virtqueue_undo_map_desc(AddressSpace *as,
+                                    unsigned int out_num, unsigned int in_num,
                                     struct iovec *iov)
 {
     unsigned int i;
@@ -1620,7 +1642,7 @@ static void virtqueue_undo_map_desc(unsigned int out_num, unsigned int in_num,
     for (i = 0; i < out_num + in_num; i++) {
         int is_write = i >= out_num;
 
-        cpu_physical_memory_unmap(iov->iov_base, iov->iov_len, is_write, 0);
+        address_space_unmap(as, iov->iov_base, iov->iov_len, is_write, 0);
         iov++;
     }
 }
@@ -1822,7 +1844,7 @@ done:
     return elem;
 
 err_undo_map:
-    virtqueue_undo_map_desc(out_num, in_num, iov);
+    virtqueue_undo_map_desc(vdev->dma_as, out_num, in_num, iov);
     goto done;
 }
 
@@ -1972,7 +1994,7 @@ done:
     return elem;
 
 err_undo_map:
-    virtqueue_undo_map_desc(out_num, in_num, iov);
+    virtqueue_undo_map_desc(vdev->dma_as, out_num, in_num, iov);
     goto done;
 }
 
@@ -2644,16 +2666,8 @@ static void virtio_notify_irqfd_deferred_fn(void *opaque)
     event_notifier_set(notifier);
 }
 
-void virtio_notify_irqfd(VirtIODevice *vdev, VirtQueue *vq)
+static void virtio_irq(VirtQueue *vq)
 {
-    WITH_RCU_READ_LOCK_GUARD() {
-        if (!virtio_should_notify(vdev, vq)) {
-            return;
-        }
-    }
-
-    trace_virtio_notify_irqfd(vdev, vq);
-
     /*
      * virtio spec 1.0 says ISR bit 0 should be ignored with MSI, but
      * windows drivers included in virtio-win 1.8.0 (circa 2015) are
@@ -2670,13 +2684,18 @@ void virtio_notify_irqfd(VirtIODevice *vdev, VirtQueue *vq)
      * to an atomic operation.
      */
     virtio_set_isr(vq->vdev, 0x1);
-    defer_call(virtio_notify_irqfd_deferred_fn, &vq->guest_notifier);
-}
 
-static void virtio_irq(VirtQueue *vq)
-{
-    virtio_set_isr(vq->vdev, 0x1);
-    virtio_notify_vector(vq->vdev, vq->vector);
+    /*
+     * The interrupt code path requires the Big QEMU Lock (BQL), so use the
+     * notifier instead when in an IOThread. This assumes that device models
+     * have already called ->set_guest_notifiers() sometime before calling this
+     * function.
+     */
+    if (qemu_in_iothread()) {
+        defer_call(virtio_notify_irqfd_deferred_fn, &vq->guest_notifier);
+    } else {
+        virtio_notify_vector(vq->vdev, vq->vector);
+    }
 }
 
 void virtio_notify(VirtIODevice *vdev, VirtQueue *vq)
@@ -2698,7 +2717,12 @@ void virtio_notify_config(VirtIODevice *vdev)
 
     virtio_set_isr(vdev, 0x3);
     vdev->generation++;
-    virtio_notify_vector(vdev, vdev->config_vector);
+
+    if (qemu_in_iothread()) {
+        defer_call(virtio_notify_irqfd_deferred_fn, &vdev->config_notifier);
+    } else {
+        virtio_notify_vector(vdev, vdev->config_vector);
+    }
 }
 
 static bool virtio_device_endian_needed(void *opaque)
@@ -2954,6 +2978,30 @@ static const VMStateDescription vmstate_virtio_disabled = {
     }
 };
 
+static bool virtio_128bit_features_needed(void *opaque)
+{
+    VirtIODevice *vdev = opaque;
+
+    return virtio_features_use_ex(vdev->host_features_ex);
+}
+
+static const VMStateDescription vmstate_virtio_128bit_features = {
+    .name = "virtio/128bit_features",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = &virtio_128bit_features_needed,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT64(guest_features_ex[1], VirtIODevice),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+/*
+ * Avoid silently breaking migration should the feature space increase
+ * even more in the (far away) future
+ */
+QEMU_BUILD_BUG_ON(VIRTIO_FEATURES_NU64S != 2);
+
 static const VMStateDescription vmstate_virtio = {
     .name = "virtio",
     .version_id = 1,
@@ -2963,6 +3011,7 @@ static const VMStateDescription vmstate_virtio = {
     },
     .subsections = (const VMStateDescription * const []) {
         &vmstate_virtio_device_endian,
+        &vmstate_virtio_128bit_features,
         &vmstate_virtio_64bit_features,
         &vmstate_virtio_virtqueues,
         &vmstate_virtio_ringsize,
@@ -2982,6 +3031,7 @@ int virtio_save(VirtIODevice *vdev, QEMUFile *f)
     VirtioDeviceClass *vdc = VIRTIO_DEVICE_GET_CLASS(vdev);
     uint32_t guest_features_lo = (vdev->guest_features & 0xffffffff);
     int i;
+    Error *local_err = NULL;
 
     if (k->save_config) {
         k->save_config(qbus->parent, f);
@@ -3025,14 +3075,15 @@ int virtio_save(VirtIODevice *vdev, QEMUFile *f)
     }
 
     if (vdc->vmsd) {
-        int ret = vmstate_save_state(f, vdc->vmsd, vdev, NULL);
+        int ret = vmstate_save_state(f, vdc->vmsd, vdev, NULL, &local_err);
         if (ret) {
+            error_report_err(local_err);
             return ret;
         }
     }
 
     /* Subsections */
-    return vmstate_save_state(f, &vmstate_virtio, vdev, NULL);
+    return vmstate_save_state(f, &vmstate_virtio, vdev, NULL, &error_fatal);
 }
 
 /* A wrapper for use as a VMState .put function */
@@ -3059,23 +3110,30 @@ const VMStateInfo  virtio_vmstate_info = {
     .put = virtio_device_put,
 };
 
-static int virtio_set_features_nocheck(VirtIODevice *vdev, uint64_t val)
+static int virtio_set_features_nocheck(VirtIODevice *vdev, const uint64_t *val)
 {
     VirtioDeviceClass *k = VIRTIO_DEVICE_GET_CLASS(vdev);
-    bool bad = (val & ~(vdev->host_features)) != 0;
+    uint64_t tmp[VIRTIO_FEATURES_NU64S];
+    bool bad;
 
-    val &= vdev->host_features;
-    if (k->set_features) {
-        k->set_features(vdev, val);
+    bad = virtio_features_andnot(tmp, val, vdev->host_features_ex);
+    virtio_features_and(tmp, val, vdev->host_features_ex);
+
+    if (k->set_features_ex) {
+        k->set_features_ex(vdev, val);
+    } else if (k->set_features) {
+        bad = bad || virtio_features_use_ex(tmp);
+        k->set_features(vdev, tmp[0]);
     }
-    vdev->guest_features = val;
+
+    virtio_features_copy(vdev->guest_features_ex, tmp);
     return bad ? -1 : 0;
 }
 
 typedef struct VirtioSetFeaturesNocheckData {
     Coroutine *co;
     VirtIODevice *vdev;
-    uint64_t val;
+    uint64_t val[VIRTIO_FEATURES_NU64S];
     int ret;
 } VirtioSetFeaturesNocheckData;
 
@@ -3088,14 +3146,15 @@ static void virtio_set_features_nocheck_bh(void *opaque)
 }
 
 static int coroutine_mixed_fn
-virtio_set_features_nocheck_maybe_co(VirtIODevice *vdev, uint64_t val)
+virtio_set_features_nocheck_maybe_co(VirtIODevice *vdev,
+                                     const uint64_t *val)
 {
     if (qemu_in_coroutine()) {
         VirtioSetFeaturesNocheckData data = {
             .co = qemu_coroutine_self(),
             .vdev = vdev,
-            .val = val,
         };
+        virtio_features_copy(data.val, val);
         aio_bh_schedule_oneshot(qemu_get_current_aio_context(),
                                 virtio_set_features_nocheck_bh, &data);
         qemu_coroutine_yield();
@@ -3107,6 +3166,14 @@ virtio_set_features_nocheck_maybe_co(VirtIODevice *vdev, uint64_t val)
 
 int virtio_set_features(VirtIODevice *vdev, uint64_t val)
 {
+    uint64_t features[VIRTIO_FEATURES_NU64S];
+
+    virtio_features_from_u64(features, val);
+    return virtio_set_features_ex(vdev, features);
+}
+
+int virtio_set_features_ex(VirtIODevice *vdev, const uint64_t *features)
+{
     int ret;
     /*
      * The driver must not attempt to set features after feature negotiation
@@ -3116,13 +3183,13 @@ int virtio_set_features(VirtIODevice *vdev, uint64_t val)
         return -EINVAL;
     }
 
-    if (val & (1ull << VIRTIO_F_BAD_FEATURE)) {
+    if (features[0] & (1ull << VIRTIO_F_BAD_FEATURE)) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: guest driver for %s has enabled UNUSED(30) feature bit!\n",
                       __func__, vdev->name);
     }
 
-    ret = virtio_set_features_nocheck(vdev, val);
+    ret = virtio_set_features_nocheck(vdev, features);
     if (virtio_vdev_has_feature(vdev, VIRTIO_RING_F_EVENT_IDX)) {
         /* VIRTIO_RING_F_EVENT_IDX changes the size of the caches.  */
         int i;
@@ -3145,6 +3212,7 @@ void virtio_reset(void *opaque)
 {
     VirtIODevice *vdev = opaque;
     VirtioDeviceClass *k = VIRTIO_DEVICE_GET_CLASS(vdev);
+    uint64_t features[VIRTIO_FEATURES_NU64S];
     int i;
 
     virtio_set_status(vdev, 0);
@@ -3171,7 +3239,8 @@ void virtio_reset(void *opaque)
     vdev->start_on_kick = false;
     vdev->started = false;
     vdev->broken = false;
-    virtio_set_features_nocheck(vdev, 0);
+    virtio_features_clear(features);
+    virtio_set_features_nocheck(vdev, features);
     vdev->queue_sel = 0;
     vdev->status = 0;
     vdev->disabled = false;
@@ -3225,6 +3294,7 @@ virtio_load(VirtIODevice *vdev, QEMUFile *f, int version_id)
     BusState *qbus = qdev_get_parent_bus(DEVICE(vdev));
     VirtioBusClass *k = VIRTIO_BUS_GET_CLASS(qbus);
     VirtioDeviceClass *vdc = VIRTIO_DEVICE_GET_CLASS(vdev);
+    Error *local_err = NULL;
 
     /*
      * We poison the endianness to ensure it does not get used before
@@ -3254,7 +3324,7 @@ virtio_load(VirtIODevice *vdev, QEMUFile *f, int version_id)
      * Note: devices should always test host features in future - don't create
      * new dependencies like this.
      */
-    vdev->guest_features = features;
+    virtio_features_from_u64(vdev->guest_features_ex, features);
 
     config_len = qemu_get_be32(f);
 
@@ -3317,15 +3387,17 @@ virtio_load(VirtIODevice *vdev, QEMUFile *f, int version_id)
     }
 
     if (vdc->vmsd) {
-        ret = vmstate_load_state(f, vdc->vmsd, vdev, version_id);
+        ret = vmstate_load_state(f, vdc->vmsd, vdev, version_id, &local_err);
         if (ret) {
+            error_report_err(local_err);
             return ret;
         }
     }
 
     /* Subsections */
-    ret = vmstate_load_state(f, &vmstate_virtio, vdev, 1);
+    ret = vmstate_load_state(f, &vmstate_virtio, vdev, 1, &local_err);
     if (ret) {
+        error_report_err(local_err);
         return ret;
     }
 
@@ -3333,26 +3405,17 @@ virtio_load(VirtIODevice *vdev, QEMUFile *f, int version_id)
         vdev->device_endian = virtio_default_endian();
     }
 
-    if (virtio_64bit_features_needed(vdev)) {
-        /*
-         * Subsection load filled vdev->guest_features.  Run them
-         * through virtio_set_features to sanity-check them against
-         * host_features.
-         */
-        uint64_t features64 = vdev->guest_features;
-        if (virtio_set_features_nocheck_maybe_co(vdev, features64) < 0) {
-            error_report("Features 0x%" PRIx64 " unsupported. "
-                         "Allowed features: 0x%" PRIx64,
-                         features64, vdev->host_features);
-            return -1;
-        }
-    } else {
-        if (virtio_set_features_nocheck_maybe_co(vdev, features) < 0) {
-            error_report("Features 0x%x unsupported. "
-                         "Allowed features: 0x%" PRIx64,
-                         features, vdev->host_features);
-            return -1;
-        }
+    /*
+     * guest_features_ex is fully initialized with u32 features and upper
+     * bits have been filled as needed by the later load.
+     */
+    if (virtio_set_features_nocheck_maybe_co(vdev,
+                                             vdev->guest_features_ex) < 0) {
+        error_report("Features 0x" VIRTIO_FEATURES_FMT " unsupported. "
+                     "Allowed features: 0x" VIRTIO_FEATURES_FMT,
+                     VIRTIO_FEATURES_PR(vdev->guest_features_ex),
+                     VIRTIO_FEATURES_PR(vdev->host_features_ex));
+        return -1;
     }
 
     if (!virtio_device_started(vdev, vdev->status) &&

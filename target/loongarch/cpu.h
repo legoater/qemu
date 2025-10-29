@@ -21,27 +21,6 @@
 #include "cpu-csr.h"
 #include "cpu-qom.h"
 
-#define IOCSRF_TEMP             0
-#define IOCSRF_NODECNT          1
-#define IOCSRF_MSI              2
-#define IOCSRF_EXTIOI           3
-#define IOCSRF_CSRIPI           4
-#define IOCSRF_FREQCSR          5
-#define IOCSRF_FREQSCALE        6
-#define IOCSRF_DVFSV1           7
-#define IOCSRF_GMOD             9
-#define IOCSRF_VM               11
-
-#define VERSION_REG             0x0
-#define FEATURE_REG             0x8
-#define VENDOR_REG              0x10
-#define CPUNAME_REG             0x20
-#define MISC_FUNC_REG           0x420
-#define IOCSRM_EXTIOI_EN        48
-#define IOCSRM_EXTIOI_INT_ENCODE 49
-
-#define IOCSR_MEM_SIZE          0x428
-
 #define FCSR0_M1    0x1f         /* FCSR1 mask, Enables */
 #define FCSR0_M2    0x1f1f0000   /* FCSR2 mask, Cause and Flags */
 #define FCSR0_M3    0x300        /* FCSR3 mask, Round Mode */
@@ -158,6 +137,7 @@ FIELD(CPUCFG2, LBT_MIPS, 20, 1)
 FIELD(CPUCFG2, LBT_ALL, 18, 3)
 FIELD(CPUCFG2, LSPW, 21, 1)
 FIELD(CPUCFG2, LAM, 22, 1)
+FIELD(CPUCFG2, HPTW, 24, 1)
 
 /* cpucfg[3] bits */
 FIELD(CPUCFG3, CCDMA, 0, 1)
@@ -238,9 +218,10 @@ FIELD(CSR_CRMD, WE, 9, 1)
 extern const char * const regnames[32];
 extern const char * const fregnames[32];
 
-#define N_IRQS      13
+#define N_IRQS      15
 #define IRQ_TIMER   11
 #define IRQ_IPI     12
+#define INT_DMSI    14
 
 #define LOONGARCH_STLB         2048 /* 2048 STLB */
 #define LOONGARCH_MTLB         64   /* 64 MTLB */
@@ -253,6 +234,13 @@ FIELD(TLB_MISC, E, 0, 1)
 FIELD(TLB_MISC, ASID, 1, 10)
 FIELD(TLB_MISC, VPPN, 13, 35)
 FIELD(TLB_MISC, PS, 48, 6)
+
+/*Msg interrupt registers */
+#define N_MSGIS                4
+FIELD(CSR_MSGIS, IS, 0, 63)
+FIELD(CSR_MSGIR, INTNUM, 0, 8)
+FIELD(CSR_MSGIR, ACTIVE, 31, 1)
+FIELD(CSR_MSGIE, PT, 0, 8)
 
 #define LSX_LEN    (128)
 #define LASX_LEN   (256)
@@ -371,6 +359,10 @@ typedef struct CPUArchState {
     uint64_t CSR_DBG;
     uint64_t CSR_DERA;
     uint64_t CSR_DSAVE;
+    /* Msg interrupt registers */
+    uint64_t CSR_MSGIS[N_MSGIS];
+    uint64_t CSR_MSGIR;
+    uint64_t CSR_MSGIE;
     struct {
         uint64_t guest_addr;
     } stealtime;
@@ -387,11 +379,7 @@ typedef struct CPUArchState {
 #endif
 
     AddressSpace *address_space_iocsr;
-    bool load_elf;
-    uint64_t elf_address;
     uint32_t mp_state;
-
-    struct loongarch_boot_info *boot_info;
 #endif
 } CPULoongArchState;
 
@@ -415,8 +403,10 @@ struct ArchCPU {
     uint32_t  phy_id;
     OnOffAuto lbt;
     OnOffAuto pmu;
+    OnOffAuto ptw;
     OnOffAuto lsx;
     OnOffAuto lasx;
+    OnOffAuto msgint;
     OnOffAuto kvm_pv_ipi;
     OnOffAuto kvm_steal_time;
     int32_t socket_id;  /* socket-id of this CPU */
@@ -493,16 +483,5 @@ static inline void set_pc(CPULoongArchState *env, uint64_t value)
 #define HW_FLAGS_EUEN_ASXE  0x40
 
 #define CPU_RESOLVING_TYPE TYPE_LOONGARCH_CPU
-
-void loongarch_cpu_post_init(Object *obj);
-
-#ifdef CONFIG_KVM
-void kvm_loongarch_cpu_post_init(LoongArchCPU *cpu);
-#else
-static inline void kvm_loongarch_cpu_post_init(LoongArchCPU *cpu)
-{
-}
-#endif
-void kvm_loongarch_init_irq_routing(void);
 
 #endif /* LOONGARCH_CPU_H */

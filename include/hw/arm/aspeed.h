@@ -11,6 +11,7 @@
 
 #include "hw/boards.h"
 #include "qom/object.h"
+#include "hw/arm/aspeed_soc.h"
 
 typedef struct AspeedMachineState AspeedMachineState;
 
@@ -24,6 +25,26 @@ DECLARE_OBJ_CHECKERS(AspeedMachineState, AspeedMachineClass,
 #define ASPEED_MAC2_ON   (1 << 2)
 #define ASPEED_MAC3_ON   (1 << 3)
 
+/* On 32-bit hosts, lower RAM to 1G because of the 2047 MB limit */
+#if HOST_LONG_BITS == 32
+#define ASPEED_RAM_SIZE(sz) MIN((sz), 1 * GiB)
+#else
+#define ASPEED_RAM_SIZE(sz) (sz)
+#endif
+
+struct AspeedMachineState {
+    /* Private */
+    MachineState parent_obj;
+    /* Public */
+
+    AspeedSoCState *soc;
+    MemoryRegion boot_rom;
+    bool mmio_exec;
+    uint32_t uart_chosen;
+    char *fmc_model;
+    char *spi_model;
+    uint32_t hw_strap1;
+};
 
 struct AspeedMachineClass {
     MachineClass parent_obj;
@@ -45,5 +66,10 @@ struct AspeedMachineClass {
     bool vbootrom;
 };
 
+void aspeed_machine_class_init_cpus_defaults(MachineClass *mc);
+void create_pca9552(AspeedSoCState *soc, int bus_id, int addr);
+I2CSlave *create_pca9554(AspeedSoCState *soc, int bus_id, int addr);
+void aspeed_machine_ast2600_class_emmc_init(ObjectClass *oc);
+void connect_serial_hds_to_uarts(AspeedMachineState *bmc);
 
 #endif

@@ -1672,7 +1672,8 @@ static MachineClass *select_machine(QDict *qdict, Error **errp)
 {
     ERRP_GUARD();
     const char *machine_type = qdict_get_try_str(qdict, "type");
-    g_autoptr(GSList) machines = object_class_get_list(TYPE_MACHINE, false);
+    g_autoptr(GSList) machines = object_class_get_list(target_machine_typename(),
+                                                       false);
     MachineClass *machine_class = NULL;
 
     if (machine_type) {
@@ -3077,7 +3078,7 @@ void qemu_init(int argc, char **argv)
                     model = g_strdup(qdict_get_str(dict, "model"));
                     qdict_del(dict, "model");
                     if (is_help_option(model)) {
-                        show_valid_soundhw();
+                        audio_print_available_models();
                         exit(0);
                     }
                 }
@@ -3524,10 +3525,6 @@ void qemu_init(int argc, char **argv)
                 prom_envs[nb_prom_envs] = optarg;
                 nb_prom_envs++;
                 break;
-            case QEMU_OPTION_old_param:
-                warn_report("-old-param is deprecated");
-                old_param = 1;
-                break;
             case QEMU_OPTION_rtc:
                 opts = qemu_opts_parse_noisily(qemu_find_opts("rtc"), optarg,
                                                false);
@@ -3820,7 +3817,7 @@ void qemu_init(int argc, char **argv)
     migration_object_init();
 
     /* parse features once if machine provides default cpu_type */
-    current_machine->cpu_type = machine_class_default_cpu_type(machine_class);
+    current_machine->cpu_type = machine_default_cpu_type(current_machine);
     if (cpu_option) {
         current_machine->cpu_type = parse_cpu_option(cpu_option);
     }
@@ -3841,6 +3838,8 @@ void qemu_init(int argc, char **argv)
     }
     qemu_init_displays();
     accel_setup_post(current_machine);
-    os_setup_post();
+    if (migrate_mode() != MIG_MODE_CPR_EXEC) {
+        os_setup_post();
+    }
     resume_mux_open();
 }

@@ -169,7 +169,7 @@ struct CPUClass {
     vaddr (*gdb_adjust_breakpoint)(CPUState *cpu, vaddr addr);
 
     const char *gdb_core_xml_file;
-    const gchar * (*gdb_arch_name)(CPUState *cpu);
+    const char * (*gdb_arch_name)(CPUState *cpu);
     const char * (*gdb_get_core_xml_file)(CPUState *cpu);
 
     void (*disas_set_info)(CPUState *cpu, disassemble_info *info);
@@ -198,10 +198,11 @@ struct CPUClass {
 };
 
 /*
- * Fix the number of mmu modes to 16, which is also the maximum
- * supported by the softmmu tlb api.
+ * Fix the number of mmu modes across all targets.
+ * Current maximum is target/arm/.
  */
-#define NB_MMU_MODES 16
+#define NB_MMU_MODES 22
+typedef uint32_t MMUIdxMap;
 
 /* Use a fully associative victim tlb of 8 entries. */
 #define CPU_VTLB_SIZE 8
@@ -306,7 +307,7 @@ typedef struct CPUTLBCommon {
      * mmu_idx N since the last time that mmu_idx was flushed.
      * Protected by tlb_c.lock.
      */
-    uint16_t dirty;
+    MMUIdxMap dirty;
     /*
      * Statistics.  These are not lock protected, but are read and
      * written atomically.  This allows the monitor to print a snapshot
@@ -422,7 +423,17 @@ struct qemu_work_item;
  * valid under cpu_list_lock.
  * @created: Indicates whether the CPU thread has been successfully created.
  * @halt_cond: condition variable sleeping threads can wait on.
+ * @exit_request: Another thread requests the CPU to call qemu_process_cpu_events().
+ *   Should be read only by CPU thread with load-acquire, to synchronize with
+ *   other threads' store-release operation.
+ *
+ *   In some cases, accelerator-specific code will write exit_request from
+ *   within the same thread, to "bump" the effect of qemu_cpu_kick() to
+ *   the one provided by cpu_exit(), especially when processing interrupt
+ *   flags.  In this case, the write and read happen in the same thread
+ *   and the write therefore can use qemu_atomic_set().
  * @interrupt_request: Indicates a pending interrupt request.
+ *   Only used by system emulation.
  * @halted: Nonzero if the CPU is in suspended state.
  * @stop: Indicates a pending stop request.
  * @stopped: Indicates the CPU has been artificially stopped.
@@ -494,7 +505,6 @@ struct CPUState {
     bool exit_request;
     int exclusive_context_count;
     uint32_t cflags_next_tb;
-    /* updates protected by BQL */
     uint32_t interrupt_request;
     int singlestep_enabled;
     int64_t icount_budget;
@@ -506,7 +516,6 @@ struct CPUState {
     QSIMPLEQ_HEAD(, qemu_work_item) work_list;
 
     struct CPUAddressSpace *cpu_ases;
-    int cpu_ases_count;
     int num_ases;
     AddressSpace *as;
     MemoryRegion *memory;
@@ -592,6 +601,22 @@ static inline CPUArchState *cpu_env(CPUState *cpu)
     /* We validate that CPUArchState follows CPUState in cpu-target.c */
     return (CPUArchState *)(cpu + 1);
 }
+
+#ifdef CONFIG_TCG
+/*
+ * Invert the index order of the CPUTLBDescFast array so that lower
+ * mmu_idx have offsets from env with smaller magnitude.
+ */
+static inline int mmuidx_to_fast_index(int mmu_idx)
+{
+    return NB_MMU_MODES - 1 - mmu_idx;
+}
+
+static inline CPUTLBDescFast *cpu_tlb_fast(CPUState *cpu, int mmu_idx)
+{
+    return &cpu->neg.tlb.f[mmuidx_to_fast_index(mmu_idx)];
+}
+#endif
 
 typedef QTAILQ_HEAD(CPUTailQ, CPUState) CPUTailQ;
 extern CPUTailQ cpus_queue;
@@ -829,7 +854,8 @@ bool qemu_cpu_is_self(CPUState *cpu);
  * qemu_cpu_kick:
  * @cpu: The vCPU to kick.
  *
- * Kicks @cpu's thread.
+ * Kicks @cpu's thread to exit the accelerator.  For accelerators that
+ * can do that, the target vCPU thread will try not to take the BQL.
  */
 void qemu_cpu_kick(CPUState *cpu);
 
@@ -941,6 +967,28 @@ CPUState *cpu_by_arch_id(int64_t id);
  */
 
 void cpu_interrupt(CPUState *cpu, int mask);
+
+/**
+ * cpu_test_interrupt:
+ * @cpu: The CPU to check interrupt(s) on.
+ * @mask: The interrupts to check.
+ *
+ * Checks if any of interrupts in @mask are pending on @cpu.
+ */
+static inline bool cpu_test_interrupt(CPUState *cpu, int mask)
+{
+    return qatomic_load_acquire(&cpu->interrupt_request) & mask;
+}
+
+/**
+ * cpu_set_interrupt:
+ * @cpu: The CPU to set pending interrupt(s) on.
+ * @mask: The interrupts to set.
+ *
+ * Sets interrupts in @mask as pending on @cpu.  Unlike @cpu_interrupt,
+ * this does not kick the vCPU.
+ */
+void cpu_set_interrupt(CPUState *cpu, int mask);
 
 /**
  * cpu_set_pc:
@@ -1112,6 +1160,15 @@ AddressSpace *cpu_get_address_space(CPUState *cpu, int asidx);
 
 G_NORETURN void cpu_abort(CPUState *cpu, const char *fmt, ...)
     G_GNUC_PRINTF(2, 3);
+
+/**
+ * qemu_process_cpu_events:
+ * @cpu: CPU that left the execution loop
+ *
+ * Perform accelerator-independent work after the CPU has left
+ * the inner execution loop.
+ */
+void qemu_process_cpu_events(CPUState *cpu);
 
 /* $(top_srcdir)/cpu.c */
 void cpu_class_init_props(DeviceClass *dc);

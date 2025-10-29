@@ -12,8 +12,8 @@
 //! See [`PL011State`](crate::device::PL011State) for the device model type and
 //! the [`registers`] module for register types.
 
+mod bindings;
 mod device;
-mod device_class;
 mod registers;
 
 pub use device::pl011_create;

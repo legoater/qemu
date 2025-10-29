@@ -247,10 +247,20 @@ static int arm_gdb_get_sysreg(CPUState *cs, GByteArray *buf, int reg)
     key = cpu->dyn_sysreg_feature.data.cpregs.keys[reg];
     ri = get_arm_cp_reginfo(cpu->cp_regs, key);
     if (ri) {
-        if (cpreg_field_is_64bit(ri)) {
+        switch (cpreg_field_type(ri)) {
+        case MO_64:
+            if (ri->vhe_redir_to_el2 &&
+                (arm_hcr_el2_eff(env) & HCR_E2H) &&
+                arm_current_el(env) == 2) {
+                ri = get_arm_cp_reginfo(cpu->cp_regs, ri->vhe_redir_to_el2);
+            } else if (ri->vhe_redir_to_el01) {
+                ri = get_arm_cp_reginfo(cpu->cp_regs, ri->vhe_redir_to_el01);
+            }
             return gdb_get_reg64(buf, (uint64_t)read_raw_cp_reg(env, ri));
-        } else {
+        case MO_32:
             return gdb_get_reg32(buf, (uint32_t)read_raw_cp_reg(env, ri));
+        default:
+            g_assert_not_reached();
         }
     }
     return 0;
@@ -527,7 +537,8 @@ void arm_cpu_register_gdb_regs_for_features(ARMCPU *cpu)
          * registers so we don't need to include both.
          */
 #ifdef TARGET_AARCH64
-        if (isar_feature_aa64_sve(&cpu->isar)) {
+        if (isar_feature_aa64_sve(&cpu->isar) ||
+            isar_feature_aa64_sme(&cpu->isar)) {
             GDBFeature *feature = arm_gen_dynamic_svereg_feature(cs, cs->gdb_num_regs);
             gdb_register_coprocessor(cs, aarch64_gdb_get_sve_reg,
                                      aarch64_gdb_set_sve_reg, feature, 0);
@@ -536,6 +547,19 @@ void arm_cpu_register_gdb_regs_for_features(ARMCPU *cpu)
                                      aarch64_gdb_set_fpu_reg,
                                      gdb_find_static_feature("aarch64-fpu.xml"),
                                      0);
+        }
+
+        if (isar_feature_aa64_sme(&cpu->isar)) {
+            GDBFeature *sme_feature =
+                arm_gen_dynamic_smereg_feature(cs, cs->gdb_num_regs);
+            gdb_register_coprocessor(cs, aarch64_gdb_get_sme_reg,
+                                     aarch64_gdb_set_sme_reg, sme_feature, 0);
+            if (isar_feature_aa64_sme2(&cpu->isar)) {
+                gdb_register_coprocessor(cs, aarch64_gdb_get_sme2_reg,
+                                         aarch64_gdb_set_sme2_reg,
+                                         gdb_find_static_feature("aarch64-sme2.xml"),
+                                         0);
+            }
         }
         /*
          * Note that we report pauth information via the feature name
@@ -559,6 +583,12 @@ void arm_cpu_register_gdb_regs_for_features(ARMCPU *cpu)
                                      0);
         }
 #endif
+
+        /* All AArch64 CPUs have at least TPIDR */
+        gdb_register_coprocessor(cs, aarch64_gdb_get_tls_reg,
+                                 aarch64_gdb_set_tls_reg,
+                                 arm_gen_dynamic_tls_feature(cs, cs->gdb_num_regs),
+                                 0);
 #endif
     } else {
         if (arm_feature(env, ARM_FEATURE_NEON)) {
