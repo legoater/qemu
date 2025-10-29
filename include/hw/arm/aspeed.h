@@ -70,5 +70,6 @@ void aspeed_machine_class_init_cpus_defaults(MachineClass *mc);
 void create_pca9552(AspeedSoCState *soc, int bus_id, int addr);
 I2CSlave *create_pca9554(AspeedSoCState *soc, int bus_id, int addr);
 void aspeed_machine_ast2600_class_emmc_init(ObjectClass *oc);
+void connect_serial_hds_to_uarts(AspeedMachineState *bmc);
 
 #endif
