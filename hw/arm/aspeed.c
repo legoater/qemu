@@ -117,7 +117,7 @@ static void sdhci_attach_drive(SDHCIState *sdhci, DriveInfo *dinfo, bool emmc,
                                &error_fatal);
 }
 
-static void connect_serial_hds_to_uarts(AspeedMachineState *bmc)
+void connect_serial_hds_to_uarts(AspeedMachineState *bmc)
 {
     AspeedMachineClass *amc = ASPEED_MACHINE_GET_CLASS(bmc);
     AspeedSoCState *s = bmc->soc;
