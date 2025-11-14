@@ -1454,7 +1454,7 @@ static bool fold_and(OptContext *ctx, TCGOp *op)
     a_mask = t1->z_mask & ~t2->o_mask;
 
     if (!fold_masks_zosa_int(ctx, op, z_mask, o_mask, s_mask, a_mask)) {
-        if (ti_is_const(t2)) {
+        if (op->opc == INDEX_op_and && ti_is_const(t2)) {
             /*
              * Canonicalize on extract, if valid.  This aids x86 with its
              * 2 operand MOVZBL and 2 operand AND, selecting the TCGOpcode
@@ -1568,9 +1568,10 @@ static bool fold_bitsel_vec(OptContext *ctx, TCGOp *op)
             return fold_and(ctx, op);
         }
         if (fv == -1 && TCG_TARGET_HAS_orc_vec) {
+            TCGArg ta = op->args[2];
             op->opc = INDEX_op_orc_vec;
             op->args[2] = op->args[1];
-            op->args[1] = op->args[3];
+            op->args[1] = ta;
             return fold_orc(ctx, op);
         }
     }

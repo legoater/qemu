@@ -975,7 +975,8 @@ static void tgen_deposit(TCGContext *s, TCGType type, TCGReg a0, TCGReg a1,
                          TCGReg a2, unsigned ofs, unsigned len)
 {
     /* bfi/bfc */
-    tcg_out32(s, 0x07c00010 | (COND_AL << 28) | (a0 << 12) | a1
+    tcg_debug_assert(a0 == a1);
+    tcg_out32(s, 0x07c00010 | (COND_AL << 28) | (a0 << 12) | a2
               | (ofs << 7) | ((ofs + len - 1) << 16));
 }
 
@@ -1420,7 +1421,7 @@ static TCGLabelQemuLdst *prepare_host_addr(TCGContext *s, HostAddress *h,
         ldst->oi = oi;
         ldst->addr_reg = addr;
 
-        /* Load cpu->neg.tlb.f[mmu_idx].{mask,table} into {r0,r1}.  */
+        /* Load CPUTLBDescFast.{mask,table} into {r0,r1}.  */
         QEMU_BUILD_BUG_ON(offsetof(CPUTLBDescFast, mask) != 0);
         QEMU_BUILD_BUG_ON(offsetof(CPUTLBDescFast, table) != 4);
         tcg_out_ldrd_8(s, COND_AL, TCG_REG_R0, TCG_AREG0, fast_off);

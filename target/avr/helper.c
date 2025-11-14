@@ -28,6 +28,7 @@
 #include "exec/target_page.h"
 #include "accel/tcg/cpu-ldst.h"
 #include "exec/helper-proto.h"
+#include "qemu/plugin.h"
 
 bool avr_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 {
@@ -47,7 +48,7 @@ bool avr_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
             cs->exception_index = EXCP_RESET;
             avr_cpu_do_interrupt(cs);
 
-            cs->interrupt_request &= ~CPU_INTERRUPT_RESET;
+            cpu_reset_interrupt(cs, CPU_INTERRUPT_RESET);
             return true;
         }
     }
@@ -59,7 +60,7 @@ bool avr_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 
             env->intsrc &= env->intsrc - 1; /* clear the interrupt */
             if (!env->intsrc) {
-                cs->interrupt_request &= ~CPU_INTERRUPT_HARD;
+                cpu_reset_interrupt(cs, CPU_INTERRUPT_HARD);
             }
             return true;
         }
@@ -102,6 +103,8 @@ void avr_cpu_do_interrupt(CPUState *cs)
     env->sregI = 0; /* clear Global Interrupt Flag */
 
     cs->exception_index = -1;
+
+    qemu_plugin_vcpu_interrupt_cb(cs, ret);
 }
 
 hwaddr avr_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)

@@ -199,11 +199,15 @@ static void update_ckc_timer(CPUS390XState *env)
         return;
     }
 
-    /* difference between origins */
-    time = env->ckc - td->base.low;
+    if (env->ckc < td->base.low) {
+        time = 0;
+    } else {
+        /* difference between origins */
+        time = env->ckc - td->base.low;
 
-    /* nanoseconds */
-    time = tod2time(time);
+        /* nanoseconds */
+        time = tod2time(time);
+    }
 
     timer_mod(env->tod_timer, time);
 }
@@ -570,7 +574,7 @@ uint32_t HELPER(tpi)(CPUS390XState *env, uint64_t addr)
         lowcore->subchannel_nr = cpu_to_be16(io->nr);
         lowcore->io_int_parm = cpu_to_be32(io->parm);
         lowcore->io_int_word = cpu_to_be32(io->word);
-        cpu_unmap_lowcore(lowcore);
+        cpu_unmap_lowcore(env, lowcore);
     }
 
     g_free(io);
@@ -700,7 +704,7 @@ void HELPER(stfl)(CPUS390XState *env)
     lowcore = cpu_map_lowcore(env);
     prepare_stfl();
     memcpy(&lowcore->stfl_fac_list, stfl_bytes, sizeof(lowcore->stfl_fac_list));
-    cpu_unmap_lowcore(lowcore);
+    cpu_unmap_lowcore(env, lowcore);
 }
 #endif
 

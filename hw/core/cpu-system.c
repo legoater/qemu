@@ -23,7 +23,6 @@
 #include "system/address-spaces.h"
 #include "exec/cputlb.h"
 #include "system/memory.h"
-#include "exec/tb-flush.h"
 #include "qemu/target-info.h"
 #include "hw/qdev-core.h"
 #include "hw/qdev-properties.h"
@@ -204,17 +203,9 @@ static int cpu_common_post_load(void *opaque, int version_id)
          * 0x01 was CPU_INTERRUPT_EXIT. This line can be removed when the
          * version_id is increased.
          */
-        cpu->interrupt_request &= ~0x01;
+        cpu_reset_interrupt(cpu, 0x01);
 
         tlb_flush(cpu);
-
-        /*
-         * loadvm has just updated the content of RAM, bypassing the
-         * usual mechanisms that ensure we flush TBs for writes to
-         * memory we've translated code from. So we must flush all TBs,
-         * which will now be stale.
-         */
-        tb_flush(cpu);
     }
 
     return 0;

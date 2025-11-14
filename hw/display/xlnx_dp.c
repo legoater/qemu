@@ -1267,14 +1267,18 @@ static void xlnx_dp_init(Object *obj)
     s->aux_bus = aux_bus_init(DEVICE(obj), "aux");
 
     /*
-     * Initialize DPCD and EDID..
+     * Initialize DPCD and EDID. Once we have added the objects as
+     * child properties of this device, we can drop the reference we
+     * hold to them, leaving the child-property as the only reference.
      */
     s->dpcd = DPCD(qdev_new("dpcd"));
     object_property_add_child(OBJECT(s), "dpcd", OBJECT(s->dpcd));
+    object_unref(s->dpcd);
 
     s->edid = I2CDDC(qdev_new("i2c-ddc"));
     i2c_slave_set_address(I2C_SLAVE(s->edid), 0x50);
     object_property_add_child(OBJECT(s), "edid", OBJECT(s->edid));
+    object_unref(s->edid);
 
     fifo8_create(&s->rx_fifo, 16);
     fifo8_create(&s->tx_fifo, 16);
@@ -1302,7 +1306,7 @@ static void xlnx_dp_realize(DeviceState *dev, Error **errp)
     DisplaySurface *surface;
     struct audsettings as;
 
-    if (!AUD_register_card("xlnx_dp.audio", &s->aud_card, errp)) {
+    if (!AUD_backend_check(&s->audio_be, errp)) {
         return;
     }
 
@@ -1311,8 +1315,8 @@ static void xlnx_dp_realize(DeviceState *dev, Error **errp)
     qdev_realize(DEVICE(s->dpcd), BUS(s->aux_bus), &error_fatal);
     aux_map_slave(AUX_SLAVE(s->dpcd), 0x0000);
 
-    qdev_realize_and_unref(DEVICE(s->edid), BUS(aux_get_i2c_bus(s->aux_bus)),
-                           &error_fatal);
+    qdev_realize(DEVICE(s->edid), BUS(aux_get_i2c_bus(s->aux_bus)),
+                 &error_fatal);
 
     s->console = graphic_console_init(dev, 0, &xlnx_dp_gfx_ops, s);
     surface = qemu_console_surface(s->console);
@@ -1324,13 +1328,13 @@ static void xlnx_dp_realize(DeviceState *dev, Error **errp)
     as.fmt = AUDIO_FORMAT_S16;
     as.endianness = 0;
 
-    s->amixer_output_stream = AUD_open_out(&s->aud_card,
+    s->amixer_output_stream = AUD_open_out(s->audio_be,
                                            s->amixer_output_stream,
                                            "xlnx_dp.audio.out",
                                            s,
                                            xlnx_dp_audio_callback,
                                            &as);
-    AUD_set_volume_out(s->amixer_output_stream, 0, 255, 255);
+    AUD_set_volume_out_lr(s->amixer_output_stream, 0, 255, 255);
     xlnx_dp_audio_activate(s);
     s->vblank = ptimer_init(vblank_hit, s, DP_VBLANK_PTIMER_POLICY);
     ptimer_transaction_begin(s->vblank);
@@ -1388,7 +1392,7 @@ static void xlnx_dp_reset(DeviceState *dev)
 }
 
 static const Property xlnx_dp_device_properties[] = {
-    DEFINE_AUDIO_PROPERTIES(XlnxDPState, aud_card),
+    DEFINE_AUDIO_PROPERTIES(XlnxDPState, audio_be),
 };
 
 static void xlnx_dp_class_init(ObjectClass *oc, const void *data)
