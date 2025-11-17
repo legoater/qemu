@@ -15,6 +15,7 @@
 #ifdef CONFIG_VTD_ACCEL
 bool vtd_check_hiod_accel(IntelIOMMUState *s, VTDHostIOMMUDevice *vtd_hiod,
                           Error **errp);
+VTDHostIOMMUDevice *vtd_find_hiod_iommufd(VTDAddressSpace *as);
 #else
 static inline bool vtd_check_hiod_accel(IntelIOMMUState *s,
                                         VTDHostIOMMUDevice *vtd_hiod,
@@ -23,6 +24,11 @@ static inline bool vtd_check_hiod_accel(IntelIOMMUState *s,
     error_setg(errp,
                "host IOMMU is incompatible with guest first stage translation");
     return false;
+}
+
+static inline VTDHostIOMMUDevice *vtd_find_hiod_iommufd(VTDAddressSpace *as)
+{
+    return NULL;
 }
 #endif
 #endif
