@@ -88,19 +88,21 @@ struct HostIOMMUDeviceClass {
      * @get_cap: check if a host IOMMU device capability is supported.
      *
      * Optional callback, if not implemented, hint not supporting query
-     * of @cap.
+     * of @cap_id.
      *
      * @hiod: pointer to a host IOMMU device instance.
      *
-     * @cap: capability to check.
+     * @cap_id: capability to check.
+     *
+     * @out_cap: 0 if a @cap_id is unsupported or else the capability
+     * value for @cap_id.
      *
      * @errp: pass an Error out when fails to query capability.
      *
-     * Returns: <0 on failure, 0 if a @cap is unsupported, or else
-     * 1 or some positive value for some special @cap,
-     * i.e., HOST_IOMMU_DEVICE_CAP_AW_BITS.
+     * Returns: <0 if @cap_id is not supported, 0 on success.
      */
-    int (*get_cap)(HostIOMMUDevice *hiod, int cap, Error **errp);
+    int (*get_cap)(HostIOMMUDevice *hiod, int cap_id, uint64_t *out_cap,
+                   Error **errp);
     /**
      * @get_iova_ranges: Return the list of usable iova_ranges along with
      * @hiod Host IOMMU device
@@ -123,6 +125,10 @@ struct HostIOMMUDeviceClass {
  */
 #define HOST_IOMMU_DEVICE_CAP_IOMMU_TYPE        0
 #define HOST_IOMMU_DEVICE_CAP_AW_BITS           1
+/* Generic IOMMU HW capability info */
+#define HOST_IOMMU_DEVICE_CAP_GENERIC_HW        2
+/* PASID width */
+#define HOST_IOMMU_DEVICE_CAP_MAX_PASID_LOG2    3
 
 #define HOST_IOMMU_DEVICE_CAP_AW_BITS_MAX       64
 #endif
