@@ -583,6 +583,9 @@ typedef struct CD {
     ((extract64((x)->word[7], 0, 16) << 32) |           \
      ((x)->word[6] & 0xfffffff0))
 
+#define SMMU_STE_VALID      (1ULL << 0)
+#define SMMU_STE_CFG_BYPASS (1ULL << 3)
+
 static inline int oas2bits(int oas_field)
 {
     switch (oas_field) {
