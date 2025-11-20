@@ -3052,12 +3052,20 @@ static void virt_machine_device_pre_plug_cb(HotplugHandler *hotplug_dev,
             /* The new SMMUv3 device is specific to the PCI bus */
             object_property_set_bool(OBJECT(dev), "smmu_per_bus", true, NULL);
         }
-        if (object_property_find(OBJECT(dev), "accel") &&
-            object_property_get_bool(OBJECT(dev), "accel", &error_abort)) {
+        if (object_property_get_bool(OBJECT(dev), "accel", &error_abort)) {
+            char *stage;
+
             if (!kvm_enabled() || !kvm_irqchip_in_kernel()) {
                 error_setg(errp, "SMMUv3 accel=on requires KVM with "
                            "kernel-irqchip=on support");
                     return;
+            }
+            stage = object_property_get_str(OBJECT(dev), "stage", &error_fatal);
+            /* If no stage specified, SMMUv3 will default to stage 1 */
+            if (*stage && strcmp("1", stage)) {
+                error_setg(errp, "Only stage1 is supported for SMMUV3 with "
+                           "accel=on");
+                return;
             }
         }
     }
@@ -3096,8 +3104,7 @@ static void virt_machine_device_plug_cb(HotplugHandler *hotplug_dev,
             }
 
             create_smmuv3_dev_dtb(vms, dev, bus);
-            if (object_property_find(OBJECT(dev), "accel") &&
-                object_property_get_bool(OBJECT(dev), "accel", &error_abort)) {
+            if (object_property_get_bool(OBJECT(dev), "accel", &error_abort)) {
                 hwaddr db_start;
 
                 if (vms->msi_controller == VIRT_MSI_CTRL_ITS) {
