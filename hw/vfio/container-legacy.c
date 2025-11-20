@@ -1206,15 +1206,19 @@ static bool hiod_legacy_vfio_realize(HostIOMMUDevice *hiod, void *opaque,
 }
 
 static int hiod_legacy_vfio_get_cap(HostIOMMUDevice *hiod, int cap,
-                                    Error **errp)
+                                    uint64_t *out_cap, Error **errp)
 {
+    g_assert(out_cap);
+
     switch (cap) {
     case HOST_IOMMU_DEVICE_CAP_AW_BITS:
-        return vfio_device_get_aw_bits(hiod->agent);
+        *out_cap = vfio_device_get_aw_bits(hiod->agent);
+        break;
     default:
         error_setg(errp, "%s: unsupported capability %x", hiod->name, cap);
         return -EINVAL;
     }
+    return 0;
 }
 
 static GList *

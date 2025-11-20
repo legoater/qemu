@@ -524,19 +524,32 @@ bool host_iommu_device_iommufd_detach_hwpt(HostIOMMUDeviceIOMMUFD *idev,
     return idevc->detach_hwpt(idev, errp);
 }
 
-static int hiod_iommufd_get_cap(HostIOMMUDevice *hiod, int cap, Error **errp)
+static int hiod_iommufd_get_cap(HostIOMMUDevice *hiod, int cap_id,
+                                uint64_t *out_cap, Error **errp)
 {
     HostIOMMUDeviceCaps *caps = &hiod->caps;
 
-    switch (cap) {
+    g_assert(out_cap);
+
+    switch (cap_id) {
     case HOST_IOMMU_DEVICE_CAP_IOMMU_TYPE:
-        return caps->type;
+        *out_cap = caps->type;
+        break;
     case HOST_IOMMU_DEVICE_CAP_AW_BITS:
-        return vfio_device_get_aw_bits(hiod->agent);
+        *out_cap = vfio_device_get_aw_bits(hiod->agent);
+        break;
+    case HOST_IOMMU_DEVICE_CAP_GENERIC_HW:
+        *out_cap = caps->hw_caps;
+        break;
+    case HOST_IOMMU_DEVICE_CAP_MAX_PASID_LOG2:
+        *out_cap = caps->max_pasid_log2;
+        break;
     default:
-        error_setg(errp, "%s: unsupported capability %x", hiod->name, cap);
+        *out_cap = 0;
+        error_setg(errp, "%s: unsupported capability %x", hiod->name, cap_id);
         return -EINVAL;
     }
+    return 0;
 }
 
 static void hiod_iommufd_class_init(ObjectClass *oc, const void *data)
