@@ -3052,6 +3052,14 @@ static void virt_machine_device_pre_plug_cb(HotplugHandler *hotplug_dev,
             /* The new SMMUv3 device is specific to the PCI bus */
             object_property_set_bool(OBJECT(dev), "smmu_per_bus", true, NULL);
         }
+        if (object_property_find(OBJECT(dev), "accel") &&
+            object_property_get_bool(OBJECT(dev), "accel", &error_abort)) {
+            if (!kvm_enabled() || !kvm_irqchip_in_kernel()) {
+                error_setg(errp, "SMMUv3 accel=on requires KVM with "
+                           "kernel-irqchip=on support");
+                    return;
+            }
+        }
     }
 }
 
@@ -3088,6 +3096,20 @@ static void virt_machine_device_plug_cb(HotplugHandler *hotplug_dev,
             }
 
             create_smmuv3_dev_dtb(vms, dev, bus);
+            if (object_property_find(OBJECT(dev), "accel") &&
+                object_property_get_bool(OBJECT(dev), "accel", &error_abort)) {
+                hwaddr db_start;
+
+                if (vms->msi_controller == VIRT_MSI_CTRL_ITS) {
+                    /* GITS_TRANSLATER page + offset */
+                    db_start = base_memmap[VIRT_GIC_ITS].base + 0x10000 + 0x40;
+                } else {
+                    /* MSI_SETSPI_NS page + offset */
+                    db_start = base_memmap[VIRT_GIC_V2M].base + 0x40;
+                }
+                object_property_set_uint(OBJECT(dev), "msi-gpa", db_start,
+                                         &error_abort);
+            }
         }
     }
 
