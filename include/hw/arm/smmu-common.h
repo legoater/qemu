@@ -162,6 +162,7 @@ struct SMMUState {
     uint8_t bus_num;
     PCIBus *primary_bus;
     bool smmu_per_bus; /* SMMU is specific to the primary_bus */
+    const PCIIOMMUOps *iommu_ops;
 };
 
 struct SMMUBaseClass {
