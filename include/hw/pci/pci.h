@@ -418,6 +418,23 @@ typedef struct IOMMUPRINotifier {
  */
 typedef struct PCIIOMMUOps {
     /**
+     * @supports_address_space: Optional pre-check to determine if a PCI
+     * device can have an IOMMU address space.
+     *
+     * @bus: the #PCIBus being accessed.
+     *
+     * @opaque: the data passed to pci_setup_iommu().
+     *
+     * @devfn: device and function number.
+     *
+     * @errp: pass an Error out only when return false
+     *
+     * Returns: true if the device can be associated with an IOMMU address
+     * space, false otherwise with errp set.
+     */
+    bool (*supports_address_space)(PCIBus *bus, void *opaque, int devfn,
+                                   Error **errp);
+    /**
      * @get_address_space: get the address space for a set of devices
      * on a PCI bus.
      *
