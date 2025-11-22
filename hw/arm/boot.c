@@ -25,6 +25,7 @@
 #include "hw/boards.h"
 #include "system/reset.h"
 #include "hw/loader.h"
+#include "hw/mem/memory-device.h"
 #include "elf.h"
 #include "system/device_tree.h"
 #include "qemu/config-file.h"
@@ -336,81 +337,6 @@ static void set_kernel_args(const struct arm_boot_info *info, AddressSpace *as)
     WRITE_WORD(p, 0);
 }
 
-static void set_kernel_args_old(const struct arm_boot_info *info,
-                                AddressSpace *as)
-{
-    hwaddr p;
-    const char *s;
-    int initrd_size = info->initrd_size;
-    hwaddr base = info->loader_start;
-
-    /* see linux/include/asm-arm/setup.h */
-    p = base + KERNEL_ARGS_ADDR;
-    /* page_size */
-    WRITE_WORD(p, 4096);
-    /* nr_pages */
-    WRITE_WORD(p, info->ram_size / 4096);
-    /* ramdisk_size */
-    WRITE_WORD(p, 0);
-#define FLAG_READONLY 1
-#define FLAG_RDLOAD   4
-#define FLAG_RDPROMPT 8
-    /* flags */
-    WRITE_WORD(p, FLAG_READONLY | FLAG_RDLOAD | FLAG_RDPROMPT);
-    /* rootdev */
-    WRITE_WORD(p, (31 << 8) | 0); /* /dev/mtdblock0 */
-    /* video_num_cols */
-    WRITE_WORD(p, 0);
-    /* video_num_rows */
-    WRITE_WORD(p, 0);
-    /* video_x */
-    WRITE_WORD(p, 0);
-    /* video_y */
-    WRITE_WORD(p, 0);
-    /* memc_control_reg */
-    WRITE_WORD(p, 0);
-    /* unsigned char sounddefault */
-    /* unsigned char adfsdrives */
-    /* unsigned char bytes_per_char_h */
-    /* unsigned char bytes_per_char_v */
-    WRITE_WORD(p, 0);
-    /* pages_in_bank[4] */
-    WRITE_WORD(p, 0);
-    WRITE_WORD(p, 0);
-    WRITE_WORD(p, 0);
-    WRITE_WORD(p, 0);
-    /* pages_in_vram */
-    WRITE_WORD(p, 0);
-    /* initrd_start */
-    if (initrd_size) {
-        WRITE_WORD(p, info->initrd_start);
-    } else {
-        WRITE_WORD(p, 0);
-    }
-    /* initrd_size */
-    WRITE_WORD(p, initrd_size);
-    /* rd_start */
-    WRITE_WORD(p, 0);
-    /* system_rev */
-    WRITE_WORD(p, 0);
-    /* system_serial_low */
-    WRITE_WORD(p, 0);
-    /* system_serial_high */
-    WRITE_WORD(p, 0);
-    /* mem_fclk_21285 */
-    WRITE_WORD(p, 0);
-    /* zero unused fields */
-    while (p < base + KERNEL_ARGS_ADDR + 256 + 1024) {
-        WRITE_WORD(p, 0);
-    }
-    s = info->kernel_cmdline;
-    if (s) {
-        address_space_write(as, p, MEMTXATTRS_UNSPECIFIED, s, strlen(s) + 1);
-    } else {
-        WRITE_WORD(p, 0);
-    }
-}
-
 static int fdt_add_memory_node(void *fdt, uint32_t acells, hwaddr mem_base,
                                uint32_t scells, hwaddr mem_len,
                                int numa_node_id)
@@ -515,6 +441,29 @@ static void fdt_add_psci_node(void *fdt, ARMCPU *armcpu)
     qemu_fdt_setprop_cell(fdt, "/psci", "migrate", migrate_fn);
 }
 
+static int fdt_add_pmem_node(void *fdt, uint32_t acells, uint32_t scells,
+                             int64_t mem_base, int64_t size, int64_t node)
+{
+    int ret;
+
+    g_autofree char *nodename = g_strdup_printf("/pmem@%" PRIx64, mem_base);
+
+    qemu_fdt_add_subnode(fdt, nodename);
+    qemu_fdt_setprop_string(fdt, nodename, "compatible", "pmem-region");
+    ret = qemu_fdt_setprop_sized_cells(fdt, nodename, "reg", acells,
+                                       mem_base, scells, size);
+    if (ret) {
+        return ret;
+    }
+
+    if (node >= 0) {
+        return qemu_fdt_setprop_cell(fdt, nodename, "numa-node-id",
+                                     node);
+    }
+
+    return 0;
+}
+
 int arm_load_dtb(hwaddr addr, const struct arm_boot_info *binfo,
                  hwaddr addr_limit, AddressSpace *as, MachineState *ms,
                  ARMCPU *cpu)
@@ -525,6 +474,7 @@ int arm_load_dtb(hwaddr addr, const struct arm_boot_info *binfo,
     unsigned int i;
     hwaddr mem_base, mem_len;
     char **node_path;
+    g_autoptr(MemoryDeviceInfoList) md_list = NULL;
     Error *err = NULL;
 
     if (binfo->dtb_filename) {
@@ -625,6 +575,23 @@ int arm_load_dtb(hwaddr addr, const struct arm_boot_info *binfo,
             fprintf(stderr, "couldn't add /memory@%"PRIx64" node\n",
                     binfo->loader_start);
             goto fail;
+        }
+    }
+
+    md_list = qmp_memory_device_list();
+    for (MemoryDeviceInfoList *m = md_list; m != NULL; m = m->next) {
+        MemoryDeviceInfo *mi = m->value;
+
+        if (mi->type == MEMORY_DEVICE_INFO_KIND_NVDIMM) {
+            PCDIMMDeviceInfo *di = mi->u.nvdimm.data;
+
+            rc = fdt_add_pmem_node(fdt, acells, scells,
+                                   di->addr, di->size, di->node);
+            if (rc < 0) {
+                fprintf(stderr, "couldn't add NVDIMM /pmem@%"PRIx64" node\n",
+                        di->addr);
+                goto fail;
+            }
         }
     }
 
@@ -760,11 +727,7 @@ static void do_cpu_reset(void *opaque)
                 cpu_set_pc(cs, info->loader_start);
 
                 if (!have_dtb(info)) {
-                    if (old_param) {
-                        set_kernel_args_old(info, as);
-                    } else {
-                        set_kernel_args(info, as);
-                    }
+                    set_kernel_args(info, as);
                 }
             } else if (info->secondary_cpu_reset_hook) {
                 info->secondary_cpu_reset_hook(cpu, info);
@@ -1001,7 +964,8 @@ static void arm_setup_direct_kernel_boot(ARMCPU *cpu,
         /* 32-bit ARM */
         entry = info->loader_start + KERNEL_LOAD_ADDR;
         kernel_size = load_image_targphys_as(info->kernel_filename, entry,
-                                             ram_end - KERNEL_LOAD_ADDR, as);
+                                             ram_end - KERNEL_LOAD_ADDR, as,
+                                             NULL);
         is_linux = 1;
         if (kernel_size >= 0) {
             image_low_addr = entry;
@@ -1062,7 +1026,7 @@ static void arm_setup_direct_kernel_boot(ARMCPU *cpu,
                                                      info->initrd_start,
                                                      ram_end -
                                                      info->initrd_start,
-                                                     as);
+                                                     as, NULL);
             }
             if (initrd_size < 0) {
                 error_report("could not load initrd '%s'",

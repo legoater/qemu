@@ -94,7 +94,7 @@ struct IVShmemState {
 
     /* exactly one of these two may be set */
     HostMemoryBackend *hostmem; /* with interrupts */
-    CharBackend server_chr; /* without interrupts */
+    CharFrontend server_chr; /* without interrupts */
 
     /* registers */
     uint32_t intrmask;
@@ -479,6 +479,11 @@ static void process_msg_shmem(IVShmemState *s, int fd, Error **errp)
     struct stat buf;
     size_t size;
 
+    if (fd < 0) {
+        error_setg(errp, "server didn't provide fd with shared memory message");
+        return;
+    }
+
     if (s->ivshmem_bar2) {
         error_setg(errp, "server sent unexpected shared memory message");
         close(fd);
@@ -535,7 +540,12 @@ static void process_msg_connect(IVShmemState *s, uint16_t posn, int fd,
 
     IVSHMEM_DPRINTF("eventfds[%d][%d] = %d\n", posn, vector, fd);
     event_notifier_init_fd(&peer->eventfds[vector], fd);
-    g_unix_set_fd_nonblocking(fd, true, NULL); /* msix/irqfd poll non block */
+
+    /* msix/irqfd poll non block */
+    if (!qemu_set_blocking(fd, false, errp)) {
+        close(fd);
+        return;
+    }
 
     if (posn == s->vm_id) {
         setup_interrupt(s, vector, errp);
@@ -553,7 +563,9 @@ static void process_msg(IVShmemState *s, int64_t msg, int fd, Error **errp)
 
     if (msg < -1 || msg > IVSHMEM_MAX_PEERS) {
         error_setg(errp, "server sent invalid message %" PRId64, msg);
-        close(fd);
+        if (fd >= 0) {
+            close(fd);
+        }
         return;
     }
 

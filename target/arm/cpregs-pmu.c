@@ -228,28 +228,46 @@ static bool event_supported(uint16_t number)
     return supported_event_map[number] != UNSUPPORTED_EVENT;
 }
 
-static CPAccessResult pmreg_access(CPUARMState *env, const ARMCPRegInfo *ri,
-                                   bool isread)
+static CPAccessResult do_pmreg_access(CPUARMState *env, bool is_pmcr)
 {
     /*
      * Performance monitor registers user accessibility is controlled
-     * by PMUSERENR. MDCR_EL2.TPM and MDCR_EL3.TPM allow configurable
+     * by PMUSERENR. MDCR_EL2.TPM/TPMCR and MDCR_EL3.TPM allow configurable
      * trapping to EL2 or EL3 for other accesses.
      */
     int el = arm_current_el(env);
-    uint64_t mdcr_el2 = arm_mdcr_el2_eff(env);
 
     if (el == 0 && !(env->cp15.c9_pmuserenr & 1)) {
         return CP_ACCESS_TRAP_EL1;
     }
-    if (el < 2 && (mdcr_el2 & MDCR_TPM)) {
-        return CP_ACCESS_TRAP_EL2;
+    if (el < 2) {
+        uint64_t mdcr_el2 = arm_mdcr_el2_eff(env);
+
+        if (mdcr_el2 & MDCR_TPM) {
+            return CP_ACCESS_TRAP_EL2;
+        }
+        if (is_pmcr && (mdcr_el2 & MDCR_TPMCR)) {
+            return CP_ACCESS_TRAP_EL2;
+        }
     }
     if (el < 3 && (env->cp15.mdcr_el3 & MDCR_TPM)) {
         return CP_ACCESS_TRAP_EL3;
     }
 
     return CP_ACCESS_OK;
+}
+
+static CPAccessResult pmreg_access(CPUARMState *env, const ARMCPRegInfo *ri,
+                                   bool isread)
+{
+    return do_pmreg_access(env, false);
+}
+
+static CPAccessResult pmreg_access_pmcr(CPUARMState *env,
+                                        const ARMCPRegInfo *ri,
+                                        bool isread)
+{
+    return do_pmreg_access(env, true);
 }
 
 static CPAccessResult pmreg_access_xevcntr(CPUARMState *env,
@@ -1067,11 +1085,6 @@ static const ARMCPRegInfo v7_pm_reginfo[] = {
       .fgt = FGT_PMSELR_EL0,
       .fieldoffset = offsetof(CPUARMState, cp15.c9_pmselr),
       .writefn = pmselr_write, .raw_writefn = raw_write, },
-    { .name = "PMCCNTR", .cp = 15, .crn = 9, .crm = 13, .opc1 = 0, .opc2 = 0,
-      .access = PL0_RW, .resetvalue = 0, .type = ARM_CP_ALIAS | ARM_CP_IO,
-      .fgt = FGT_PMCCNTR_EL0,
-      .readfn = pmccntr_read, .writefn = pmccntr_write32,
-      .accessfn = pmreg_access_ccntr },
     { .name = "PMCCNTR_EL0", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 3, .crn = 9, .crm = 13, .opc2 = 0,
       .access = PL0_RW, .accessfn = pmreg_access_ccntr,
@@ -1192,14 +1205,14 @@ void define_pm_cpregs(ARMCPU *cpu)
             .fgt = FGT_PMCR_EL0,
             .type = ARM_CP_IO | ARM_CP_ALIAS,
             .fieldoffset = offsetoflow32(CPUARMState, cp15.c9_pmcr),
-            .accessfn = pmreg_access,
+            .accessfn = pmreg_access_pmcr,
             .readfn = pmcr_read, .raw_readfn = raw_read,
             .writefn = pmcr_write, .raw_writefn = raw_write,
         };
         const ARMCPRegInfo pmcr64 = {
             .name = "PMCR_EL0", .state = ARM_CP_STATE_AA64,
             .opc0 = 3, .opc1 = 3, .crn = 9, .crm = 12, .opc2 = 0,
-            .access = PL0_RW, .accessfn = pmreg_access,
+            .access = PL0_RW, .accessfn = pmreg_access_pmcr,
             .fgt = FGT_PMCR_EL0,
             .type = ARM_CP_IO,
             .fieldoffset = offsetof(CPUARMState, cp15.c9_pmcr),
@@ -1211,6 +1224,23 @@ void define_pm_cpregs(ARMCPU *cpu)
         define_one_arm_cp_reg(cpu, &pmcr);
         define_one_arm_cp_reg(cpu, &pmcr64);
         define_arm_cp_regs(cpu, v7_pm_reginfo);
+        /*
+         * 32-bit AArch32 PMCCNTR. We don't expose this to GDB if the
+         * new-in-v8 PMUv3 64-bit AArch32 PMCCNTR register is implemented
+         * (as that will provide the GDB user's view of "PMCCNTR").
+         */
+        ARMCPRegInfo pmccntr = {
+            .name = "PMCCNTR",
+            .cp = 15, .crn = 9, .crm = 13, .opc1 = 0, .opc2 = 0,
+            .access = PL0_RW, .accessfn = pmreg_access_ccntr,
+            .resetvalue = 0, .type = ARM_CP_ALIAS | ARM_CP_IO,
+            .fgt = FGT_PMCCNTR_EL0,
+            .readfn = pmccntr_read, .writefn = pmccntr_write32,
+        };
+        if (arm_feature(env, ARM_FEATURE_V8)) {
+            pmccntr.type |= ARM_CP_NO_GDB;
+        }
+        define_one_arm_cp_reg(cpu, &pmccntr);
 
         for (unsigned i = 0, pmcrn = pmu_num_counters(env); i < pmcrn; i++) {
             g_autofree char *pmevcntr_name = g_strdup_printf("PMEVCNTR%d", i);
@@ -1276,6 +1306,13 @@ void define_pm_cpregs(ARMCPU *cpu)
               .access = PL0_R, .accessfn = pmreg_access, .type = ARM_CP_CONST,
               .fgt = FGT_PMCEIDN_EL0,
               .resetvalue = cpu->pmceid1 },
+            /* AArch32 64-bit PMCCNTR view: added in PMUv3 with Armv8 */
+            { .name = "PMCCNTR", .state = ARM_CP_STATE_AA32,
+              .cp = 15, .crm = 9, .opc1 = 0,
+              .access = PL0_RW, .accessfn = pmreg_access_ccntr, .resetvalue = 0,
+              .type = ARM_CP_ALIAS | ARM_CP_IO | ARM_CP_64BIT,
+              .fgt = FGT_PMCCNTR_EL0, .readfn = pmccntr_read,
+              .writefn = pmccntr_write,  },
         };
         define_arm_cp_regs(cpu, v8_pm_reginfo);
     }

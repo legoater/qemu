@@ -43,10 +43,7 @@
 #include <libfdt.h>
 
 #define BINARY_DEVICE_TREE_FILE "canyonlands.dtb"
-#define UBOOT_FILENAME "u-boot-sam460-20100605.bin"
-/* to extract the official U-Boot bin from the updater: */
-/* dd bs=1 skip=$(($(stat -c '%s' updater/updater-460) - 0x80000)) \
-     if=updater/updater-460 of=u-boot-sam460-20100605.bin */
+#define UBOOT_FILENAME "u-boot-sam460.bin"
 
 #define PCIE0_DCRN_BASE 0x100
 #define PCIE1_DCRN_BASE 0x120
@@ -97,7 +94,7 @@ static int sam460ex_load_uboot(void)
      *
      * Else, it's initialized to zero.  And then 512KiB of ROM get
      * mapped on top of its second half (0xFFF80000..0xFFFFFFFF),
-     * initialized from u-boot-sam460-20100605.bin.
+     * initialized from UBOOT_FILENAME.
      *
      * This doesn't smell right.
      *
@@ -494,12 +491,8 @@ static void sam460ex_init(MachineState *machine)
     if (machine->initrd_filename) {
         initrd_size = load_image_targphys(machine->initrd_filename,
                                           RAMDISK_ADDR,
-                                          machine->ram_size - RAMDISK_ADDR);
-        if (initrd_size < 0) {
-            error_report("could not load ram disk '%s' at %x",
-                    machine->initrd_filename, RAMDISK_ADDR);
-            exit(1);
-        }
+                                          machine->ram_size - RAMDISK_ADDR,
+                                          &error_fatal);
     }
 
     /* If we're loading a kernel directly, we must load the device tree too. */

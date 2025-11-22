@@ -508,7 +508,12 @@ struct BlockDriver {
         BlockDriverState *bs, BlockdevAmendOptions *opts, bool force,
         Error **errp);
 
-    /* aio */
+    /*
+     * AIO
+     * The given completion callback will be run in the same AioContext as the
+     * one in which the AIO function was called.
+     */
+
     BlockAIOCB * GRAPH_RDLOCK_PTR (*bdrv_aio_preadv)(BlockDriverState *bs,
         int64_t offset, int64_t bytes, QEMUIOVector *qiov,
         BdrvRequestFlags flags, BlockCompletionFunc *cb, void *opaque);
@@ -817,10 +822,10 @@ typedef struct BlockLimits {
     int64_t max_pdiscard;
 
     /*
-     * Optimal alignment for discard requests in bytes. A power of 2
-     * is best but not mandatory.  Must be a multiple of
-     * bl.request_alignment, and must be less than max_pdiscard if
-     * that is set. May be 0 if bl.request_alignment is good enough
+     * Optimal alignment for discard requests in bytes. Note that this doesn't
+     * have to be a power of two. Must be a multiple of bl.request_alignment,
+     * and must be less than max_pdiscard if that is set. May be 0 if
+     * bl.request_alignment is good enough.
      */
     uint32_t pdiscard_alignment;
 
@@ -831,11 +836,10 @@ typedef struct BlockLimits {
     int64_t max_pwrite_zeroes;
 
     /*
-     * Optimal alignment for write zeroes requests in bytes. A power
-     * of 2 is best but not mandatory.  Must be a multiple of
-     * bl.request_alignment, and must be less than max_pwrite_zeroes
-     * if that is set. May be 0 if bl.request_alignment is good
-     * enough
+     * Optimal alignment for write zeroes requests in bytes. Note that this
+     * doesn't have to be a power of two. Must be a multiple of
+     * bl.request_alignment, and must be less than max_pwrite_zeroes if that is
+     * set. May be 0 if bl.request_alignment is good enough.
      */
     uint32_t pwrite_zeroes_alignment;
 
@@ -863,18 +867,23 @@ typedef struct BlockLimits {
     uint64_t max_hw_transfer;
 
     /*
-     * Maximal number of scatter/gather elements allowed by the hardware.
+     * Maximum number of scatter/gather elements allowed by the hardware.
      * Applies whenever transfers to the device bypass the kernel I/O
      * scheduler, for example with SG_IO.  If larger than max_iov
      * or if zero, blk_get_max_hw_iov will fall back to max_iov.
      */
     int max_hw_iov;
 
-
-    /* memory alignment, in bytes so that no bounce buffer is needed */
+    /*
+     * Minimal required memory alignment in bytes for zero-copy I/O to succeed.
+     * For unaligned requests, a bounce buffer will be used.
+     */
     size_t min_mem_alignment;
 
-    /* memory alignment, in bytes, for bounce buffer */
+    /*
+     * Optimal memory alignment in bytes. This is the alignment used for any
+     * buffer allocations QEMU performs internally.
+     */
     size_t opt_mem_alignment;
 
     /* maximum number of iovec elements */
@@ -1020,7 +1029,10 @@ struct BdrvChildClass {
      * the I/O API.
      */
 
-    void (*resize)(BdrvChild *child);
+    /*
+     * Notifies the parent that the child was resized.
+     */
+    void GRAPH_RDLOCK_PTR (*resize)(BdrvChild *child);
 
     /*
      * Returns a name that is supposedly more useful for human users than the
