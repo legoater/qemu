@@ -1368,6 +1368,9 @@ sub checkspdx {
     $expr =~ s/^\s*//g;
     $expr =~ s/\s*$//g;
 
+    # Cull C comment end
+    $expr =~ s/\*\/.*//;
+
     my @bits = split / +/, $expr;
 
     my $prefer = "GPL-2.0-or-later";
@@ -1738,13 +1741,7 @@ sub process {
 			}
 		} elsif ($line =~ /^\+\+\+\s+(\S+)/) {
 			$realfile = $1;
-			$realfile =~ s@^([^/]*)/@@ if (!$file);
-
-			$p1_prefix = $1;
-			if (!$file && $tree && $p1_prefix ne '' &&
-			    -e "$root/$p1_prefix") {
-				WARN("patch prefix '$p1_prefix' exists, appears to be a -p0 patch\n");
-			}
+			$realfile =~ s@^[^/]*/@@  if (!$file);
 
 			if (defined $fileinfo && !$fileinfo->{isgit}) {
 				$fileinfo->{lineend} = $oldhere;
@@ -1813,7 +1810,8 @@ sub process {
 		}
 
 # Check SPDX-License-Identifier references a permitted license
-		if ($rawline =~ m,SPDX-License-Identifier: (.*?)(\*/)?\s*$,) {
+		if (($rawline =~ m,SPDX-License-Identifier: (.*?)(\*/)?\s*$,) &&
+			$rawline !~ /^-/) {
 			$fileinfo->{facts}->{sawspdx} = 1;
 			&checkspdx($realfile, $1);
 		}
@@ -3194,13 +3192,17 @@ sub process {
 		if ($line =~ /\bsignal\s*\(/ && !($line =~ /SIG_(?:IGN|DFL)/)) {
 			ERROR("use sigaction to establish signal handlers; signal is not portable\n" . $herecurr);
 		}
-# recommend qemu_bh_new_guarded instead of qemu_bh_new
-        if ($realfile =~ /.*\/hw\/.*/ && $line =~ /\bqemu_bh_new\s*\(/) {
-			ERROR("use qemu_bh_new_guarded() instead of qemu_bh_new() to avoid reentrancy problems\n" . $herecurr);
+# recommend aio_bh_new_guarded instead of legacy qemu_bh_new / qemu_bh_new_guarded
+        if ($realfile =~ /.*\/hw\/.*/ && $line =~ /\bqemu_bh_new(_guarded)?\s*\(/) {
+			ERROR("use aio_bh_new_guarded() instead of qemu_bh_new*() to avoid reentrancy problems\n" . $herecurr);
 		}
 # recommend aio_bh_new_guarded instead of aio_bh_new
         if ($realfile =~ /.*\/hw\/.*/ && $line =~ /\baio_bh_new\s*\(/) {
 			ERROR("use aio_bh_new_guarded() instead of aio_bh_new() to avoid reentrancy problems\n" . $herecurr);
+		}
+# check for DEVICE_NATIVE_ENDIAN, use explicit endianness instead
+		if ($line =~ /\bDEVICE_NATIVE_ENDIAN\b/) {
+			ERROR("DEVICE_NATIVE_ENDIAN is not allowed, use DEVICE_LITTLE_ENDIAN or DEVICE_BIG_ENDIAN instead\n" . $herecurr);
 		}
 # check for module_init(), use category-specific init macros explicitly please
 		if ($line =~ /^module_init\s*\(/) {

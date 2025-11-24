@@ -46,7 +46,7 @@
 #include "trace.h"
 #include "elf.h"
 #include "qemu/units.h"
-#include "audio/audio.h"
+#include "qemu/audio.h"
 
 /* SMP is not enabled, for now */
 #define MAX_CPUS 1
@@ -280,7 +280,8 @@ static void ibm_40p_init(MachineState *machine)
     bios_size = load_elf(filename, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                          ELFDATA2MSB, PPC_ELF_MACHINE, 0, 0);
     if (bios_size < 0) {
-        bios_size = load_image_targphys(filename, BIOS_ADDR, BIOS_SIZE);
+        bios_size = load_image_targphys(filename, BIOS_ADDR, BIOS_SIZE,
+                                        &error_fatal);
     }
     if (bios_size < 0 || bios_size > BIOS_SIZE) {
         error_report("Could not load bios image '%s'", filename);
@@ -308,6 +309,13 @@ static void ibm_40p_init(MachineState *machine)
     sysbus_connect_irq(pcihost, 0, qdev_get_gpio_in(i82378_dev, 15));
     isa_bus = ISA_BUS(qdev_get_child_bus(i82378_dev, "isa.0"));
 
+    /* system control ports */
+    isa_dev = isa_new("prep-systemio");
+    dev = DEVICE(isa_dev);
+    qdev_prop_set_uint32(dev, "ibm-planar-id", 0xfc);
+    qdev_prop_set_uint32(dev, "equipment", 0xc0);
+    isa_realize_and_unref(isa_dev, isa_bus, &error_fatal);
+
     /* Memory controller */
     isa_dev = isa_new("rs6000-mc");
     dev = DEVICE(isa_dev);
@@ -333,7 +341,6 @@ static void ibm_40p_init(MachineState *machine)
         dev = DEVICE(isa_dev);
         qdev_prop_set_uint32(dev, "iobase", 0x830);
         qdev_prop_set_uint32(dev, "irq", 10);
-
         if (machine->audiodev) {
             qdev_prop_set_string(dev, "audiodev", machine->audiodev);
         }
@@ -344,14 +351,7 @@ static void ibm_40p_init(MachineState *machine)
         qdev_prop_set_uint32(dev, "config", 12);
         isa_realize_and_unref(isa_dev, isa_bus, &error_fatal);
 
-        isa_dev = isa_new("prep-systemio");
-        dev = DEVICE(isa_dev);
-        qdev_prop_set_uint32(dev, "ibm-planar-id", 0xfc);
-        qdev_prop_set_uint32(dev, "equipment", 0xc0);
-        isa_realize_and_unref(isa_dev, isa_bus, &error_fatal);
-
-        dev = DEVICE(pci_create_simple(pci_bus, PCI_DEVFN(1, 0),
-                                       "lsi53c810"));
+        dev = DEVICE(pci_create_simple(pci_bus, PCI_DEVFN(1, 0), "lsi53c810"));
         lsi53c8xx_handle_legacy_cmdline(dev);
         qdev_connect_gpio_out(dev, 0, qdev_get_gpio_in(i82378_dev, 13));
 
@@ -380,12 +380,8 @@ static void ibm_40p_init(MachineState *machine)
         kernel_base = KERNEL_LOAD_ADDR;
         kernel_size = load_image_targphys(machine->kernel_filename,
                                           kernel_base,
-                                          machine->ram_size - kernel_base);
-        if (kernel_size < 0) {
-            error_report("could not load kernel '%s'",
-                         machine->kernel_filename);
-            exit(1);
-        }
+                                          machine->ram_size - kernel_base,
+                                          &error_fatal);
         fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_ADDR, kernel_base);
         fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_SIZE, kernel_size);
         /* load initrd */
@@ -393,12 +389,8 @@ static void ibm_40p_init(MachineState *machine)
             initrd_base = INITRD_LOAD_ADDR;
             initrd_size = load_image_targphys(machine->initrd_filename,
                                               initrd_base,
-                                              machine->ram_size - initrd_base);
-            if (initrd_size < 0) {
-                error_report("could not load initial ram disk '%s'",
-                             machine->initrd_filename);
-                exit(1);
-            }
+                                              machine->ram_size - initrd_base,
+                                              &error_fatal);
             fw_cfg_add_i32(fw_cfg, FW_CFG_INITRD_ADDR, initrd_base);
             fw_cfg_add_i32(fw_cfg, FW_CFG_INITRD_SIZE, initrd_size);
         }

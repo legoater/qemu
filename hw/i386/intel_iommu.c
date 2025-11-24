@@ -45,6 +45,8 @@
     ((ce)->val[1] & VTD_SM_CONTEXT_ENTRY_RID2PASID_MASK)
 #define VTD_CE_GET_PASID_DIR_TABLE(ce) \
     ((ce)->val[0] & VTD_PASID_DIR_BASE_ADDR_MASK)
+#define VTD_CE_GET_PRE(ce) \
+    ((ce)->val[0] & VTD_SM_CONTEXT_ENTRY_PRE)
 
 /* pe operations */
 #define VTD_PE_GET_TYPE(pe) ((pe)->val[0] & VTD_SM_PASID_ENTRY_PGTT)
@@ -85,11 +87,18 @@ struct vtd_iotlb_key {
 static void vtd_address_space_refresh_all(IntelIOMMUState *s);
 static void vtd_address_space_unmap(VTDAddressSpace *as, IOMMUNotifier *n);
 
-static void vtd_panic_require_caching_mode(void)
+static void vtd_pasid_cache_reset_locked(IntelIOMMUState *s)
 {
-    error_report("We need to set caching-mode=on for intel-iommu to enable "
-                 "device assignment with IOMMU protection.");
-    exit(1);
+    VTDAddressSpace *vtd_as;
+    GHashTableIter as_it;
+
+    trace_vtd_pasid_cache_reset();
+
+    g_hash_table_iter_init(&as_it, s->vtd_address_spaces);
+    while (g_hash_table_iter_next(&as_it, NULL, (void **)&vtd_as)) {
+        VTDPASIDCacheEntry *pc_entry = &vtd_as->pasid_cache_entry;
+        pc_entry->valid = false;
+    }
 }
 
 static void vtd_define_quad(IntelIOMMUState *s, hwaddr addr, uint64_t val,
@@ -386,6 +395,7 @@ static void vtd_reset_caches(IntelIOMMUState *s)
     vtd_iommu_lock(s);
     vtd_reset_iotlb_locked(s);
     vtd_reset_context_cache_locked(s);
+    vtd_pasid_cache_reset_locked(s);
     vtd_iommu_unlock(s);
 }
 
@@ -1838,6 +1848,7 @@ static const bool vtd_qualified_faults[] = {
     [VTD_FR_FS_NON_CANONICAL] = true,
     [VTD_FR_FS_PAGING_ENTRY_US] = true,
     [VTD_FR_SM_WRITE] = true,
+    [VTD_FR_SM_PRE_ABS] = true,
     [VTD_FR_SM_INTERRUPT_ADDR] = true,
     [VTD_FR_FS_BIT_UPDATE_FAILED] = true,
     [VTD_FR_MAX] = false,
@@ -2701,7 +2712,7 @@ static void vtd_handle_gcmd_write(IntelIOMMUState *s)
     uint32_t changed = status ^ val;
 
     trace_vtd_reg_write_gcmd(status, val);
-    if ((changed & VTD_GCMD_TE) && s->dma_translation) {
+    if ((changed & VTD_GCMD_TE) && x86_iommu->dma_translation) {
         /* Translation enable/disable */
         vtd_handle_gcmd_te(s, val & VTD_GCMD_TE);
     }
@@ -2828,6 +2839,7 @@ static bool vtd_process_wait_desc(IntelIOMMUState *s, VTDInvDesc *inv_desc)
 {
     uint64_t mask[4] = {VTD_INV_DESC_WAIT_RSVD_LO, VTD_INV_DESC_WAIT_RSVD_HI,
                         VTD_INV_DESC_ALL_ONE, VTD_INV_DESC_ALL_ONE};
+    bool ret = true;
 
     if (!vtd_inv_desc_reserved_check(s, inv_desc, mask, false,
                                      __func__, "wait")) {
@@ -2839,8 +2851,6 @@ static bool vtd_process_wait_desc(IntelIOMMUState *s, VTDInvDesc *inv_desc)
         uint32_t status_data = (uint32_t)(inv_desc->lo >>
                                VTD_INV_DESC_WAIT_DATA_SHIFT);
 
-        assert(!(inv_desc->lo & VTD_INV_DESC_WAIT_IF));
-
         /* FIXME: need to be masked with HAW? */
         dma_addr_t status_addr = inv_desc->hi;
         trace_vtd_inv_desc_wait_sw(status_addr, status_data);
@@ -2849,18 +2859,28 @@ static bool vtd_process_wait_desc(IntelIOMMUState *s, VTDInvDesc *inv_desc)
                              &status_data, sizeof(status_data),
                              MEMTXATTRS_UNSPECIFIED)) {
             trace_vtd_inv_desc_wait_write_fail(inv_desc->hi, inv_desc->lo);
-            return false;
+            ret = false;
         }
-    } else if (inv_desc->lo & VTD_INV_DESC_WAIT_IF) {
+    }
+
+    if (inv_desc->lo & VTD_INV_DESC_WAIT_IF) {
         /* Interrupt flag */
         vtd_generate_completion_event(s);
-    } else {
+    }
+
+    /*
+     * SW=0, IF=0, FN=1 is also a valid descriptor (VT-d 7.10)
+     * Nothing to do as we process the descriptors in order
+     */
+
+    if (!(inv_desc->lo & (VTD_INV_DESC_WAIT_IF | VTD_INV_DESC_WAIT_SW |
+                                                 VTD_INV_DESC_WAIT_FN))) {
         error_report_once("%s: invalid wait desc: hi=%"PRIx64", lo=%"PRIx64
                           " (unknown type)", __func__, inv_desc->hi,
                           inv_desc->lo);
         return false;
     }
-    return true;
+    return ret;
 }
 
 static bool vtd_process_context_cache_desc(IntelIOMMUState *s,
@@ -3046,6 +3066,155 @@ static bool vtd_process_piotlb_desc(IntelIOMMUState *s,
     return true;
 }
 
+static inline int vtd_dev_get_pe_from_pasid(VTDAddressSpace *vtd_as,
+                                            VTDPASIDEntry *pe)
+{
+    IntelIOMMUState *s = vtd_as->iommu_state;
+    VTDContextEntry ce;
+    int ret;
+
+    if (!s->root_scalable) {
+        return -VTD_FR_RTADDR_INV_TTM;
+    }
+
+    ret = vtd_dev_to_context_entry(s, pci_bus_num(vtd_as->bus), vtd_as->devfn,
+                                   &ce);
+    if (ret) {
+        return ret;
+    }
+
+    return vtd_ce_get_rid2pasid_entry(s, &ce, pe, vtd_as->pasid);
+}
+
+static int vtd_pasid_entry_compare(VTDPASIDEntry *p1, VTDPASIDEntry *p2)
+{
+    return memcmp(p1, p2, sizeof(*p1));
+}
+
+/* Update or invalidate pasid cache based on the pasid entry in guest memory. */
+static void vtd_pasid_cache_sync_locked(gpointer key, gpointer value,
+                                        gpointer user_data)
+{
+    VTDPASIDCacheInfo *pc_info = user_data;
+    VTDAddressSpace *vtd_as = value;
+    VTDPASIDCacheEntry *pc_entry = &vtd_as->pasid_cache_entry;
+    VTDPASIDEntry pe;
+    IOMMUNotifier *n;
+    uint16_t did;
+
+    if (vtd_dev_get_pe_from_pasid(vtd_as, &pe)) {
+        if (!pc_entry->valid) {
+            return;
+        }
+        /*
+         * No valid pasid entry in guest memory. e.g. pasid entry was modified
+         * to be either all-zero or non-present. Either case means existing
+         * pasid cache should be invalidated.
+         */
+        pc_entry->valid = false;
+
+        /*
+         * When a pasid entry isn't valid any more, we should unmap all
+         * mappings in shadow pages instantly to ensure DMA security.
+         */
+        IOMMU_NOTIFIER_FOREACH(n, &vtd_as->iommu) {
+            vtd_address_space_unmap(vtd_as, n);
+        }
+        vtd_switch_address_space(vtd_as);
+        return;
+    }
+
+    /*
+     * VTD_INV_DESC_PASIDC_G_DSI and VTD_INV_DESC_PASIDC_G_PASID_SI require
+     * DID check. If DID doesn't match the value in cache or memory, then
+     * it's not a pasid entry we want to invalidate.
+     */
+    switch (pc_info->type) {
+    case VTD_INV_DESC_PASIDC_G_PASID_SI:
+        if (pc_info->pasid != vtd_as->pasid) {
+            return;
+        }
+        /* Fall through */
+    case VTD_INV_DESC_PASIDC_G_DSI:
+        if (pc_entry->valid) {
+            did = VTD_SM_PASID_ENTRY_DID(pc_entry->pasid_entry.val[1]);
+        } else {
+            did = VTD_SM_PASID_ENTRY_DID(pe.val[1]);
+        }
+        if (pc_info->did != did) {
+            return;
+        }
+    }
+
+    if (!pc_entry->valid) {
+        pc_entry->pasid_entry = pe;
+        pc_entry->valid = true;
+    } else if (!vtd_pasid_entry_compare(&pe, &pc_entry->pasid_entry)) {
+        return;
+    }
+
+    vtd_switch_address_space(vtd_as);
+    vtd_address_space_sync(vtd_as);
+}
+
+static void vtd_pasid_cache_sync(IntelIOMMUState *s, VTDPASIDCacheInfo *pc_info)
+{
+    if (!s->root_scalable || !s->dmar_enabled) {
+        return;
+    }
+
+    vtd_iommu_lock(s);
+    g_hash_table_foreach(s->vtd_address_spaces, vtd_pasid_cache_sync_locked,
+                         pc_info);
+    vtd_iommu_unlock(s);
+}
+
+static bool vtd_process_pasid_desc(IntelIOMMUState *s,
+                                   VTDInvDesc *inv_desc)
+{
+    uint16_t did;
+    uint32_t pasid;
+    VTDPASIDCacheInfo pc_info = {};
+    uint64_t mask[4] = {VTD_INV_DESC_PASIDC_RSVD_VAL0, VTD_INV_DESC_ALL_ONE,
+                        VTD_INV_DESC_ALL_ONE, VTD_INV_DESC_ALL_ONE};
+
+    if (!vtd_inv_desc_reserved_check(s, inv_desc, mask, true,
+                                     __func__, "pasid cache inv")) {
+        return false;
+    }
+
+    did = VTD_INV_DESC_PASIDC_DID(inv_desc);
+    pasid = VTD_INV_DESC_PASIDC_PASID(inv_desc);
+    pc_info.type = VTD_INV_DESC_PASIDC_G(inv_desc);
+
+    switch (pc_info.type) {
+    case VTD_INV_DESC_PASIDC_G_DSI:
+        trace_vtd_inv_desc_pasid_cache_dsi(did);
+        pc_info.did = did;
+        break;
+
+    case VTD_INV_DESC_PASIDC_G_PASID_SI:
+        /* PASID selective implies a DID selective */
+        trace_vtd_inv_desc_pasid_cache_psi(did, pasid);
+        pc_info.did = did;
+        pc_info.pasid = pasid ?: PCI_NO_PASID;
+        break;
+
+    case VTD_INV_DESC_PASIDC_G_GLOBAL:
+        trace_vtd_inv_desc_pasid_cache_gsi();
+        break;
+
+    default:
+        error_report_once("invalid granularity field in PASID-cache invalidate "
+                          "descriptor, hi: 0x%"PRIx64" lo: 0x%" PRIx64,
+                           inv_desc->val[1], inv_desc->val[0]);
+        return false;
+    }
+
+    vtd_pasid_cache_sync(s, &pc_info);
+    return true;
+}
+
 static bool vtd_process_inv_iec_desc(IntelIOMMUState *s,
                                      VTDInvDesc *inv_desc)
 {
@@ -3143,6 +3312,59 @@ static bool vtd_process_device_piotlb_desc(IntelIOMMUState *s,
     return true;
 }
 
+static bool vtd_process_page_group_response_desc(IntelIOMMUState *s,
+                                                 VTDInvDesc *inv_desc)
+{
+    VTDAddressSpace *vtd_dev_as;
+    bool pasid_present;
+    uint8_t response_code;
+    uint16_t rid;
+    uint32_t pasid;
+    uint16_t prgi;
+    IOMMUPRIResponse response;
+
+    if ((inv_desc->lo & VTD_INV_DESC_PGRESP_RSVD_LO) ||
+        (inv_desc->hi & VTD_INV_DESC_PGRESP_RSVD_HI)) {
+        error_report_once("%s: invalid page group response desc: hi=%"PRIx64
+                            ", lo=%"PRIx64" (reserved nonzero)", __func__,
+                            inv_desc->hi, inv_desc->lo);
+        return false;
+    }
+
+    pasid_present = VTD_INV_DESC_PGRESP_PP(inv_desc->lo);
+    response_code = VTD_INV_DESC_PGRESP_RC(inv_desc->lo);
+    rid = VTD_INV_DESC_PGRESP_RID(inv_desc->lo);
+    pasid = VTD_INV_DESC_PGRESP_PASID(inv_desc->lo);
+    prgi = VTD_INV_DESC_PGRESP_PRGI(inv_desc->hi);
+
+    if (!pasid_present) {
+        error_report_once("Page group response without PASID is"
+                          "not supported yet");
+        return false;
+    }
+
+    vtd_dev_as = vtd_get_as_by_sid_and_pasid(s, rid, pasid);
+    if (!vtd_dev_as) {
+        return true;
+    }
+
+    response.prgi = prgi;
+
+    if (response_code == 0x0u) {
+        response.response_code = IOMMU_PRI_RESP_SUCCESS;
+    } else if (response_code == 0x1u) {
+        response.response_code = IOMMU_PRI_RESP_INVALID_REQUEST;
+    } else {
+        response.response_code = IOMMU_PRI_RESP_FAILURE;
+    }
+
+    if (vtd_dev_as->pri_notifier) {
+        vtd_dev_as->pri_notifier->notify(vtd_dev_as->pri_notifier, &response);
+    }
+
+    return true;
+}
+
 static bool vtd_process_device_iotlb_desc(IntelIOMMUState *s,
                                           VTDInvDesc *inv_desc)
 {
@@ -3208,6 +3430,13 @@ static bool vtd_process_inv_desc(IntelIOMMUState *s)
         }
         break;
 
+    case VTD_INV_DESC_PC:
+        trace_vtd_inv_desc("pasid-cache", inv_desc.val[1], inv_desc.val[0]);
+        if (!vtd_process_pasid_desc(s, &inv_desc)) {
+            return false;
+        }
+        break;
+
     case VTD_INV_DESC_PIOTLB:
         trace_vtd_inv_desc("p-iotlb", inv_desc.val[1], inv_desc.val[0]);
         if (!vtd_process_piotlb_desc(s, &inv_desc)) {
@@ -3243,16 +3472,13 @@ static bool vtd_process_inv_desc(IntelIOMMUState *s)
         }
         break;
 
-    /*
-     * TODO: the entity of below two cases will be implemented in future series.
-     * To make guest (which integrates scalable mode support patch set in
-     * iommu driver) work, just return true is enough so far.
-     */
-    case VTD_INV_DESC_PC:
-        if (s->scalable_mode) {
-            break;
+    case VTD_INV_DESC_PGRESP:
+        trace_vtd_inv_desc("page group response", inv_desc.hi, inv_desc.lo);
+        if (!vtd_process_page_group_response_desc(s, &inv_desc)) {
+            return false;
         }
-    /* fallthrough */
+        break;
+
     default:
         error_report_once("%s: invalid inv desc: hi=%"PRIx64", lo=%"PRIx64
                           " (unknown type)", __func__, inv_desc.hi,
@@ -3377,6 +3603,27 @@ static void vtd_handle_iectl_write(IntelIOMMUState *s)
     }
 }
 
+static void vtd_handle_prs_write(IntelIOMMUState *s)
+{
+    uint32_t prs = vtd_get_long_raw(s, DMAR_PRS_REG);
+    if (!(prs & VTD_PR_STATUS_PPR) && !(prs & VTD_PR_STATUS_PRO)) {
+        vtd_set_clear_mask_long(s, DMAR_PECTL_REG, VTD_PR_PECTL_IP, 0);
+    }
+}
+
+static void vtd_handle_pectl_write(IntelIOMMUState *s)
+{
+    uint32_t pectl = vtd_get_long_raw(s, DMAR_PECTL_REG);
+    if ((pectl & VTD_PR_PECTL_IP) && !(pectl & VTD_PR_PECTL_IM)) {
+        /*
+         * If IP field was 1 when software clears the IM field,
+         * the  interrupt is generated along with clearing the IP field.
+         */
+        vtd_set_clear_mask_long(s, DMAR_PECTL_REG, VTD_PR_PECTL_IP, 0);
+        vtd_generate_interrupt(s, DMAR_PEADDR_REG, DMAR_PEDATA_REG);
+    }
+}
+
 static uint64_t vtd_mem_read(void *opaque, hwaddr addr, unsigned size)
 {
     IntelIOMMUState *s = opaque;
@@ -3417,6 +3664,11 @@ static uint64_t vtd_mem_read(void *opaque, hwaddr addr, unsigned size)
     case DMAR_IQA_REG_HI:
         assert(size == 4);
         val = s->iq >> 32;
+        break;
+
+    case DMAR_PEUADDR_REG:
+        assert(size == 4);
+        val = vtd_get_long_raw(s, DMAR_PEUADDR_REG);
         break;
 
     default:
@@ -3480,6 +3732,11 @@ static void vtd_mem_write(void *opaque, hwaddr addr,
         assert(size == 4);
         vtd_set_long(s, addr, val);
         vtd_handle_iotlb_write(s);
+        break;
+
+    case DMAR_PEUADDR_REG:
+        assert(size == 4);
+        vtd_set_long(s, addr, val);
         break;
 
     /* Invalidate Address Register, 64-bit */
@@ -3662,6 +3919,18 @@ static void vtd_mem_write(void *opaque, hwaddr addr,
         vtd_set_long(s, addr, val);
         break;
 
+    case DMAR_PRS_REG:
+        assert(size == 4);
+        vtd_set_long(s, addr, val);
+        vtd_handle_prs_write(s);
+        break;
+
+    case DMAR_PECTL_REG:
+        assert(size == 4);
+        vtd_set_long(s, addr, val);
+        vtd_handle_pectl_write(s);
+        break;
+
     default:
         if (size == 4) {
             vtd_set_long(s, addr, val);
@@ -3832,7 +4101,6 @@ static const Property vtd_properties[] = {
     DEFINE_PROP_BOOL("snoop-control", IntelIOMMUState, snoop_control, false),
     DEFINE_PROP_BOOL("x-pasid-mode", IntelIOMMUState, pasid, false),
     DEFINE_PROP_BOOL("dma-drain", IntelIOMMUState, dma_drain, true),
-    DEFINE_PROP_BOOL("dma-translation", IntelIOMMUState, dma_translation, true),
     DEFINE_PROP_BOOL("stale-tm", IntelIOMMUState, stale_tm, false),
     DEFINE_PROP_BOOL("fs1gp", IntelIOMMUState, fs1gp, true),
 };
@@ -4375,6 +4643,12 @@ static bool vtd_dev_set_iommu_device(PCIBus *bus, void *opaque, int devfn,
 
     assert(hiod);
 
+    if (!s->caching_mode) {
+        error_setg(errp, "Device assignment is not allowed without enabling "
+                   "caching-mode=on for Intel IOMMU.");
+        return false;
+    }
+
     vtd_iommu_lock(s);
 
     if (g_hash_table_lookup(s->vtd_host_iommu_dev, &key)) {
@@ -4546,11 +4820,11 @@ static void vtd_cap_init(IntelIOMMUState *s)
 
     s->cap = VTD_CAP_FRO | VTD_CAP_NFR | VTD_CAP_ND |
              VTD_CAP_MAMV | VTD_CAP_PSI | VTD_CAP_SLLPS |
-             VTD_CAP_MGAW(s->aw_bits);
+             VTD_CAP_ESRTPS | VTD_CAP_MGAW(s->aw_bits);
     if (s->dma_drain) {
         s->cap |= VTD_CAP_DRAIN;
     }
-    if (s->dma_translation) {
+    if (x86_iommu->dma_translation) {
             if (s->aw_bits >= VTD_HOST_AW_39BIT) {
                     s->cap |= VTD_CAP_SAGAW_39bit;
             }
@@ -4713,6 +4987,18 @@ static void vtd_init(IntelIOMMUState *s)
      * Interrupt remapping registers.
      */
     vtd_define_quad(s, DMAR_IRTA_REG, 0, 0xfffffffffffff80fULL, 0);
+
+    /* Page request registers */
+    if (s->ecap & VTD_ECAP_PRS) {
+        vtd_define_quad(s, DMAR_PQH_REG, 0, 0x7ffe0ULL, 0);
+        vtd_define_quad(s, DMAR_PQT_REG, 0, 0x7ffe0ULL, 0);
+        vtd_define_quad(s, DMAR_PQA_REG, 0, 0xfffffffffffff007ULL, 0);
+        vtd_define_long(s, DMAR_PRS_REG, 0, 0, 0x3UL);
+        vtd_define_long(s, DMAR_PECTL_REG, 0, 0x80000000UL, 0);
+        vtd_define_long(s, DMAR_PEDATA_REG, 0, 0xffffUL, 0);
+        vtd_define_long(s, DMAR_PEADDR_REG, 0, 0xfffffffcUL, 0);
+        vtd_define_long(s, DMAR_PEUADDR_REG, 0, 0xffffffffUL, 0);
+    }
 }
 
 /* Should not reset address_spaces when reset because devices will still use
@@ -4800,6 +5086,194 @@ static ssize_t vtd_ats_request_translation(PCIBus *bus, void *opaque,
     return res_index;
 }
 
+/* 11.4.11.3 : The number of entries in the page request queue is 2^(PQS + 7) */
+static inline uint64_t vtd_prq_size(IntelIOMMUState *s)
+{
+    return 1ULL << ((vtd_get_quad(s, DMAR_PQA_REG) & VTD_PQA_SIZE) + 7);
+}
+
+/**
+ * Return true if the bit is accessible and correctly set, false otherwise
+ */
+static bool vtd_check_pre_bit(VTDAddressSpace *vtd_as, hwaddr addr,
+                              uint16_t sid, bool is_write)
+{
+    int ret;
+    IntelIOMMUState *s = vtd_as->iommu_state;
+    uint8_t bus_n = pci_bus_num(vtd_as->bus);
+    VTDContextEntry ce;
+    bool is_fpd_set = false;
+
+    ret = vtd_dev_to_context_entry(s, bus_n, vtd_as->devfn, &ce);
+
+    if (ret) {
+        goto error_report;
+    }
+
+    if (!VTD_CE_GET_PRE(&ce)) {
+        ret = -VTD_FR_SM_PRE_ABS;
+        goto error_get_fpd_and_report;
+    }
+
+    return true;
+
+error_get_fpd_and_report:
+    /* Try to get fpd (may not work but we are already on an error path) */
+    is_fpd_set = ce.lo & VTD_CONTEXT_ENTRY_FPD;
+    vtd_ce_get_pasid_fpd(s, &ce, &is_fpd_set, vtd_as->pasid);
+error_report:
+    vtd_report_fault(s, -ret, is_fpd_set, sid, addr, is_write,
+                     vtd_as->pasid != PCI_NO_PASID, vtd_as->pasid);
+    return false;
+}
+
+/* Logic described in section 7.5 */
+static void vtd_generate_page_request_event(IntelIOMMUState *s,
+                                            uint32_t old_pr_status)
+{
+    uint32_t current_pectl = vtd_get_long(s, DMAR_PECTL_REG);
+    /*
+     * Hardware evaluates PPR and PRO fields in the Page Request Status Register
+     * and if any of them is set, Page Request Event is not generated
+     */
+    if (old_pr_status & (VTD_PR_STATUS_PRO | VTD_PR_STATUS_PPR)) {
+        return;
+    }
+
+    vtd_set_clear_mask_long(s, DMAR_PECTL_REG, 0, VTD_PR_PECTL_IP);
+    if (!(current_pectl & VTD_PR_PECTL_IM)) {
+        vtd_set_clear_mask_long(s, DMAR_PECTL_REG, VTD_PR_PECTL_IP, 0);
+        vtd_generate_interrupt(s, DMAR_PEADDR_REG, DMAR_PEDATA_REG);
+    }
+}
+
+/* When calling this function, we known that we are in scalable mode */
+static int vtd_pri_perform_implicit_invalidation(VTDAddressSpace *vtd_as,
+                                                 hwaddr addr)
+{
+    IntelIOMMUState *s = vtd_as->iommu_state;
+    VTDContextEntry ce;
+    VTDPASIDEntry pe;
+    uint16_t pgtt;
+    uint16_t domain_id;
+    int ret = vtd_dev_to_context_entry(s, pci_bus_num(vtd_as->bus),
+                                       vtd_as->devfn, &ce);
+    if (ret) {
+        return -EINVAL;
+    }
+    ret = vtd_ce_get_rid2pasid_entry(s, &ce, &pe, vtd_as->pasid);
+    if (ret) {
+        return -EINVAL;
+    }
+    pgtt = VTD_PE_GET_TYPE(&pe);
+    domain_id = VTD_SM_PASID_ENTRY_DID(pe.val[1]);
+    ret = 0;
+    switch (pgtt) {
+    case VTD_SM_PASID_ENTRY_FLT:
+        vtd_piotlb_page_invalidate(s, domain_id, vtd_as->pasid, addr, 0);
+        break;
+    /* Room for other pgtt values */
+    default:
+        error_report_once("Translation type not supported yet : %d", pgtt);
+        ret = -EINVAL;
+        break;
+    }
+
+    return ret;
+}
+
+/* Page Request Descriptor : 7.4.1.1 */
+static int vtd_pri_request_page(PCIBus *bus, void *opaque, int devfn,
+                                uint32_t pasid, bool priv_req, bool exec_req,
+                                hwaddr addr, bool lpig, uint16_t prgi,
+                                bool is_read, bool is_write)
+{
+    IntelIOMMUState *s = opaque;
+    VTDAddressSpace *vtd_as;
+
+    vtd_as = vtd_find_add_as(s, bus, devfn, pasid);
+
+    uint64_t queue_addr_reg = vtd_get_quad(s, DMAR_PQA_REG);
+    uint64_t queue_tail_offset_reg = vtd_get_quad(s, DMAR_PQT_REG);
+    uint64_t new_queue_tail_offset = (
+                                (queue_tail_offset_reg + VTD_PQA_ENTRY_SIZE) %
+                                (vtd_prq_size(s) * VTD_PQA_ENTRY_SIZE));
+    uint64_t queue_head_offset_reg = vtd_get_quad(s, DMAR_PQH_REG);
+    hwaddr queue_tail = (queue_addr_reg & VTD_PQA_ADDR) + queue_tail_offset_reg;
+    uint32_t old_pr_status = vtd_get_long(s, DMAR_PRS_REG);
+    uint16_t sid = PCI_BUILD_BDF(pci_bus_num(vtd_as->bus), vtd_as->devfn);
+    VTDPRDesc desc;
+
+    if (!(s->ecap & VTD_ECAP_PRS)) {
+        return -EPERM;
+    }
+
+    /*
+     * No need to check if scalable mode is enabled as we already known that
+     * VTD_ECAP_PRS is set (see vtd_decide_config)
+     */
+
+    /* We do not support PRI without PASID */
+    if (vtd_as->pasid == PCI_NO_PASID) {
+        return -EPERM;
+    }
+    if (exec_req && !is_read) {
+        return -EINVAL;
+    }
+
+    /* Check PRE bit in the scalable mode context entry */
+    if (!vtd_check_pre_bit(vtd_as, addr, sid, is_write)) {
+        return -EPERM;
+    }
+
+    if (old_pr_status & VTD_PR_STATUS_PRO) {
+        /*
+         * No action is taken by hardware to report a fault
+         * or generate an event
+         */
+        return -ENOSPC;
+    }
+
+    /* Check for overflow */
+    if (new_queue_tail_offset == queue_head_offset_reg) {
+        vtd_set_clear_mask_long(s, DMAR_PRS_REG, 0, VTD_PR_STATUS_PRO);
+        vtd_generate_page_request_event(s, old_pr_status);
+        return -ENOSPC;
+    }
+
+    if (vtd_pri_perform_implicit_invalidation(vtd_as, addr)) {
+        return -EINVAL;
+    }
+
+    desc.lo = VTD_PRD_TYPE | VTD_PRD_PP(true) | VTD_PRD_RID(sid) |
+              VTD_PRD_PASID(vtd_as->pasid) | VTD_PRD_PMR(priv_req);
+    desc.hi = VTD_PRD_RDR(is_read) | VTD_PRD_WRR(is_write) |
+              VTD_PRD_LPIG(lpig) | VTD_PRD_PRGI(prgi) | VTD_PRD_ADDR(addr);
+
+    desc.lo = cpu_to_le64(desc.lo);
+    desc.hi = cpu_to_le64(desc.hi);
+    if (dma_memory_write(&address_space_memory, queue_tail, &desc, sizeof(desc),
+                         MEMTXATTRS_UNSPECIFIED)) {
+        error_report_once("IO error, the PQ tail cannot be updated");
+        return -EIO;
+    }
+
+    /* increment the tail register and set the pending request bit */
+    vtd_set_quad(s, DMAR_PQT_REG, new_queue_tail_offset);
+    /*
+     * read status again so that the kernel does not miss a request.
+     * in some cases, we can trigger an unecessary interrupt but this strategy
+     * drastically improves performance as we don't need to take a lock.
+     */
+    old_pr_status = vtd_get_long(s, DMAR_PRS_REG);
+    if (!(old_pr_status & VTD_PR_STATUS_PPR)) {
+        vtd_set_clear_mask_long(s, DMAR_PRS_REG, 0, VTD_PR_STATUS_PPR);
+        vtd_generate_page_request_event(s, old_pr_status);
+    }
+
+    return 0;
+}
+
 static void vtd_init_iotlb_notifier(PCIBus *bus, void *opaque, int devfn,
                                     IOMMUNotifier *n, IOMMUNotify fn,
                                     void *user_opaque)
@@ -4841,6 +5315,26 @@ static void vtd_unregister_iotlb_notifier(PCIBus *bus, void *opaque,
     memory_region_unregister_iommu_notifier(MEMORY_REGION(&vtd_as->iommu), n);
 }
 
+static void vtd_pri_register_notifier(PCIBus *bus, void *opaque, int devfn,
+                               uint32_t pasid, IOMMUPRINotifier *notifier)
+{
+    IntelIOMMUState *s = opaque;
+    VTDAddressSpace *vtd_as;
+
+    vtd_as = vtd_find_add_as(s, bus, devfn, pasid);
+    vtd_as->pri_notifier = notifier;
+}
+
+static void vtd_pri_unregister_notifier(PCIBus *bus, void *opaque,
+                                        int devfn, uint32_t pasid)
+{
+    IntelIOMMUState *s = opaque;
+    VTDAddressSpace *vtd_as;
+
+    vtd_as = vtd_find_add_as(s, bus, devfn, pasid);
+    vtd_as->pri_notifier = NULL;
+}
+
 static PCIIOMMUOps vtd_iommu_ops = {
     .get_address_space = vtd_host_dma_iommu,
     .set_iommu_device = vtd_dev_set_iommu_device,
@@ -4850,6 +5344,9 @@ static PCIIOMMUOps vtd_iommu_ops = {
     .register_iotlb_notifier = vtd_register_iotlb_notifier,
     .unregister_iotlb_notifier = vtd_unregister_iotlb_notifier,
     .ats_request_translation = vtd_ats_request_translation,
+    .pri_register_notifier = vtd_pri_register_notifier,
+    .pri_unregister_notifier = vtd_pri_unregister_notifier,
+    .pri_request_page = vtd_pri_request_page,
 };
 
 static bool vtd_decide_config(IntelIOMMUState *s, Error **errp)
@@ -4907,32 +5404,6 @@ static bool vtd_decide_config(IntelIOMMUState *s, Error **errp)
     return true;
 }
 
-static int vtd_machine_done_notify_one(Object *child, void *unused)
-{
-    IntelIOMMUState *iommu = INTEL_IOMMU_DEVICE(x86_iommu_get_default());
-
-    /*
-     * We hard-coded here because vfio-pci is the only special case
-     * here.  Let's be more elegant in the future when we can, but so
-     * far there seems to be no better way.
-     */
-    if (object_dynamic_cast(child, "vfio-pci") && !iommu->caching_mode) {
-        vtd_panic_require_caching_mode();
-    }
-
-    return 0;
-}
-
-static void vtd_machine_done_hook(Notifier *notifier, void *unused)
-{
-    object_child_foreach_recursive(object_get_root(),
-                                   vtd_machine_done_notify_one, NULL);
-}
-
-static Notifier vtd_machine_done_notify = {
-    .notify = vtd_machine_done_hook,
-};
-
 static void vtd_realize(DeviceState *dev, Error **errp)
 {
     MachineState *ms = MACHINE(qdev_get_machine());
@@ -4987,7 +5458,6 @@ static void vtd_realize(DeviceState *dev, Error **errp)
     pci_setup_iommu(bus, &vtd_iommu_ops, dev);
     /* Pseudo address space under root PCI bus. */
     x86ms->ioapic_as = vtd_host_dma_iommu(bus, s, Q35_PSEUDO_DEVFN_IOAPIC);
-    qemu_add_machine_init_done_notifier(&vtd_machine_done_notify);
 }
 
 static void vtd_class_init(ObjectClass *klass, const void *data)

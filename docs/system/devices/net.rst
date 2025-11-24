@@ -21,11 +21,17 @@ configure it as if it was a real ethernet card.
 Linux host
 ^^^^^^^^^^
 
-As an example, you can download the ``linux-test-xxx.tar.gz`` archive
-and copy the script ``qemu-ifup`` in ``/etc`` and configure properly
-``sudo`` so that the command ``ifconfig`` contained in ``qemu-ifup`` can
-be executed as root. You must verify that your host kernel supports the
-TAP network interfaces: the device ``/dev/net/tun`` must be present.
+A distribution will generally provide specific helper scripts when it
+packages QEMU. By default these are found at ``/etc/qemu-ifup`` and
+``/etc/qemu-ifdown`` and are called appropriately when QEMU wants to
+change the network state.
+
+If QEMU is being run as a non-privileged user you may need properly
+configure ``sudo`` so that network commands in the scripts can be
+executed as root.
+
+You must verify that your host kernel supports the TAP network
+interfaces: the device ``/dev/net/tun`` must be present.
 
 See :ref:`sec_005finvocation` to have examples of command
 lines using the TAP network interfaces.
@@ -73,7 +79,7 @@ those sockets. To allow ping for GID 100 (usually users group)::
 
 When using the built-in TFTP server, the router is also the TFTP server.
 
-When using the ``'-netdev user,hostfwd=...'`` option, TCP or UDP
+When using the ``'-netdev user,hostfwd=...'`` option, TCP, UDP or UNIX
 connections can be redirected from the host to the guest. It allows for
 example to redirect X11, telnet or SSH connections.
 

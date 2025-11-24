@@ -38,7 +38,7 @@ extern const PropertyInfo qdev_prop_virtio_gpu_output_list;
     DEFINE_PROP_SIGNED(_n, _s, _f, _d, qdev_prop_pci_devfn, int32_t)
 
 #define DEFINE_PROP_CHR(_n, _s, _f)             \
-    DEFINE_PROP(_n, _s, _f, qdev_prop_chr, CharBackend)
+    DEFINE_PROP(_n, _s, _f, qdev_prop_chr, CharFrontend)
 #define DEFINE_PROP_NETDEV(_n, _s, _f)             \
     DEFINE_PROP(_n, _s, _f, qdev_prop_netdev, NICPeers)
 #define DEFINE_PROP_DRIVE(_n, _s, _f) \
@@ -87,7 +87,7 @@ extern const PropertyInfo qdev_prop_virtio_gpu_output_list;
                 .set_default = true)
 
 #define DEFINE_PROP_AUDIODEV(_n, _s, _f) \
-    DEFINE_PROP(_n, _s, _f, qdev_prop_audiodev, QEMUSoundCard)
+    DEFINE_PROP(_n, _s, _f, qdev_prop_audiodev, AudioBackend *)
 
 #define DEFINE_PROP_UUID_NODEFAULT(_name, _state, _field) \
     DEFINE_PROP(_name, _state, _field, qdev_prop_uuid, QemuUUID)
