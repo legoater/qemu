@@ -1261,6 +1261,7 @@ static void aspeed_i2c_realize(DeviceState *dev, Error **errp)
 static const Property aspeed_i2c_properties[] = {
     DEFINE_PROP_LINK("dram", AspeedI2CState, dram_mr,
                      TYPE_MEMORY_REGION, MemoryRegion *),
+    DEFINE_PROP_STRING("bus-label", AspeedI2CState, bus_label),
 };
 
 static void aspeed_i2c_class_init(ObjectClass *klass, const void *data)
@@ -1421,13 +1422,27 @@ static void aspeed_i2c_bus_realize(DeviceState *dev, Error **errp)
 {
     AspeedI2CBus *s = ASPEED_I2C_BUS(dev);
     AspeedI2CClass *aic;
-    g_autofree char *name = g_strdup_printf(TYPE_ASPEED_I2C_BUS ".%d", s->id);
-    g_autofree char *pool_name = g_strdup_printf("%s.pool", name);
+    g_autofree char *name = NULL;
+    g_autofree char *pool_name = NULL;
 
     if (!s->controller) {
         error_setg(errp, TYPE_ASPEED_I2C_BUS ": 'controller' link not set");
         return;
     }
+
+    /*
+     * I2C bus naming:
+     *   - Empty bus_label -> BMC internal controller, use default name.
+     *   - Non-empty bus_label -> external/addon controller, prefix with label
+     *     to avoid conflicts and show bus origin.
+     */
+    if (!s->controller->bus_label || (strlen(s->controller->bus_label) == 0)) {
+        name = g_strdup_printf(TYPE_ASPEED_I2C_BUS ".%d", s->id);
+    } else {
+        name = g_strdup_printf("aspeed.%s.i2c.bus.%d",
+                               s->controller->bus_label, s->id);
+    }
+    pool_name = g_strdup_printf("%s.pool", name);
 
     aic = ASPEED_I2C_GET_CLASS(s->controller);
 
