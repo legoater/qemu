@@ -42,6 +42,7 @@ arm_common_ss.add(when: 'CONFIG_FSL_IMX31', if_true: files('fsl-imx31.c', 'kzm.c
 arm_common_ss.add(when: 'CONFIG_FSL_IMX6', if_true: files('fsl-imx6.c'))
 arm_ss.add(when: 'CONFIG_ASPEED_SOC', if_true: files(
   'aspeed.c',
+  'aspeed_ast1700.c',
   'aspeed_soc_common.c',
   'aspeed_ast2400.c',
   'aspeed_ast2400_palmetto.c',
