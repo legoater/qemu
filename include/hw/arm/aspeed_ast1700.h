@@ -10,6 +10,7 @@
 
 #include "hw/sysbus.h"
 #include "hw/misc/aspeed_ltpi.h"
+#include "hw/ssi/aspeed_smc.h"
 #include "hw/char/serial-mm.h"
 
 #define TYPE_ASPEED_AST1700 "aspeed.ast1700"
@@ -25,6 +26,7 @@ struct AspeedAST1700SoCState {
     AspeedLTPIState ltpi;
     SerialMM uart;
     MemoryRegion sram;
+    AspeedSMCState spi;
 };
 
 #endif /* ASPEED_AST1700_H */
