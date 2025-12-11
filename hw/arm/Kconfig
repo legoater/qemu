@@ -12,7 +12,6 @@ config ARM_VIRT
     select ARM_GIC
     select ACPI
     select ARM_SMMUV3
-    select ARM_SMMUV3_ACCEL
     select GPIO_KEY
     select DEVICE_TREE
     select FW_CFG_DMA
@@ -627,12 +626,13 @@ config FSL_IMX8MP_EVK
     depends on TCG
     select FSL_IMX8MP
 
-config ARM_SMMUV3
-    bool
-
 config ARM_SMMUV3_ACCEL
     bool
-    depends on ARM_SMMUV3 && IOMMUFD
+    depends on ARM_SMMUV3
+
+config ARM_SMMUV3
+    bool
+    select ARM_SMMUV3_ACCEL if IOMMUFD
 
 config FSL_IMX6UL
     bool
