@@ -1051,6 +1051,64 @@ static void pcie_ext_cap_set_next(PCIDevice *dev, uint16_t pos, uint16_t next)
 }
 
 /*
+ * Insert a PCIe extended capability at a given offset.
+ *
+ * This helper only validates that the insertion does not overwrite an
+ * existing PCIe extended capability header, as corrupting a header would
+ * break the extended capability linked list.
+ *
+ * The caller must ensure that (offset, size) does not overlap with other
+ * registers or capability-specific register blocks. Overlaps with
+ * capability-specific registers are not checked and are considered a
+ * user-controlled override.
+ */
+bool pcie_insert_capability(PCIDevice *dev, uint16_t cap_id, uint8_t cap_ver,
+                            uint16_t offset, uint16_t size)
+{
+    uint16_t prev = 0, next = 0;
+    uint16_t cur = pci_get_word(dev->config + PCI_CONFIG_SPACE_SIZE);
+
+    /* Walk the ext cap list to find insertion point */
+    while (cur) {
+        uint32_t hdr = pci_get_long(dev->config + cur);
+        next = PCI_EXT_CAP_NEXT(hdr);
+
+        /* Check we are not overwriting any existing CAP header area */
+        if (offset >= cur && offset < cur + PCI_EXT_CAP_ALIGN) {
+            return false;
+        }
+
+        prev = cur;
+        cur = next;
+        if (next == 0 || next > offset) {
+            break;
+        }
+    }
+
+   /* Make sure, next CAP header area is not over written either */
+    if (next && (offset + size) >= next) {
+        return false;
+    }
+
+    /* Insert new cap */
+    pci_set_long(dev->config + offset,
+                 PCI_EXT_CAP(cap_id, cap_ver, cur));
+    if (prev) {
+        pcie_ext_cap_set_next(dev, prev, offset);
+    } else {
+        /* Insert at head (0x100) */
+        pci_set_word(dev->config + PCI_CONFIG_SPACE_SIZE, offset);
+    }
+
+    /* Make capability read-only by default */
+    memset(dev->wmask + offset, 0, size);
+    memset(dev->w1cmask + offset, 0, size);
+    /* Check capability by default */
+    memset(dev->cmask + offset, 0xFF, size);
+    return true;
+}
+
+/*
  * Caller must supply valid (offset, size) such that the range wouldn't
  * overlap with other capability or other registers.
  * This function doesn't check it.
