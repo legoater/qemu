@@ -522,6 +522,7 @@ void vfio_device_unprepare(VFIODevice *vbasedev)
     vbasedev->bcontainer = NULL;
 }
 
+
 bool vfio_device_get_viommu_flags_want_nesting(VFIODevice *vbasedev)
 {
     VFIOPCIDevice *vdev = vfio_pci_from_vfio_device(vbasedev);
@@ -545,6 +546,15 @@ bool vfio_device_get_host_iommu_quirk_bypass_ro(VFIODevice *vbasedev,
                   HOST_IOMMU_QUIRK_NESTING_PARENT_BYPASS_RO);
     }
     return false;
+}
+
+int vfio_device_get_feature(VFIODevice *vbasedev,
+                            struct vfio_device_feature *feature)
+{
+    if (!vbasedev->io_ops || !vbasedev->io_ops->device_feature) {
+        return -EINVAL;
+    }
+    return vbasedev->io_ops->device_feature(vbasedev, feature);
 }
 
 /*
