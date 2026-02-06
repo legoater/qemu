@@ -11,10 +11,14 @@
 #include "qemu/error-report.h"
 #include "qemu/log.h"
 #include "trace.h"
+#include <math.h>
 
 #include "hw/arm/smmuv3.h"
 #include "hw/core/irq.h"
 #include "smmuv3-accel.h"
+#include "smmuv3-internal.h"
+#include "system/ramblock.h"
+#include "system/ramlist.h"
 #include "tegra241-cmdqv.h"
 
 static void tegra241_cmdqv_event_read(void *opaque)
@@ -582,6 +586,33 @@ tegra241_cmdqv_alloc_viommu(SMMUv3State *s, HostIOMMUDeviceIOMMUFD *idev,
     return true;
 }
 
+static size_t tegra241_cmdqv_min_ram_pagesize(void)
+{
+    RAMBlock *rb;
+    size_t pg, min_pg = SIZE_MAX;
+
+    RAMBLOCK_FOREACH(rb) {
+        MemoryRegion *mr = rb->mr;
+
+        /* Only consider real RAM regions */
+        if (!mr || !memory_region_is_ram(mr)) {
+            continue;
+        }
+
+        /* Skip RAM regions that are not backed by a memory-backend */
+        if (!object_dynamic_cast(mr->owner, TYPE_MEMORY_BACKEND)) {
+            continue;
+        }
+
+        pg = qemu_ram_pagesize(rb);
+        if (pg && pg < min_pg) {
+            min_pg = pg;
+        }
+    }
+
+    return (min_pg == SIZE_MAX) ? qemu_real_host_page_size() : min_pg;
+}
+
 static void tegra241_cmdqv_init_regs(SMMUv3State *s, Tegra241CMDQV *cmdqv)
 {
     SMMUv3AccelState *s_accel = s->s_accel;
@@ -589,7 +620,9 @@ static void tegra241_cmdqv_init_regs(SMMUv3State *s, Tegra241CMDQV *cmdqv)
     struct iommu_hw_info_tegra241_cmdqv cmdqv_info;
     SMMUv3AccelDevice *accel_dev;
     Error *local_err = NULL;
+    size_t pgsize;
     uint64_t caps;
+    uint32_t val;
     int i;
 
     if (QLIST_EMPTY(&s_accel->device_list)) {
@@ -660,6 +693,16 @@ static void tegra241_cmdqv_init_regs(SMMUv3State *s, Tegra241CMDQV *cmdqv)
         cmdqv->vcmdq_base[i] = 0;
         cmdqv->vcmdq_cons_indx_base[i] = 0;
     }
+
+   /*
+    * CMDQ must not cross a physical RAM backend page. Adjust CMDQS so the
+    * queue fits entirely within the smallest backend page size, ensuring
+    * the command queue is physically contiguous in host memory.
+    */
+    pgsize = tegra241_cmdqv_min_ram_pagesize();
+    val = FIELD_EX32(s->idr[1], IDR1, CMDQS);
+    s->idr[1] = FIELD_DP32(s->idr[1], IDR1, CMDQS, MIN(log2(pgsize) - 4, val));
+
     return;
 
 out_err:
