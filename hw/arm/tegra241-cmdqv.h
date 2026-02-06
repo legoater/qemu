@@ -43,6 +43,14 @@ typedef struct Tegra241CMDQV {
     uint32_t vintf_config;
     uint32_t vintf_status;
     uint32_t vintf_cmdq_err_map[4];
+    uint32_t vcmdq_cons_indx[128];
+    uint32_t vcmdq_prod_indx[128];
+    uint32_t vcmdq_config[128];
+    uint32_t vcmdq_status[128];
+    uint32_t vcmdq_gerror[128];
+    uint32_t vcmdq_gerrorn[128];
+    uint64_t vcmdq_base[128];
+    uint64_t vcmdq_cons_indx_base[128];
 } Tegra241CMDQV;
 
 /* Global CMDQV MMIO registers (offset 0x00000) */
@@ -118,7 +126,196 @@ A_VINTFi_LVCMDQ_ERR_MAP_(0, 0)
 /* Omitting [0][1~2] as not being directly called */
 A_VINTFi_LVCMDQ_ERR_MAP_(0, 3)
 
+/*
+ * VCMDQ register windows.
+ *
+ * Page 0 @ 0x10000: VCMDQ control and status registers
+ * Page 1 @ 0x20000: VCMDQ base and DRAM address registers
+ */
+#define A_VCMDQi_CONS_INDX(i)                       \
+    REG32(VCMDQ##i##_CONS_INDX, 0x10000 + i * 0x80) \
+    FIELD(VCMDQ##i##_CONS_INDX, RD, 0, 20)          \
+    FIELD(VCMDQ##i##_CONS_INDX, ERR, 24, 7)
+
+A_VCMDQi_CONS_INDX(0)
+/* Omitting [1~126] as not being directly called */
+A_VCMDQi_CONS_INDX(127)
+
+#define V_VCMDQ_CONS_INDX_ERR_CERROR_NONE 0
+#define V_VCMDQ_CONS_INDX_ERR_CERROR_ILL_OPCODE 1
+#define V_VCMDQ_CONS_INDX_ERR_CERROR_ABT 2
+#define V_VCMDQ_CONS_INDX_ERR_CERROR_ATC_INV_SYNC 3
+#define V_VCMDQ_CONS_INDX_ERR_CERROR_ILL_ACCESS 4
+
+#define A_VCMDQi_PROD_INDX(i)                             \
+    REG32(VCMDQ##i##_PROD_INDX, 0x10000 + 0x4 + i * 0x80) \
+    FIELD(VCMDQ##i##_PROD_INDX, WR, 0, 20)
+
+A_VCMDQi_PROD_INDX(0)
+/* Omitting [1~126] as not being directly called */
+A_VCMDQi_PROD_INDX(127)
+
+#define A_VCMDQi_CONFIG(i)                             \
+    REG32(VCMDQ##i##_CONFIG, 0x10000 + 0x8 + i * 0x80) \
+    FIELD(VCMDQ##i##_CONFIG, CMDQ_EN, 0, 1)
+
+A_VCMDQi_CONFIG(0)
+/* Omitting [1~126] as not being directly called */
+A_VCMDQi_CONFIG(127)
+
+#define A_VCMDQi_STATUS(i)                             \
+    REG32(VCMDQ##i##_STATUS, 0x10000 + 0xc + i * 0x80) \
+    FIELD(VCMDQ##i##_STATUS, CMDQ_EN_OK, 0, 1)
+
+A_VCMDQi_STATUS(0)
+/* Omitting [1~126] as not being directly called */
+A_VCMDQi_STATUS(127)
+
+#define A_VCMDQi_GERROR(i)                               \
+    REG32(VCMDQ##i##_GERROR, 0x10000 + 0x10 + i * 0x80)  \
+    FIELD(VCMDQ##i##_GERROR, CMDQ_ERR, 0, 1)             \
+    FIELD(VCMDQ##i##_GERROR, CONS_DRAM_WR_ABT_ERR, 1, 1) \
+    FIELD(VCMDQ##i##_GERROR, CMDQ_INIT_ERR, 2, 1)
+
+A_VCMDQi_GERROR(0)
+/* Omitting [1~126] as not being directly called */
+A_VCMDQi_GERROR(127)
+
+#define A_VCMDQi_GERRORN(i)                               \
+    REG32(VCMDQ##i##_GERRORN, 0x10000 + 0x14 + i * 0x80)  \
+    FIELD(VCMDQ##i##_GERRORN, CMDQ_ERR, 0, 1)             \
+    FIELD(VCMDQ##i##_GERRORN, CONS_DRAM_WR_ABT_ERR, 1, 1) \
+    FIELD(VCMDQ##i##_GERRORN, CMDQ_INIT_ERR, 2, 1)
+
+A_VCMDQi_GERRORN(0)
+/* Omitting [1~126] as not being directly called */
+A_VCMDQi_GERRORN(127)
+
+#define A_VCMDQi_BASE_L(i)                       \
+    REG32(VCMDQ##i##_BASE_L, 0x20000 + i * 0x80) \
+    FIELD(VCMDQ##i##_BASE_L, LOG2SIZE, 0, 5)     \
+    FIELD(VCMDQ##i##_BASE_L, ADDR, 5, 27)
+
+A_VCMDQi_BASE_L(0)
+/* Omitting [1~126] as not being directly called */
+A_VCMDQi_BASE_L(127)
+
+#define A_VCMDQi_BASE_H(i)                             \
+    REG32(VCMDQ##i##_BASE_H, 0x20000 + 0x4 + i * 0x80) \
+    FIELD(VCMDQ##i##_BASE_H, ADDR, 0, 16)
+
+A_VCMDQi_BASE_H(0)
+/* Omitting [1~126] as not being directly called */
+A_VCMDQi_BASE_H(127)
+
+#define A_VCMDQi_CONS_INDX_BASE_DRAM_L(i)                             \
+    REG32(VCMDQ##i##_CONS_INDX_BASE_DRAM_L, 0x20000 + 0x8 + i * 0x80) \
+    FIELD(VCMDQ##i##_CONS_INDX_BASE_DRAM_L, ADDR, 0, 32)
+
+A_VCMDQi_CONS_INDX_BASE_DRAM_L(0)
+/* Omitting [1~126] as not being directly called */
+A_VCMDQi_CONS_INDX_BASE_DRAM_L(127)
+
+#define A_VCMDQi_CONS_INDX_BASE_DRAM_H(i)                             \
+    REG32(VCMDQ##i##_CONS_INDX_BASE_DRAM_H, 0x20000 + 0xc + i * 0x80) \
+    FIELD(VCMDQ##i##_CONS_INDX_BASE_DRAM_H, ADDR, 0, 16)
+
+A_VCMDQi_CONS_INDX_BASE_DRAM_H(0)
+/* Omitting [1~126] as not being directly called */
+A_VCMDQi_CONS_INDX_BASE_DRAM_H(127)
+
 #define VINTF_REG_PAGE_SIZE 0x10000
+/*
+ * VI_VCMDQ register windows (VCMDQs mapped via VINTF).
+ *
+ * Page 0 @ 0x30000: VI_VCMDQ control and status registers
+ * Page 1 @ 0x40000: VI_VCMDQ base and DRAM address registers
+ */
+#define A_VI_VCMDQi_CONS_INDX(i)                       \
+    REG32(VI_VCMDQ##i##_CONS_INDX, 0x30000 + i * 0x80) \
+    FIELD(VI_VCMDQ##i##_CONS_INDX, RD, 0, 20)          \
+    FIELD(VI_VCMDQ##i##_CONS_INDX, ERR, 24, 7)
+
+A_VI_VCMDQi_CONS_INDX(0)
+/* Omitting [1~126] as not being directly called */
+A_VI_VCMDQi_CONS_INDX(127)
+
+#define A_VI_VCMDQi_PROD_INDX(i)                             \
+    REG32(VI_VCMDQ##i##_PROD_INDX, 0x30000 + 0x4 + i * 0x80) \
+    FIELD(VI_VCMDQ##i##_PROD_INDX, WR, 0, 20)
+
+A_VI_VCMDQi_PROD_INDX(0)
+/* Omitting [1~126] as not being directly called */
+A_VI_VCMDQi_PROD_INDX(127)
+
+#define A_VI_VCMDQi_CONFIG(i)                             \
+    REG32(VI_VCMDQ##i##_CONFIG, 0x30000 + 0x8 + i * 0x80) \
+    FIELD(VI_VCMDQ##i##_CONFIG, CMDQ_EN, 0, 1)
+
+A_VI_VCMDQi_CONFIG(0)
+/* Omitting [1~126] as not being directly called */
+A_VI_VCMDQi_CONFIG(127)
+
+#define A_VI_VCMDQi_STATUS(i)                             \
+    REG32(VI_VCMDQ##i##_STATUS, 0x30000 + 0xc + i * 0x80) \
+    FIELD(VI_VCMDQ##i##_STATUS, CMDQ_EN_OK, 0, 1)
+
+A_VI_VCMDQi_STATUS(0)
+/* Omitting [1~126] as not being directly called */
+A_VI_VCMDQi_STATUS(127)
+
+#define A_VI_VCMDQi_GERROR(i)                               \
+    REG32(VI_VCMDQ##i##_GERROR, 0x30000 + 0x10 + i * 0x80)  \
+    FIELD(VI_VCMDQ##i##_GERROR, CMDQ_ERR, 0, 1)             \
+    FIELD(VI_VCMDQ##i##_GERROR, CONS_DRAM_WR_ABT_ERR, 1, 1) \
+    FIELD(VI_VCMDQ##i##_GERROR, CMDQ_INIT_ERR, 2, 1)
+
+A_VI_VCMDQi_GERROR(0)
+/* Omitting [1~126] as not being directly called */
+A_VI_VCMDQi_GERROR(127)
+
+#define A_VI_VCMDQi_GERRORN(i)                               \
+    REG32(VI_VCMDQ##i##_GERRORN, 0x30000 + 0x14 + i * 0x80)  \
+    FIELD(VI_VCMDQ##i##_GERRORN, CMDQ_ERR, 0, 1)             \
+    FIELD(VI_VCMDQ##i##_GERRORN, CONS_DRAM_WR_ABT_ERR, 1, 1) \
+    FIELD(VI_VCMDQ##i##_GERRORN, CMDQ_INIT_ERR, 2, 1)
+
+A_VI_VCMDQi_GERRORN(0)
+/* Omitting [1~126] as not being directly called */
+A_VI_VCMDQi_GERRORN(127)
+
+#define A_VI_VCMDQi_BASE_L(i)                       \
+    REG32(VI_VCMDQ##i##_BASE_L, 0x40000 + i * 0x80) \
+    FIELD(VI_VCMDQ##i##_BASE_L, LOG2SIZE, 0, 5)     \
+    FIELD(VI_VCMDQ##i##_BASE_L, ADDR, 5, 27)
+
+A_VI_VCMDQi_BASE_L(0)
+/* Omitting [1~126] as not being directly called */
+A_VI_VCMDQi_BASE_L(127)
+
+#define A_VI_VCMDQi_BASE_H(i)                             \
+    REG32(VI_VCMDQ##i##_BASE_H, 0x40000 + 0x4 + i * 0x80) \
+    FIELD(VI_VCMDQ##i##_BASE_H, ADDR, 0, 16)
+
+A_VI_VCMDQi_BASE_H(0)
+/* Omitting [1~126] as not being directly called */
+A_VI_VCMDQi_BASE_H(127)
+
+#define A_VI_VCMDQi_CONS_INDX_BASE_DRAM_L(i)                             \
+    REG32(VI_VCMDQ##i##_CONS_INDX_BASE_DRAM_L, 0x40000 + 0x8 + i * 0x80) \
+    FIELD(VI_VCMDQ##i##_CONS_INDX_BASE_DRAM_L, ADDR, 0, 32)
+
+A_VI_VCMDQi_CONS_INDX_BASE_DRAM_L(0)
+/* Omitting [1~126] as not being directly called */
+A_VI_VCMDQi_CONS_INDX_BASE_DRAM_L(127)
+
+#define A_VI_VCMDQi_CONS_INDX_BASE_DRAM_H(i)                             \
+    REG32(VI_VCMDQ##i##_CONS_INDX_BASE_DRAM_H, 0x40000 + 0xc + i * 0x80) \
+    FIELD(VI_VCMDQ##i##_CONS_INDX_BASE_DRAM_H, ADDR, 0, 16)
+
+A_VI_VCMDQi_CONS_INDX_BASE_DRAM_H(0)
+/* Omitting [1~126] as not being directly called */
+A_VI_VCMDQi_CONS_INDX_BASE_DRAM_H(127)
 
 #ifdef CONFIG_TEGRA241_CMDQV
 const SMMUv3AccelCmdqvOps *tegra241_cmdqv_ops(void);
