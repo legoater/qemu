@@ -73,6 +73,8 @@ struct SMMUv3State {
     bool ats;
     uint8_t oas;
     uint8_t ssidsize;
+    /* Support for NVIDIA Tegra241 SMMU CMDQV extension */
+    bool tegra241_cmdqv;
 };
 
 typedef enum {
