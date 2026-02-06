@@ -31,6 +31,7 @@ typedef struct Tegra241CMDQV {
     MemoryRegion mmio_cmdqv;
     qemu_irq irq;
     void *vintf_page0;
+    IOMMUFDHWqueue *vcmdq[128];
 
     /* Register Cache */
     uint32_t config;
