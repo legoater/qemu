@@ -2034,6 +2034,7 @@ static void smmu_realize(DeviceState *d, Error **errp)
 
     smmu_init_irq(s, dev);
     smmuv3_init_id_regs(s);
+    smmuv3_accel_cmdqv_init(s, errp);
 }
 
 static const VMStateDescription vmstate_smmuv3_queue = {
