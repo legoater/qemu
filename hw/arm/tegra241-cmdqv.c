@@ -13,14 +13,52 @@
 #include "smmuv3-accel.h"
 #include "tegra241-cmdqv.h"
 
+static bool tegra241_cmdqv_mmap_vintf_page0(Tegra241CMDQV *cmdqv, Error **errp)
+{
+    IOMMUFDViommu *viommu = cmdqv->s_accel->viommu;
+
+    if (!viommu) {
+        return true;
+    }
+
+    g_assert(!cmdqv->vintf_page0);
+    if (!iommufd_backend_viommu_mmap(viommu->iommufd, viommu->viommu_id,
+                                     VINTF_REG_PAGE_SIZE,
+                                     cmdqv->cmdqv_data.out_vintf_mmap_offset,
+                                     &cmdqv->vintf_page0, errp)) {
+        return false;
+    }
+
+    return true;
+}
+
 static uint64_t tegra241_cmdqv_read(void *opaque, hwaddr offset, unsigned size)
 {
+    Tegra241CMDQV *cmdqv = (Tegra241CMDQV *)opaque;
+    Error *local_err = NULL;
+
+    if (!cmdqv->vintf_page0) {
+        if (!tegra241_cmdqv_mmap_vintf_page0(cmdqv, &local_err)) {
+            error_report_err(local_err);
+            local_err = NULL;
+        }
+    }
+
     return 0;
 }
 
 static void tegra241_cmdqv_write(void *opaque, hwaddr offset, uint64_t value,
                                  unsigned size)
 {
+    Tegra241CMDQV *cmdqv = (Tegra241CMDQV *)opaque;
+    Error *local_err = NULL;
+
+    if (!cmdqv->vintf_page0) {
+        if (!tegra241_cmdqv_mmap_vintf_page0(cmdqv, &local_err)) {
+            error_report_err(local_err);
+            local_err = NULL;
+        }
+    }
 }
 
 static void tegra241_cmdqv_free_veventq(SMMUv3State *s)
