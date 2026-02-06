@@ -582,8 +582,115 @@ tegra241_cmdqv_alloc_viommu(SMMUv3State *s, HostIOMMUDeviceIOMMUFD *idev,
     return true;
 }
 
+static void tegra241_cmdqv_init_regs(SMMUv3State *s, Tegra241CMDQV *cmdqv)
+{
+    SMMUv3AccelState *s_accel = s->s_accel;
+    uint32_t data_type = IOMMU_HW_INFO_TYPE_TEGRA241_CMDQV;
+    struct iommu_hw_info_tegra241_cmdqv cmdqv_info;
+    SMMUv3AccelDevice *accel_dev;
+    Error *local_err = NULL;
+    uint64_t caps;
+    int i;
+
+    if (QLIST_EMPTY(&s_accel->device_list)) {
+        error_report("tegra241-cmdqv=on: requires at least one cold-plugged "
+                     "vfio-pci device");
+        goto out_err;
+    }
+
+    accel_dev = QLIST_FIRST(&s_accel->device_list);
+    if (!iommufd_backend_get_device_info(accel_dev->idev->iommufd,
+                                         accel_dev->idev->devid,
+                                         &data_type, &cmdqv_info,
+                                         sizeof(cmdqv_info), &caps,
+                                         NULL, &local_err)) {
+        error_append_hint(&local_err, "Failed to get Host CMDQV device info");
+        error_report_err(local_err);
+        goto out_err;
+    }
+
+    if (data_type != IOMMU_HW_INFO_TYPE_TEGRA241_CMDQV) {
+        error_report("Wrong data type (%d) from Host CMDQV device info",
+                     data_type);
+        goto out_err;
+    }
+    if (cmdqv_info.version != TEGRA241_CMDQV_VERSION) {
+        error_report("Wrong version (%d) from Host CMDQV device info",
+                     cmdqv_info.version);
+        goto out_err;
+    }
+    if (cmdqv_info.log2vcmdqs != TEGRA241_CMDQV_NUM_CMDQ_LOG2) {
+        error_report("Wrong num of cmdqs (%d) from Host CMDQV device info",
+                     cmdqv_info.version);
+        goto out_err;
+    }
+    if (cmdqv_info.log2vsids != TEGRA241_CMDQV_NUM_SID_PER_VM_LOG2) {
+        error_report("Wrong num of SID per VM (%d) from Host CMDQV device info",
+                     cmdqv_info.version);
+        goto out_err;
+    }
+
+    cmdqv->config = V_CONFIG_RESET;
+    cmdqv->param =
+        FIELD_DP32(cmdqv->param, PARAM, CMDQV_VER, TEGRA241_CMDQV_VERSION);
+    cmdqv->param = FIELD_DP32(cmdqv->param, PARAM, CMDQV_NUM_CMDQ_LOG2,
+                          TEGRA241_CMDQV_NUM_CMDQ_LOG2);
+    cmdqv->param = FIELD_DP32(cmdqv->param, PARAM, CMDQV_NUM_SID_PER_VM_LOG2,
+                          TEGRA241_CMDQV_NUM_SID_PER_VM_LOG2);
+    trace_tegra241_cmdqv_init_regs(cmdqv->param);
+    cmdqv->status = R_STATUS_CMDQV_ENABLED_MASK;
+    for (i = 0; i < 2; i++) {
+        cmdqv->vi_err_map[i] = 0;
+        cmdqv->vi_int_mask[i] = 0;
+        cmdqv->cmdq_err_map[i] = 0;
+    }
+    cmdqv->vintf_config = 0;
+    cmdqv->vintf_status = 0;
+    for (i = 0; i < 4; i++) {
+        cmdqv->vintf_cmdq_err_map[i] = 0;
+    }
+    for (i = 0; i < 128; i++) {
+        cmdqv->cmdq_alloc_map[i] = 0;
+        cmdqv->vcmdq_cons_indx[i] = 0;
+        cmdqv->vcmdq_prod_indx[i] = 0;
+        cmdqv->vcmdq_config[i] = 0;
+        cmdqv->vcmdq_status[i] = 0;
+        cmdqv->vcmdq_gerror[i] = 0;
+        cmdqv->vcmdq_gerrorn[i] = 0;
+        cmdqv->vcmdq_base[i] = 0;
+        cmdqv->vcmdq_cons_indx_base[i] = 0;
+    }
+    return;
+
+out_err:
+    exit(1);
+}
+
 static void tegra241_cmdqv_reset(SMMUv3State *s)
 {
+    SMMUv3AccelState *accel = s->s_accel;
+    Tegra241CMDQV *cmdqv = accel->cmdqv;
+    int i;
+
+    if (!cmdqv) {
+        return;
+    }
+
+    if (cmdqv->vintf_page0_mapped) {
+        memory_region_del_subregion(&cmdqv->mmio_cmdqv,
+                                    &cmdqv->mmio_vintf_page0);
+        cmdqv->vintf_page0_mapped = false;
+    }
+
+    for (i = 127; i >= 0; i--) {
+        if (cmdqv->vcmdq[i]) {
+            iommufd_backend_free_id(accel->viommu->iommufd,
+                                    cmdqv->vcmdq[i]->hw_queue_id);
+            g_free(cmdqv->vcmdq[i]);
+            cmdqv->vcmdq[i] = NULL;
+        }
+    }
+    tegra241_cmdqv_init_regs(s, cmdqv);
 }
 
 static const MemoryRegionOps mmio_cmdqv_ops = {
