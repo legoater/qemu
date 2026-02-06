@@ -1956,6 +1956,12 @@ static bool smmu_validate_property(SMMUv3State *s, Error **errp)
     }
 #endif
 
+#ifndef CONFIG_TEGRA241_CMDQV
+    if (s->tegra241_cmdqv) {
+        error_setg(errp, "tegra241_cmdqv=on support not compiled in");
+        return false;
+    }
+#endif
     if (!s->accel) {
         if (!s->ril) {
             error_setg(errp, "ril can only be disabled if accel=on");
@@ -1971,6 +1977,10 @@ static bool smmu_validate_property(SMMUv3State *s, Error **errp)
         }
         if (s->ssidsize) {
             error_setg(errp, "ssidsize can only be set if accel=on");
+            return false;
+        }
+        if (s->tegra241_cmdqv) {
+            error_setg(errp, "tegra241_cmdqv can only be enabled if accel=on");
             return false;
         }
         return true;
@@ -2123,6 +2133,7 @@ static const Property smmuv3_properties[] = {
     DEFINE_PROP_BOOL("ats", SMMUv3State, ats, false),
     DEFINE_PROP_UINT8("oas", SMMUv3State, oas, 44),
     DEFINE_PROP_UINT8("ssidsize", SMMUv3State, ssidsize, 0),
+    DEFINE_PROP_BOOL("tegra241-cmdqv", SMMUv3State, tegra241_cmdqv, false),
 };
 
 static void smmuv3_instance_init(Object *obj)
@@ -2162,6 +2173,8 @@ static void smmuv3_class_init(ObjectClass *klass, const void *data)
         "Valid range is 0-20, where 0 disables SubstreamID support. "
         "Defaults to 0. A value greater than 0 is required to enable "
         "PASID support.");
+    object_class_property_set_description(klass, "tegra241-cmdqv",
+        "Enable/disable Tegra241 CMDQ-Virtualisation support (for accel=on)");
 }
 
 static int smmuv3_notify_flag_changed(IOMMUMemoryRegion *iommu,
