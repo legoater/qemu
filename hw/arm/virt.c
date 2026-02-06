@@ -3059,12 +3059,15 @@ static void virt_machine_device_pre_plug_cb(HotplugHandler *hotplug_dev,
                        (vms->legacy_smmuv3_present) ?
                        "iommu=smmuv3" : "virtio-iommu");
         } else if (vms->iommu == VIRT_IOMMU_NONE) {
+            static uint8_t id;
+
             /* The new SMMUv3 device is specific to the PCI bus */
             object_property_set_bool(OBJECT(dev), "smmu_per_bus", true, NULL);
             object_property_set_link(OBJECT(dev), "memory",
                                      OBJECT(vms->sysmem), NULL);
             object_property_set_link(OBJECT(dev), "secure-memory",
                                      OBJECT(vms->secure_sysmem), NULL);
+            object_property_set_uint(OBJECT(dev), "identifier", id++, NULL);
         }
         if (object_property_get_bool(OBJECT(dev), "accel", &error_abort)) {
             hwaddr db_start = 0;
