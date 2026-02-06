@@ -339,24 +339,28 @@ static int iort_idmap_compare(gconstpointer a, gconstpointer b)
     return idmap_a->input_base - idmap_b->input_base;
 }
 
-typedef struct AcpiIortSMMUv3Dev {
+typedef struct AcpiSMMUv3Dev {
     int irq;
     hwaddr base;
+
+    /*
+     * IORT-only fields.
+     * These are used when building IORT SMMUv3 nodes.
+     */
     GArray *rc_smmu_idmaps;
-    /* Offset of the SMMUv3 IORT Node relative to the start of the IORT */
-    size_t offset;
+    size_t offset; /* Offset of the SMMUv3 node within the IORT table */
     bool accel;
     bool ats;
-} AcpiIortSMMUv3Dev;
+} AcpiSMMUv3Dev;
 
 /*
- * Populate the struct AcpiIortSMMUv3Dev for the legacy SMMUv3 and
+ * Populate the struct AcpiSMMUv3Dev for the legacy SMMUv3 and
  * return the total number of associated idmaps.
  */
 static int populate_smmuv3_legacy_dev(GArray *sdev_blob)
 {
     VirtMachineState *vms = VIRT_MACHINE(qdev_get_machine());
-    AcpiIortSMMUv3Dev sdev = {0};
+    AcpiSMMUv3Dev sdev = {0};
 
     sdev.rc_smmu_idmaps = g_array_new(false, true, sizeof(AcpiIortIdMapping));
     object_child_foreach_recursive(object_get_root(), iort_host_bridges,
@@ -376,8 +380,8 @@ static int populate_smmuv3_legacy_dev(GArray *sdev_blob)
 
 static int smmuv3_dev_idmap_compare(gconstpointer a, gconstpointer b)
 {
-    AcpiIortSMMUv3Dev *sdev_a = (AcpiIortSMMUv3Dev *)a;
-    AcpiIortSMMUv3Dev *sdev_b = (AcpiIortSMMUv3Dev *)b;
+    AcpiSMMUv3Dev *sdev_a = (AcpiSMMUv3Dev *)a;
+    AcpiSMMUv3Dev *sdev_b = (AcpiSMMUv3Dev *)b;
     AcpiIortIdMapping *map_a = &g_array_index(sdev_a->rc_smmu_idmaps,
                                               AcpiIortIdMapping, 0);
     AcpiIortIdMapping *map_b = &g_array_index(sdev_b->rc_smmu_idmaps,
@@ -388,7 +392,7 @@ static int smmuv3_dev_idmap_compare(gconstpointer a, gconstpointer b)
 static int iort_smmuv3_devices(Object *obj, void *opaque)
 {
     VirtMachineState *vms = VIRT_MACHINE(qdev_get_machine());
-    AcpiIortSMMUv3Dev sdev = {0};
+    AcpiSMMUv3Dev sdev = {0};
     GArray *sdev_blob = opaque;
     AcpiIortIdMapping idmap;
     PlatformBusDevice *pbus;
@@ -421,7 +425,7 @@ static int iort_smmuv3_devices(Object *obj, void *opaque)
 }
 
 /*
- * Populate the struct AcpiIortSMMUv3Dev for all SMMUv3 devices and
+ * Populate the struct AcpiSMMUv3Dev for all SMMUv3 devices and
  * return the total number of idmaps.
  */
 static int populate_smmuv3_dev(GArray *sdev_blob)
@@ -442,10 +446,10 @@ static void create_rc_its_idmaps(GArray *its_idmaps, GArray *smmuv3_devs)
 {
     AcpiIortIdMapping *idmap;
     AcpiIortIdMapping next_range = {0};
-    AcpiIortSMMUv3Dev *sdev;
+    AcpiSMMUv3Dev *sdev;
 
     for (int i = 0; i < smmuv3_devs->len; i++) {
-        sdev = &g_array_index(smmuv3_devs, AcpiIortSMMUv3Dev, i);
+        sdev = &g_array_index(smmuv3_devs, AcpiSMMUv3Dev, i);
         /*
          * Based on the RID ranges that are directed to the SMMU, determine the
          * bypassed RID ranges, i.e., the ones that are directed to the ITS
@@ -479,7 +483,7 @@ static void create_rc_its_idmaps(GArray *its_idmaps, GArray *smmuv3_devs)
 static void
 build_iort_rmr_nodes(GArray *table_data, GArray *smmuv3_devices, uint32_t *id)
 {
-    AcpiIortSMMUv3Dev *sdev;
+    AcpiSMMUv3Dev *sdev;
     AcpiIortIdMapping *idmap;
     int i;
 
@@ -487,7 +491,7 @@ build_iort_rmr_nodes(GArray *table_data, GArray *smmuv3_devices, uint32_t *id)
         uint16_t rmr_len;
         int bdf;
 
-        sdev = &g_array_index(smmuv3_devices, AcpiIortSMMUv3Dev, i);
+        sdev = &g_array_index(smmuv3_devices, AcpiSMMUv3Dev, i);
         if (!sdev->accel) {
             continue;
         }
@@ -544,13 +548,13 @@ static void
 build_iort(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
 {
     int i, nb_nodes, rc_mapping_count;
-    AcpiIortSMMUv3Dev *sdev;
+    AcpiSMMUv3Dev *sdev;
     size_t node_size;
     bool ats_needed = false;
     int num_smmus = 0;
     uint32_t id = 0;
     int rc_smmu_idmaps_len = 0;
-    GArray *smmuv3_devs = g_array_new(false, true, sizeof(AcpiIortSMMUv3Dev));
+    GArray *smmuv3_devs = g_array_new(false, true, sizeof(AcpiSMMUv3Dev));
     GArray *rc_its_idmaps = g_array_new(false, true, sizeof(AcpiIortIdMapping));
 
     AcpiTable table = { .sig = "IORT", .rev = 5, .oem_id = vms->oem_id,
@@ -581,7 +585,7 @@ build_iort(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
         }
         /* Calculate RMR nodes required. One per SMMUv3 with accelerated mode */
         for (i = 0; i < num_smmus; i++) {
-            sdev = &g_array_index(smmuv3_devs, AcpiIortSMMUv3Dev, i);
+            sdev = &g_array_index(smmuv3_devs, AcpiSMMUv3Dev, i);
             if (sdev->ats) {
                 ats_needed = true;
             }
@@ -620,7 +624,7 @@ build_iort(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
     }
 
     for (i = 0; i < num_smmus; i++) {
-        sdev = &g_array_index(smmuv3_devs, AcpiIortSMMUv3Dev, i);
+        sdev = &g_array_index(smmuv3_devs, AcpiSMMUv3Dev, i);
         int smmu_mapping_count, offset_to_id_array;
         int irq = sdev->irq;
 
@@ -699,7 +703,7 @@ build_iort(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
         AcpiIortIdMapping *range;
 
         for (i = 0; i < num_smmus; i++) {
-            sdev = &g_array_index(smmuv3_devs, AcpiIortSMMUv3Dev, i);
+            sdev = &g_array_index(smmuv3_devs, AcpiSMMUv3Dev, i);
 
             /*
              * Map RIDs (input) from RC to SMMUv3 nodes: RC -> SMMUv3.
@@ -742,7 +746,7 @@ build_iort(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
     acpi_table_end(linker, &table);
     g_array_free(rc_its_idmaps, true);
     for (i = 0; i < num_smmus; i++) {
-        sdev = &g_array_index(smmuv3_devs, AcpiIortSMMUv3Dev, i);
+        sdev = &g_array_index(smmuv3_devs, AcpiSMMUv3Dev, i);
         g_array_free(sdev->rc_smmu_idmaps, true);
     }
     g_array_free(smmuv3_devs, true);
