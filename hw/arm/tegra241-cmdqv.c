@@ -170,6 +170,71 @@ static uint64_t tegra241_cmdqv_read(void *opaque, hwaddr offset, unsigned size)
     }
 }
 
+/*
+ * Write a VCMDQ register using VCMDQ0_* offsets.
+ *
+ * The caller normalizes the MMIO offset such that @offset0 always refers
+ * to a VCMDQ0_* register, while @index selects the VCMDQ instance.
+ */
+static void
+tegra241_cmdqv_write_vcmdq(Tegra241CMDQV *cmdqv, hwaddr offset0, int index,
+                           uint64_t value, unsigned size)
+{
+
+    switch (offset0) {
+    case A_VCMDQ0_CONS_INDX:
+        cmdqv->vcmdq_cons_indx[index] = value;
+        return;
+    case A_VCMDQ0_PROD_INDX:
+        cmdqv->vcmdq_prod_indx[index] = (uint32_t)value;
+        return;
+    case A_VCMDQ0_CONFIG:
+        if (value & R_VCMDQ0_CONFIG_CMDQ_EN_MASK) {
+            cmdqv->vcmdq_status[index] |= R_VCMDQ0_STATUS_CMDQ_EN_OK_MASK;
+        } else {
+            cmdqv->vcmdq_status[index] &= ~R_VCMDQ0_STATUS_CMDQ_EN_OK_MASK;
+        }
+        cmdqv->vcmdq_config[index] = (uint32_t)value;
+        return;
+    case A_VCMDQ0_GERRORN:
+        cmdqv->vcmdq_gerrorn[index] = (uint32_t)value;
+        return;
+    case A_VCMDQ0_BASE_L:
+        if (size == 8) {
+            cmdqv->vcmdq_base[index] = value;
+        } else if (size == 4) {
+            cmdqv->vcmdq_base[index] =
+                (cmdqv->vcmdq_base[index] & 0xffffffff00000000ULL) |
+                (value & 0xffffffffULL);
+        }
+        return;
+    case A_VCMDQ0_BASE_H:
+        cmdqv->vcmdq_base[index] =
+            (cmdqv->vcmdq_base[index] & 0xffffffffULL) |
+            ((uint64_t)value << 32);
+        return;
+    case A_VCMDQ0_CONS_INDX_BASE_DRAM_L:
+        if (size == 8) {
+            cmdqv->vcmdq_cons_indx_base[index] = value;
+        } else if (size == 4) {
+            cmdqv->vcmdq_cons_indx_base[index] =
+                (cmdqv->vcmdq_cons_indx_base[index] & 0xffffffff00000000ULL) |
+                (value & 0xffffffffULL);
+        }
+        return;
+    case A_VCMDQ0_CONS_INDX_BASE_DRAM_H:
+        cmdqv->vcmdq_cons_indx_base[index] =
+            (cmdqv->vcmdq_cons_indx_base[index] & 0xffffffffULL) |
+            ((uint64_t)value << 32);
+        return;
+    default:
+        qemu_log_mask(LOG_UNIMP,
+                      "%s unhandled write access at 0x%" PRIx64 "\n",
+                      __func__, offset0);
+        return;
+    }
+}
+
 static void tegra241_cmdqv_write_vintf(Tegra241CMDQV *cmdqv, hwaddr offset,
                                        uint64_t value)
 {
@@ -197,6 +262,7 @@ static void tegra241_cmdqv_write(void *opaque, hwaddr offset, uint64_t value,
 {
     Tegra241CMDQV *cmdqv = (Tegra241CMDQV *)opaque;
     Error *local_err = NULL;
+    int index;
 
     if (!cmdqv->vintf_page0) {
         if (!tegra241_cmdqv_mmap_vintf_page0(cmdqv, &local_err)) {
@@ -229,6 +295,24 @@ static void tegra241_cmdqv_write(void *opaque, hwaddr offset, uint64_t value,
         break;
     case A_VINTF0_CONFIG ... A_VINTF0_LVCMDQ_ERR_MAP_3:
         tegra241_cmdqv_write_vintf(cmdqv, offset, value);
+        break;
+    case A_VI_VCMDQ0_CONS_INDX ... A_VI_VCMDQ127_GERRORN:
+        /* Same decoding as read() case: See comments above */
+        offset -= 0x20000;
+        QEMU_FALLTHROUGH;
+    case A_VCMDQ0_CONS_INDX ... A_VCMDQ127_GERRORN:
+        index = (offset - 0x10000) / 0x80;
+        tegra241_cmdqv_write_vcmdq(cmdqv, offset - 0x80 * index, index, value,
+                                   size);
+        break;
+    case A_VI_VCMDQ0_BASE_L ... A_VI_VCMDQ127_CONS_INDX_BASE_DRAM_H:
+        /* Same decoding as read() case: See comments above */
+        offset -= 0x20000;
+        QEMU_FALLTHROUGH;
+    case A_VCMDQ0_BASE_L ... A_VCMDQ127_CONS_INDX_BASE_DRAM_H:
+        index = (offset - 0x20000) / 0x80;
+        tegra241_cmdqv_write_vcmdq(cmdqv, offset - 0x80 * index, index, value,
+                                   size);
         break;
     default:
         qemu_log_mask(LOG_UNIMP, "%s unhandled write access at 0x%" PRIx64 "\n",
