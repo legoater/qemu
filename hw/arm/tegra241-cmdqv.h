@@ -29,7 +29,10 @@ typedef struct Tegra241CMDQV {
     SMMUv3AccelState *s_accel;
     MemoryRegion mmio_cmdqv;
     qemu_irq irq;
+    void *vintf_page0;
 } Tegra241CMDQV;
+
+#define VINTF_REG_PAGE_SIZE 0x10000
 
 #ifdef CONFIG_TEGRA241_CMDQV
 const SMMUv3AccelCmdqvOps *tegra241_cmdqv_ops(void);
