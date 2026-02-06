@@ -65,6 +65,8 @@
 #include "target/arm/cpu.h"
 #include "target/arm/multiprocessing.h"
 
+#include "tegra241-cmdqv.h"
+
 #define ARM_SPI_BASE 32
 
 #define ACPI_BUILD_TABLE_SIZE             0x20000
@@ -1121,6 +1123,75 @@ static void build_fadt_rev6(GArray *table_data, BIOSLinker *linker,
     build_fadt(table_data, linker, &fadt, vms->oem_id, vms->oem_table_id);
 }
 
+static int smmuv3_cmdqv_devices(Object *obj, void *opaque)
+{
+    VirtMachineState *vms = VIRT_MACHINE(qdev_get_machine());
+    GArray *sdev_blob = opaque;
+    PlatformBusDevice *pbus;
+    AcpiSMMUv3Dev sdev;
+    SysBusDevice *sbdev;
+
+    if (!object_dynamic_cast(obj, TYPE_ARM_SMMUV3)) {
+        return 0;
+    }
+
+    if (!object_property_get_bool(obj, "tegra241-cmdqv", NULL)) {
+        return 0;
+    }
+
+    sdev.id = object_property_get_uint(obj, "identifier", &error_abort);
+    pbus = PLATFORM_BUS_DEVICE(vms->platform_bus_dev);
+    sbdev = SYS_BUS_DEVICE(obj);
+    sdev.base = platform_bus_get_mmio_addr(pbus, sbdev, 1);
+    sdev.base += vms->memmap[VIRT_PLATFORM_BUS].base;
+    sdev.irq = platform_bus_get_irqn(pbus, sbdev, NUM_SMMU_IRQS);
+    sdev.irq += vms->irqmap[VIRT_PLATFORM_BUS];
+    sdev.irq += ARM_SPI_BASE;
+    g_array_append_val(sdev_blob, sdev);
+    return 0;
+}
+
+static void acpi_dsdt_add_tegra241_cmdqv(Aml *scope, VirtMachineState *vms)
+{
+    GArray *smmuv3_devs = g_array_new(false, true, sizeof(AcpiSMMUv3Dev));
+    int i;
+
+    if (vms->legacy_smmuv3_present) {
+        return;
+    }
+
+    object_child_foreach_recursive(object_get_root(), smmuv3_cmdqv_devices,
+                                   smmuv3_devs);
+
+    for (i = 0; i < smmuv3_devs->len; i++) {
+        AcpiSMMUv3Dev *sdev;
+        Aml *dev, *crs, *addr;
+
+        sdev = &g_array_index(smmuv3_devs, AcpiSMMUv3Dev, i);
+
+        dev = aml_device("CV%.02u", sdev->id);
+        aml_append(dev, aml_name_decl("_HID", aml_string("NVDA200C")));
+        aml_append(dev, aml_name_decl("_UID", aml_int(sdev->id)));
+        aml_append(dev, aml_name_decl("_CCA", aml_int(1)));
+
+        crs = aml_resource_template();
+        addr = aml_qword_memory(AML_POS_DECODE, AML_MIN_FIXED, AML_MAX_FIXED,
+                                AML_CACHEABLE, AML_READ_WRITE, 0x0, sdev->base,
+                                sdev->base + TEGRA241_CMDQV_IO_LEN - 0x1, 0x0,
+                                TEGRA241_CMDQV_IO_LEN);
+        aml_append(crs, addr);
+        aml_append(crs, aml_interrupt(AML_CONSUMER, AML_EDGE,
+                                      AML_ACTIVE_HIGH, AML_EXCLUSIVE,
+                                      (uint32_t *)&sdev->irq, 1));
+        aml_append(dev, aml_name_decl("_CRS", crs));
+
+        aml_append(scope, dev);
+
+        trace_virt_acpi_dsdt_tegra241_cmdqv(sdev->id, sdev->base, sdev->irq);
+    }
+    g_array_free(smmuv3_devs, true);
+}
+
 /* DSDT */
 static void
 build_dsdt(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
@@ -1184,6 +1255,8 @@ build_dsdt(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
 #ifdef CONFIG_TPM
     acpi_dsdt_add_tpm(scope, vms);
 #endif
+
+    acpi_dsdt_add_tegra241_cmdqv(scope, vms);
 
     aml_append(dsdt, scope);
 
