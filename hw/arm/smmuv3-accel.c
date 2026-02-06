@@ -707,7 +707,11 @@ static void smmuv3_accel_unset_iommu_device(PCIBus *bus, void *opaque,
     QLIST_REMOVE(accel_dev, next);
     trace_smmuv3_accel_unset_iommu_device(devfn, idev->devid);
 
-    if (QLIST_EMPTY(&accel->device_list)) {
+   /*
+    * Keep the vIOMMU alive when CMDQV is present, as the vIOMMU to host
+    * SMMUv3 association cannot be changed via device hot-plug.
+    */
+    if (QLIST_EMPTY(&accel->device_list) && !accel->cmdqv) {
         smmuv3_accel_free_viommu(accel);
     }
 }
