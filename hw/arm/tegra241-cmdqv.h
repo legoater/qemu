@@ -10,7 +10,26 @@
 #ifndef HW_TEGRA241_CMDQV_H
 #define HW_TEGRA241_CMDQV_H
 
+#include "smmuv3-accel.h"
 #include CONFIG_DEVICES
+
+/*
+ * Tegra241 CMDQV MMIO layout (64KB pages):
+ *
+ * 0x00000: Global CMDQV registers
+ * 0x10000: Global VCMDQ registers, page 0
+ * 0x20000: Global VCMDQ registers, page 1
+ * 0x30000: VINTF0 logical VCMDQ registers, page 0
+ * 0x40000: VINTF0 logical VCMDQ registers, page 1
+ */
+#define TEGRA241_CMDQV_IO_LEN 0x50000
+
+typedef struct Tegra241CMDQV {
+    struct iommu_viommu_tegra241_cmdqv cmdqv_data;
+    SMMUv3AccelState *s_accel;
+    MemoryRegion mmio_cmdqv;
+    qemu_irq irq;
+} Tegra241CMDQV;
 
 #ifdef CONFIG_TEGRA241_CMDQV
 const SMMUv3AccelCmdqvOps *tegra241_cmdqv_ops(void);
