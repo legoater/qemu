@@ -428,12 +428,47 @@ static void tegra241_cmdqv_write(void *opaque, hwaddr offset, uint64_t value,
 
 static void tegra241_cmdqv_free_veventq(SMMUv3State *s)
 {
+    SMMUv3AccelState *accel = s->s_accel;
+    Tegra241CMDQV *cmdqv = accel->cmdqv;
+    IOMMUFDVeventq *veventq = cmdqv->veventq;
+
+    if (!veventq) {
+        return;
+    }
+    close(veventq->veventq_fd);
+    iommufd_backend_free_id(accel->viommu->iommufd, veventq->veventq_id);
+    g_free(veventq);
+    cmdqv->veventq = NULL;
 }
 
 static bool tegra241_cmdqv_alloc_veventq(SMMUv3State *s, Error **errp)
 {
-    error_setg(errp, "NVIDIA Tegra241 CMDQV is unsupported");
-    return false;
+    SMMUv3AccelState *accel = s->s_accel;
+    IOMMUFDViommu *viommu = accel->viommu;
+    Tegra241CMDQV *cmdqv = accel->cmdqv;
+    IOMMUFDVeventq *veventq;
+    uint32_t veventq_id;
+    uint32_t veventq_fd;
+
+    if (cmdqv->veventq) {
+        return true;
+    }
+
+    if (!iommufd_backend_alloc_veventq(viommu->iommufd, viommu->viommu_id,
+                                       IOMMU_VEVENTQ_TYPE_TEGRA241_CMDQV,
+                                       1 << 16, &veventq_id, &veventq_fd,
+                                       errp)) {
+        error_append_hint(errp, "Tegra241 CMDQV: failed to alloc veventq");
+        return false;
+    }
+
+    veventq = g_new(IOMMUFDVeventq, 1);
+    veventq->veventq_id = veventq_id;
+    veventq->veventq_fd = veventq_fd;
+    veventq->viommu = viommu;
+    cmdqv->veventq = veventq;
+
+    return true;
 }
 
 static void tegra241_cmdqv_free_viommu(SMMUv3State *s)
