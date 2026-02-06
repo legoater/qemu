@@ -2900,6 +2900,16 @@ bool address_space_access_valid(AddressSpace *as, hwaddr addr, hwaddr len,
  */
 bool address_space_is_io(AddressSpace *as, hwaddr addr);
 
+/**
+ * address_space_is_ram: check whether a guest physical address whithin
+ *                       an address space is RAM.
+ *
+ * @as: #AddressSpace to be accessed
+ * @addr: address within that address space
+ */
+
+bool address_space_is_ram(AddressSpace *as, hwaddr addr);
+
 /* address_space_map: map a physical memory region into a host virtual address
  *
  * May map a subset of the requested range, given by and returned in @plen.
