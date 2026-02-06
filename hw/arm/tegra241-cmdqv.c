@@ -38,12 +38,32 @@ static bool tegra241_cmdqv_mmap_vintf_page0(Tegra241CMDQV *cmdqv, Error **errp)
  *
  * The caller normalizes the MMIO offset such that @offset0 always refers
  * to a VCMDQ0_* register, while @index selects the VCMDQ instance.
- *
- * All VCMDQ accesses are currently trapped. Use cached registers
  */
 static uint64_t tegra241_cmdqv_read_vcmdq(Tegra241CMDQV *cmdqv, hwaddr offset0,
                                           int index)
 {
+
+    /*
+     * If this VCMDQ is mapped and VINTF page0 is available, read directly
+     * from the VINTF page0 backing. Otherwise, fall back to cached state.
+     */
+    if (cmdqv->vcmdq[index] && cmdqv->vintf_page0_mapped) {
+        uint64_t off = (index * 0x80) + (offset0 - 0x10000);
+        uint32_t *ptr = (uint32_t *)(cmdqv->vintf_page0 + off);
+
+        switch (offset0) {
+        case A_VCMDQ0_CONS_INDX:
+        case A_VCMDQ0_PROD_INDX:
+        case A_VCMDQ0_CONFIG:
+        case A_VCMDQ0_STATUS:
+        case A_VCMDQ0_GERROR:
+        case A_VCMDQ0_GERRORN:
+            return *ptr;
+        default:
+            break;
+        }
+    }
+
     switch (offset0) {
     case A_VCMDQ0_CONS_INDX:
         return cmdqv->vcmdq_cons_indx[index];
@@ -240,6 +260,26 @@ static void
 tegra241_cmdqv_write_vcmdq(Tegra241CMDQV *cmdqv, hwaddr offset0, int index,
                            uint64_t value, unsigned size, Error **errp)
 {
+
+    /*
+     * If this VCMDQ is mapped and VINTF page0 is available, write directly
+     * to the VINTF page0 backing. Otherwise, update cached state.
+     */
+    if (cmdqv->vcmdq[index] && cmdqv->vintf_page0_mapped) {
+        uint64_t off = (index * 0x80) + (offset0 - 0x10000);
+        uint32_t *ptr = (uint32_t *)(cmdqv->vintf_page0 + off);
+
+        switch (offset0) {
+        case A_VCMDQ0_CONS_INDX:
+        case A_VCMDQ0_PROD_INDX:
+        case A_VCMDQ0_CONFIG:
+        case A_VCMDQ0_GERRORN:
+            *ptr = (uint32_t)value;
+            return;
+        default:
+            break;
+        }
+    }
 
     switch (offset0) {
     case A_VCMDQ0_CONS_INDX:
