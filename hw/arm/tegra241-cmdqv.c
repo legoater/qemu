@@ -170,6 +170,26 @@ static uint64_t tegra241_cmdqv_read(void *opaque, hwaddr offset, unsigned size)
     }
 }
 
+static void tegra241_cmdqv_map_vintf_page0(Tegra241CMDQV *cmdqv)
+{
+    char *name;
+
+    if (cmdqv->vintf_page0_mapped) {
+        return;
+    }
+
+    name = g_strdup_printf("%s vintf-page0",
+                           memory_region_name(&cmdqv->mmio_cmdqv));
+    memory_region_init_ram_device_ptr(&cmdqv->mmio_vintf_page0,
+                                      memory_region_owner(&cmdqv->mmio_cmdqv),
+                                      name, VINTF_REG_PAGE_SIZE,
+                                      cmdqv->vintf_page0);
+    memory_region_add_subregion_overlap(&cmdqv->mmio_cmdqv, 0x30000,
+                                        &cmdqv->mmio_vintf_page0, 1);
+    g_free(name);
+    cmdqv->vintf_page0_mapped = true;
+}
+
 static bool tegra241_cmdqv_setup_vcmdq(Tegra241CMDQV *cmdqv, int index,
                                        Error **errp)
 {
@@ -206,6 +226,7 @@ static bool tegra241_cmdqv_setup_vcmdq(Tegra241CMDQV *cmdqv, int index,
     hw_queue->viommu = viommu;
     cmdqv->vcmdq[index] = hw_queue;
 
+    tegra241_cmdqv_map_vintf_page0(cmdqv);
     return true;
 }
 
