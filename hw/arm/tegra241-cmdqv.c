@@ -33,6 +33,46 @@ static bool tegra241_cmdqv_mmap_vintf_page0(Tegra241CMDQV *cmdqv, Error **errp)
     return true;
 }
 
+/*
+ * Read a VCMDQ register using VCMDQ0_* offsets.
+ *
+ * The caller normalizes the MMIO offset such that @offset0 always refers
+ * to a VCMDQ0_* register, while @index selects the VCMDQ instance.
+ *
+ * All VCMDQ accesses are currently trapped. Use cached registers
+ */
+static uint64_t tegra241_cmdqv_read_vcmdq(Tegra241CMDQV *cmdqv, hwaddr offset0,
+                                          int index)
+{
+    switch (offset0) {
+    case A_VCMDQ0_CONS_INDX:
+        return cmdqv->vcmdq_cons_indx[index];
+    case A_VCMDQ0_PROD_INDX:
+        return cmdqv->vcmdq_prod_indx[index];
+    case A_VCMDQ0_CONFIG:
+        return cmdqv->vcmdq_config[index];
+    case A_VCMDQ0_STATUS:
+        return cmdqv->vcmdq_status[index];
+    case A_VCMDQ0_GERROR:
+        return cmdqv->vcmdq_gerror[index];
+    case A_VCMDQ0_GERRORN:
+        return cmdqv->vcmdq_gerrorn[index];
+    case A_VCMDQ0_BASE_L:
+        return cmdqv->vcmdq_base[index];
+    case A_VCMDQ0_BASE_H:
+        return cmdqv->vcmdq_base[index] >> 32;
+    case A_VCMDQ0_CONS_INDX_BASE_DRAM_L:
+        return cmdqv->vcmdq_cons_indx_base[index];
+    case A_VCMDQ0_CONS_INDX_BASE_DRAM_H:
+        return cmdqv->vcmdq_cons_indx_base[index] >> 32;
+    default:
+        qemu_log_mask(LOG_UNIMP,
+                      "%s unhandled read access at 0x%" PRIx64 "\n",
+                      __func__, offset0);
+        return 0;
+    }
+}
+
 static uint64_t tegra241_cmdqv_read_vintf(Tegra241CMDQV *cmdqv, hwaddr offset)
 {
     int i;
@@ -56,6 +96,7 @@ static uint64_t tegra241_cmdqv_read(void *opaque, hwaddr offset, unsigned size)
 {
     Tegra241CMDQV *cmdqv = (Tegra241CMDQV *)opaque;
     Error *local_err = NULL;
+    int index;
 
     if (!cmdqv->vintf_page0) {
         if (!tegra241_cmdqv_mmap_vintf_page0(cmdqv, &local_err)) {
@@ -88,6 +129,40 @@ static uint64_t tegra241_cmdqv_read(void *opaque, hwaddr offset, unsigned size)
         return cmdqv->cmdq_alloc_map[(offset - A_CMDQ_ALLOC_MAP_0) / 4];
     case A_VINTF0_CONFIG ... A_VINTF0_LVCMDQ_ERR_MAP_3:
         return tegra241_cmdqv_read_vintf(cmdqv, offset);
+    case A_VI_VCMDQ0_CONS_INDX ... A_VI_VCMDQ127_GERRORN:
+        /*
+         * VI_VCMDQ registers (VINTF logical view) have the same per-VCMDQ
+         * layout as the global VCMDQ registers, but are based at 0x30000
+         * instead of 0x10000.
+         *
+         * Subtract 0x20000 to translate a VI_VCMDQ offset into the equivalent
+         * global VCMDQ offset, then fall through to reuse the common VCMDQ
+         * decoding logic below.
+         */
+        offset -= 0x20000;
+        QEMU_FALLTHROUGH;
+    case A_VCMDQ0_CONS_INDX ... A_VCMDQ127_GERRORN:
+        /*
+         * Decode a per-VCMDQ register access.
+         *
+         * VCMDQs are 128 identical instances, each occupying a 0x80-byte window
+         * starting at 0x10000. The MMIO offset is decoded to extract the VCMDQ
+         * index, and the per-instance offset is normalized to a VCMDQ0_*
+         * register (@offset0 = offset - 0x80 * index).
+         *
+         * A single helper then services all VCMDQs, with @index selecting the
+         * instance.
+         */
+        index = (offset - 0x10000) / 0x80;
+        return tegra241_cmdqv_read_vcmdq(cmdqv, offset - 0x80 * index, index);
+    case A_VI_VCMDQ0_BASE_L ... A_VI_VCMDQ127_CONS_INDX_BASE_DRAM_H:
+        /* Same as A_VI_VCMDQ0_CONS_INDX ... A_VI_VCMDQ127_GERRORN case above */
+        offset -= 0x20000;
+        QEMU_FALLTHROUGH;
+    case A_VCMDQ0_BASE_L ... A_VCMDQ127_CONS_INDX_BASE_DRAM_H:
+        /* Same as A_VCMDQ0_CONS_INDX ... A_VCMDQ127_GERRORN case above */
+        index = (offset - 0x20000) / 0x80;
+        return tegra241_cmdqv_read_vcmdq(cmdqv, offset - 0x80 * index, index);
     default:
         qemu_log_mask(LOG_UNIMP, "%s unhandled read access at 0x%" PRIx64 "\n",
                       __func__, offset);
