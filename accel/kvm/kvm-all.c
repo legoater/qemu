@@ -2816,7 +2816,7 @@ static int kvm_reset_vmfd(MachineState *ms)
     }
 
     s->vmfd = ret;
-
+    kvm_state->guest_state_protected = false;
     kvm_setup_dirty_ring(s);
 
     /* rebind memory to new vm fd */
@@ -2872,6 +2872,9 @@ static int kvm_reset_vmfd(MachineState *ms)
      * kvm fd has changed. Commit the irq routes to KVM once more.
      */
     kvm_irqchip_commit_routes(s);
+    if (ms->cgs) {
+        cpu_synchronize_all_post_init();
+    }
     trace_kvm_reset_vmfd();
     return ret;
 }
