@@ -29,6 +29,8 @@ typedef struct SMMUv3AccelCmdqvOps {
                          uint32_t *out_viommu_id,
                          Error **errp);
     void (*free_viommu)(SMMUv3State *s);
+    bool (*alloc_veventq)(SMMUv3State *s,  Error **errp);
+    void (*free_veventq)(SMMUv3State *s);
     void (*reset)(SMMUv3State *s);
 } SMMUv3AccelCmdqvOps;
 
