@@ -36,6 +36,7 @@ typedef struct Tegra241CMDQV {
     SMMUv3AccelState *s_accel;
     MemoryRegion mmio_cmdqv;
     qemu_irq irq;
+    IOMMUFDHWqueue *vcmdq[TEGRA241_CMDQV_MAX_CMDQ];
     void *vintf_page0;
 
     /* Register Cache */
@@ -321,6 +322,16 @@ A_VI_VCMDQi_CONS_INDX_BASE_DRAM_L(1)
 
 A_VI_VCMDQi_CONS_INDX_BASE_DRAM_H(0)
 A_VI_VCMDQi_CONS_INDX_BASE_DRAM_H(1)
+
+static inline bool tegra241_cmdq_enabled(Tegra241CMDQV *cmdq)
+{
+    return cmdq->status & R_STATUS_CMDQV_ENABLED_MASK;
+}
+
+static inline bool tegra241_vintf_enabled(Tegra241CMDQV *cmdq)
+{
+    return cmdq->vintf_status & R_VINTF0_STATUS_ENABLE_OK_MASK;
+}
 
 const SMMUv3AccelCmdqvOps *tegra241_cmdqv_get_ops(void);
 
