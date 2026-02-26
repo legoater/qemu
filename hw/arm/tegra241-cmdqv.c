@@ -9,8 +9,10 @@
 
 #include "qemu/osdep.h"
 #include "qemu/log.h"
+#include "trace.h"
 
 #include "hw/arm/smmuv3.h"
+#include "hw/core/irq.h"
 #include "smmuv3-accel.h"
 #include "tegra241-cmdqv.h"
 
@@ -487,6 +489,43 @@ static void tegra241_cmdqv_write(void *opaque, hwaddr offset, uint64_t value,
     }
 }
 
+static void tegra241_cmdqv_event_read(void *opaque)
+{
+    Tegra241CMDQV *cmdqv = opaque;
+    IOMMUFDVeventq *veventq = cmdqv->veventq;
+    struct {
+        struct iommufd_vevent_header hdr;
+        struct iommu_vevent_tegra241_cmdqv vevent;
+    } buf;
+    Error *local_err;
+
+    if (!smmuv3_accel_event_read_validate(veventq,
+                                          IOMMU_VEVENTQ_TYPE_TEGRA241_CMDQV,
+                                          &buf, sizeof(buf), &local_err)) {
+        warn_report_err_once(local_err);
+        return;
+    }
+
+    if (buf.vevent.lvcmdq_err_map[0] || buf.vevent.lvcmdq_err_map[1]) {
+        cmdqv->vintf_cmdq_err_map[0] =
+            buf.vevent.lvcmdq_err_map[0] & 0xffffffff;
+        cmdqv->vintf_cmdq_err_map[1] =
+            (buf.vevent.lvcmdq_err_map[0] >> 32) & 0xffffffff;
+        cmdqv->vintf_cmdq_err_map[2] =
+            buf.vevent.lvcmdq_err_map[1] & 0xffffffff;
+        cmdqv->vintf_cmdq_err_map[3] =
+            (buf.vevent.lvcmdq_err_map[1] >> 32) & 0xffffffff;
+        for (int i = 0; i < 4; i++) {
+            cmdqv->cmdq_err_map[i] = cmdqv->vintf_cmdq_err_map[i];
+        }
+        cmdqv->vi_err_map[0] |= 0x1;
+        qemu_irq_pulse(cmdqv->irq);
+        trace_tegra241_cmdqv_err_map(
+        cmdqv->vintf_cmdq_err_map[3], cmdqv->vintf_cmdq_err_map[2],
+        cmdqv->vintf_cmdq_err_map[1], cmdqv->vintf_cmdq_err_map[0]);
+    }
+}
+
 static void tegra241_cmdqv_free_veventq(SMMUv3State *s)
 {
     SMMUv3AccelState *accel = s->s_accel;
@@ -496,6 +535,7 @@ static void tegra241_cmdqv_free_veventq(SMMUv3State *s)
     if (!veventq) {
         return;
     }
+    qemu_set_fd_handler(veventq->veventq_fd, NULL, NULL, NULL);
     close(veventq->veventq_fd);
     iommufd_backend_free_id(veventq->viommu->iommufd, veventq->veventq_id);
     g_free(veventq);
@@ -510,6 +550,7 @@ static bool tegra241_cmdqv_alloc_veventq(SMMUv3State *s, Error **errp)
     IOMMUFDVeventq *veventq;
     uint32_t veventq_id;
     uint32_t veventq_fd;
+    int flags;
 
     if (cmdqv->veventq) {
         return true;
@@ -523,13 +564,30 @@ static bool tegra241_cmdqv_alloc_veventq(SMMUv3State *s, Error **errp)
         return false;
     }
 
+    flags = fcntl(veventq_fd, F_GETFL);
+    if (flags < 0) {
+        error_setg(errp, "Failed to get flags for vEVENTQ fd");
+        goto free_veventq;
+    }
+    if (fcntl(veventq_fd, F_SETFL, O_NONBLOCK | flags) < 0) {
+        error_setg(errp, "Failed to set O_NONBLOCK on vEVENTQ fd");
+        goto free_veventq;
+    }
+
     veventq = g_new(IOMMUFDVeventq, 1);
     veventq->veventq_id = veventq_id;
     veventq->veventq_fd = veventq_fd;
     veventq->viommu = accel->viommu;
     cmdqv->veventq = veventq;
 
+    /* Set up event handler for veventq fd */
+    qemu_set_fd_handler(veventq_fd, tegra241_cmdqv_event_read, NULL, cmdqv);
     return true;
+
+free_veventq:
+    close(veventq_fd);
+    iommufd_backend_free_id(viommu->iommufd, veventq_id);
+    return false;
 }
 
 static void tegra241_cmdqv_free_viommu(SMMUv3State *s)
