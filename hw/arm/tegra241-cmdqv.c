@@ -151,6 +151,67 @@ static uint64_t tegra241_cmdqv_read(void *opaque, hwaddr offset, unsigned size)
     }
 }
 
+static void tegra241_cmdqv_free_vcmdq(Tegra241CMDQV *cmdqv, int index)
+{
+    SMMUv3AccelState *accel = cmdqv->s_accel;
+    IOMMUFDViommu *viommu = accel->viommu;
+    IOMMUFDHWqueue *vcmdq = cmdqv->vcmdq[index];
+
+    if (!vcmdq) {
+        return;
+    }
+    iommufd_backend_free_id(viommu->iommufd, vcmdq->hw_queue_id);
+    g_free(vcmdq);
+    cmdqv->vcmdq[index] = NULL;
+}
+
+static void tegra241_cmdqv_free_all_vcmdq(Tegra241CMDQV *cmdqv)
+{
+    /* Free in the reverse order to avoid "resource busy" error */
+    for (int i = (TEGRA241_CMDQV_MAX_CMDQ - 1); i >= 0; i--) {
+        tegra241_cmdqv_free_vcmdq(cmdqv, i);
+    }
+}
+
+static bool tegra241_cmdqv_setup_vcmdq(Tegra241CMDQV *cmdqv, int index,
+                                       Error **errp)
+{
+    SMMUv3AccelState *accel = cmdqv->s_accel;
+    uint64_t base_mask = (uint64_t)R_VCMDQ0_BASE_L_ADDR_MASK |
+                         (uint64_t)R_VCMDQ0_BASE_H_ADDR_MASK << 32;
+    uint64_t addr = cmdqv->vcmdq_base[index] & base_mask;
+    uint64_t log2 = cmdqv->vcmdq_base[index] & R_VCMDQ0_BASE_L_LOG2SIZE_MASK;
+    uint64_t size = 1ULL << (log2 + 4);
+    IOMMUFDViommu *viommu = accel->viommu;
+    IOMMUFDHWqueue *hw_queue;
+    uint32_t hw_queue_id;
+
+    /* Ignore any invalid address. This may come as part of reset etc */
+    if (!address_space_is_ram(&address_space_memory, addr) ||
+        !address_space_is_ram(&address_space_memory, addr + size - 1)) {
+        return true;
+    }
+
+    if (!tegra241_cmdq_enabled(cmdqv) || !tegra241_vintf_enabled(cmdqv)) {
+        return true;
+    }
+
+    tegra241_cmdqv_free_vcmdq(cmdqv, index);
+
+    if (!iommufd_backend_alloc_hw_queue(viommu->iommufd, viommu->viommu_id,
+                                        IOMMU_HW_QUEUE_TYPE_TEGRA241_CMDQV,
+                                        index, addr, size, &hw_queue_id,
+                                        errp)) {
+        return false;
+    }
+    hw_queue = g_new(IOMMUFDHWqueue, 1);
+    hw_queue->hw_queue_id = hw_queue_id;
+    hw_queue->viommu = viommu;
+    cmdqv->vcmdq[index] = hw_queue;
+
+    return true;
+}
+
 static bool
 tegra241_cmdqv_munmap_vintf_page0(Tegra241CMDQV *cmdqv, Error **errp)
 {
@@ -192,7 +253,7 @@ static bool tegra241_cmdqv_mmap_vintf_page0(Tegra241CMDQV *cmdqv, Error **errp)
  */
 static void
 tegra241_cmdqv_write_vcmdq(Tegra241CMDQV *cmdqv, hwaddr offset0, int index,
-                           uint64_t value, unsigned size)
+                           uint64_t value, unsigned size, Error **errp)
 {
     switch (offset0) {
     case A_VCMDQ0_CONS_INDX:
@@ -220,11 +281,13 @@ tegra241_cmdqv_write_vcmdq(Tegra241CMDQV *cmdqv, hwaddr offset0, int index,
                 (cmdqv->vcmdq_base[index] & 0xffffffff00000000ULL) |
                 (value & 0xffffffffULL);
         }
+        tegra241_cmdqv_setup_vcmdq(cmdqv, index, errp);
         return;
     case A_VCMDQ0_BASE_H:
         cmdqv->vcmdq_base[index] =
             (cmdqv->vcmdq_base[index] & 0xffffffffULL) |
             ((uint64_t)value << 32);
+        tegra241_cmdqv_setup_vcmdq(cmdqv, index, errp);
         return;
     case A_VCMDQ0_CONS_INDX_BASE_DRAM_L:
         if (size == 8) {
@@ -263,6 +326,7 @@ static void tegra241_cmdqv_write_vintf(Tegra241CMDQV *cmdqv, hwaddr offset,
             tegra241_cmdqv_mmap_vintf_page0(cmdqv, errp);
             cmdqv->vintf_status |= R_VINTF0_STATUS_ENABLE_OK_MASK;
         } else {
+            tegra241_cmdqv_free_all_vcmdq(cmdqv);
             tegra241_cmdqv_munmap_vintf_page0(cmdqv, errp);
             cmdqv->vintf_status &= ~R_VINTF0_STATUS_ENABLE_OK_MASK;
         }
@@ -302,6 +366,7 @@ static void tegra241_cmdqv_write(void *opaque, hwaddr offset, uint64_t value,
         if (value & R_CONFIG_CMDQV_EN_MASK) {
             cmdqv->status |= R_STATUS_CMDQV_ENABLED_MASK;
         } else {
+            tegra241_cmdqv_free_all_vcmdq(cmdqv);
             cmdqv->status &= ~R_STATUS_CMDQV_ENABLED_MASK;
         }
         break;
@@ -321,7 +386,7 @@ static void tegra241_cmdqv_write(void *opaque, hwaddr offset, uint64_t value,
     case A_VCMDQ0_CONS_INDX ... A_VCMDQ1_GERRORN:
         index = (offset - 0x10000) / 0x80;
         tegra241_cmdqv_write_vcmdq(cmdqv, offset - 0x80 * index, index, value,
-                                   size);
+                                   size, &local_err);
         break;
     case A_VI_VCMDQ0_BASE_L ... A_VI_VCMDQ1_CONS_INDX_BASE_DRAM_H:
         /* Same decoding as read() case: See comments above */
@@ -330,7 +395,7 @@ static void tegra241_cmdqv_write(void *opaque, hwaddr offset, uint64_t value,
     case A_VCMDQ0_BASE_L ... A_VCMDQ1_CONS_INDX_BASE_DRAM_H:
         index = (offset - 0x20000) / 0x80;
         tegra241_cmdqv_write_vcmdq(cmdqv, offset - 0x80 * index, index, value,
-                                   size);
+                                   size, &local_err);
         break;
     default:
         qemu_log_mask(LOG_UNIMP, "%s unhandled write access at 0x%" PRIx64 "\n",
