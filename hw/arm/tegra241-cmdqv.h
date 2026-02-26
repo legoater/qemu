@@ -18,6 +18,8 @@
 #define TEGRA241_CMDQV_MAX_CMDQ            (1U << TEGRA241_CMDQV_NUM_CMDQ_LOG2)
 #define TEGRA241_CMDQV_NUM_SID_PER_VM_LOG2 4
 
+#define VINTF_PAGE_SIZE 0x10000
+
 /*
  * Tegra241 CMDQV MMIO layout (64KB pages)
  *
@@ -34,6 +36,7 @@ typedef struct Tegra241CMDQV {
     SMMUv3AccelState *s_accel;
     MemoryRegion mmio_cmdqv;
     qemu_irq irq;
+    void *vintf_page0;
 
     /* Register Cache */
     uint32_t config;
