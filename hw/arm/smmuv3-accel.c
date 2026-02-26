@@ -582,13 +582,21 @@ smmuv3_accel_alloc_viommu(SMMUv3State *s, HostIOMMUDeviceIOMMUFD *idev,
         goto free_bypass_hwpt;
     }
 
+    if (cmdqv_ops && !cmdqv_ops->alloc_veventq(s, errp)) {
+        goto free_veventq;
+    }
+
     /* Attach a HWPT based on SMMUv3 GBPA.ABORT value */
     hwpt_id = smmuv3_accel_gbpa_hwpt(s, accel);
     if (!host_iommu_device_iommufd_attach_hwpt(idev, hwpt_id, errp)) {
-        goto free_veventq;
+        goto free_cmdqv_veventq;
     }
     return true;
 
+free_cmdqv_veventq:
+    if (cmdqv_ops && cmdqv_ops->free_veventq) {
+        cmdqv_ops->free_veventq(s);
+    }
 free_veventq:
     smmuv3_accel_free_veventq(accel);
 free_bypass_hwpt:
