@@ -783,7 +783,11 @@ static void smmuv3_accel_unset_iommu_device(PCIBus *bus, void *opaque,
     QLIST_REMOVE(accel_dev, next);
     trace_smmuv3_accel_unset_iommu_device(devfn, hiodi->devid);
 
-    if (QLIST_EMPTY(&accel->device_list)) {
+   /*
+    * Keep the vIOMMU alive when CMDQV is present, as the vIOMMU to host
+    * SMMUv3 association cannot be changed via device hot-plug.
+    */
+    if (QLIST_EMPTY(&accel->device_list) && !accel->cmdqv) {
         smmuv3_accel_free_viommu(accel);
     }
 }
@@ -999,6 +1003,12 @@ void smmuv3_accel_reset(SMMUv3State *s)
     }
     /* Attach a HWPT based on GBPA reset value */
     smmuv3_accel_attach_gbpa_hwpt(s, NULL);
+
+    if (s->cmdqv == ON_OFF_AUTO_ON && QLIST_EMPTY(&accel->device_list)) {
+        error_report("cmdqv=on: requires at least one cold-plugged "
+                     "vfio-pci device");
+        exit(1);
+    }
 
     if (accel->cmdqv_ops && accel->cmdqv_ops->reset) {
         accel->cmdqv_ops->reset(s);
