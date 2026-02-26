@@ -3167,6 +3167,7 @@ static void virt_memory_plug(HotplugHandler *hotplug_dev,
     }
 }
 
+static uint8_t smmuv3_dev_id;
 static void virt_machine_device_pre_plug_cb(HotplugHandler *hotplug_dev,
                                             DeviceState *dev, Error **errp)
 {
@@ -3225,6 +3226,8 @@ static void virt_machine_device_pre_plug_cb(HotplugHandler *hotplug_dev,
                                      OBJECT(vms->sysmem), NULL);
             object_property_set_link(OBJECT(dev), "secure-memory",
                                      OBJECT(vms->secure_sysmem), NULL);
+            object_property_set_uint(OBJECT(dev), "identifier", smmuv3_dev_id++,
+                                     NULL);
         }
         if (object_property_get_bool(OBJECT(dev), "accel", &error_abort)) {
             hwaddr db_start = 0;
