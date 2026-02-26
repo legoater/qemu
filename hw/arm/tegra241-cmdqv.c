@@ -736,6 +736,11 @@ static bool tegra241_cmdqv_init(SMMUv3State *s, Error **errp)
     return true;
 }
 
+static SMMUv3AccelCmdqvType tegra241_cmdqv_get_type(void)
+{
+    return SMMUV3_CMDQV_TEGRA241;
+};
+
 static bool tegra241_cmdqv_probe(SMMUv3State *s, HostIOMMUDeviceIOMMUFD *idev,
                                  Error **errp)
 {
@@ -778,6 +783,7 @@ static const SMMUv3AccelCmdqvOps tegra241_cmdqv_ops = {
     .free_viommu = tegra241_cmdqv_free_viommu,
     .alloc_veventq = tegra241_cmdqv_alloc_veventq,
     .free_veventq = tegra241_cmdqv_free_veventq,
+    .get_type = tegra241_cmdqv_get_type,
     .reset = tegra241_cmdqv_reset,
 };
 

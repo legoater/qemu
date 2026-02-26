@@ -16,6 +16,11 @@
 #endif
 #include CONFIG_DEVICES
 
+typedef enum SMMUv3AccelCmdqvType {
+    SMMUV3_CMDQV_NONE = 0,
+    SMMUV3_CMDQV_TEGRA241,
+} SMMUv3AccelCmdqvType;
+
 /*
  * CMDQ-Virtualization (CMDQV) hardware support, extends the SMMUv3 to
  * support multiple VCMDQs with virtualization capabilities.
@@ -31,6 +36,7 @@ typedef struct SMMUv3AccelCmdqvOps {
     void (*free_viommu)(SMMUv3State *s);
     bool (*alloc_veventq)(SMMUv3State *s,  Error **errp);
     void (*free_veventq)(SMMUv3State *s);
+    SMMUv3AccelCmdqvType (*get_type)(void);
     void (*reset)(SMMUv3State *s);
 } SMMUv3AccelCmdqvOps;
 
@@ -75,6 +81,7 @@ bool smmuv3_accel_alloc_veventq(SMMUv3State *s, Error **errp);
 bool smmuv3_accel_event_read_validate(IOMMUFDVeventq *veventq, uint32_t type,
                                       void *buf, size_t size, Error **errp);
 void smmuv3_accel_reset(SMMUv3State *s);
+SMMUv3AccelCmdqvType smmuv3_accel_cmdqv_type(Object *obj);
 #else
 static inline void smmuv3_accel_init(SMMUv3State *s)
 {
