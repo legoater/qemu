@@ -10,6 +10,11 @@
 #ifndef HW_ARM_TEGRA241_CMDQV_H
 #define HW_ARM_TEGRA241_CMDQV_H
 
+#define TEGRA241_CMDQV_VERSION             1
+#define TEGRA241_CMDQV_NUM_CMDQ_LOG2       1
+#define TEGRA241_CMDQV_MAX_CMDQ            (1U << TEGRA241_CMDQV_NUM_CMDQ_LOG2)
+#define TEGRA241_CMDQV_NUM_SID_PER_VM_LOG2 4
+
 const SMMUv3AccelCmdqvOps *tegra241_cmdqv_get_ops(void);
 
 #endif /* HW_ARM_TEGRA241_CMDQV_H */
