@@ -4797,6 +4797,7 @@ static uint64_t vtd_get_viommu_flags(void *opaque)
         flags = VIOMMU_FLAG_WANT_NESTING_PARENT |
                 VIOMMU_FLAG_WANT_NESTING_DIRTY_TRACKING;
     }
+    flags |= s->pasid ? VIOMMU_FLAG_PASID_SUPPORTED : 0;
 
     return flags;
 }
