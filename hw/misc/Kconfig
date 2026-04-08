@@ -48,6 +48,11 @@ config IR35221
     bool
     depends on I2C
 
+config MCTP_I2C_RESPONDER
+    bool
+    default y
+    depends on I2C
+
 config PL310
     bool
 
