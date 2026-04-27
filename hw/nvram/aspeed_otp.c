@@ -62,9 +62,8 @@ static bool program_otpmem_data(void *opaque, uint32_t otp_addr,
 {
     AspeedOTPState *s = opaque;
     bool is_odd = otp_addr & 1;
-    uint32_t otp_offset = otp_addr << 2;
 
-    memcpy(value, s->storage + otp_offset, sizeof(uint32_t));
+    memcpy(value, s->storage + otp_addr, sizeof(uint32_t));
 
     if (!valid_program_data(otp_addr, *value, prog_bit)) {
         return false;
@@ -83,7 +82,7 @@ static void aspeed_otp_write(void *opaque, hwaddr otp_addr,
                                 uint64_t val, unsigned size)
 {
     AspeedOTPState *s = opaque;
-    uint32_t otp_offset, value;
+    uint32_t value;
 
     if (!program_otpmem_data(s, otp_addr, val, &value)) {
         qemu_log_mask(LOG_GUEST_ERROR,
@@ -92,19 +91,18 @@ static void aspeed_otp_write(void *opaque, hwaddr otp_addr,
         return;
     }
 
-    otp_offset = otp_addr << 2;
-    memcpy(s->storage + otp_offset, &value, size);
+    memcpy(s->storage + otp_addr, &value, size);
 
     if (s->blk) {
-        if (blk_pwrite(s->blk, otp_offset, size, &value, 0) < 0) {
+        if (blk_pwrite(s->blk, otp_addr, size, &value, 0) < 0) {
             qemu_log_mask(LOG_GUEST_ERROR,
-                          "%s: Failed to write %x to %x\n",
-                          __func__, value, otp_offset);
+                          "%s: Failed to write %x to %"HWADDR_PRIx"\n",
+                          __func__, value, otp_addr);
 
             return;
         }
     }
-    trace_aspeed_otp_prog(otp_offset, val, value);
+    trace_aspeed_otp_prog(otp_addr, val, value);
 }
 
 static bool aspeed_otp_init_storage(AspeedOTPState *s, Error **errp)
