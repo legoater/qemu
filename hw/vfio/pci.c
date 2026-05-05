@@ -38,6 +38,7 @@
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
+#include "qemu/log.h"
 #include "qemu/range.h"
 #include "qemu/units.h"
 #include "system/kvm.h"
@@ -1139,8 +1140,16 @@ static uint64_t vfio_rom_read(void *opaque, hwaddr addr, unsigned size)
         }
     }
 
-    memcpy(&val, vdev->rom + addr,
-           (addr < vdev->rom_size) ? MIN(size, vdev->rom_size - addr) : 0);
+    /* If ROM loading failed, return 0xff pattern and log guest error */
+    if (!vdev->rom) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "vfio-pci [%s]: guest attempted to read from failed ROM "
+                      "at offset 0x%"HWADDR_PRIx"\n", vdev->vbasedev.name, addr);
+        memset(&val, 0xff, sizeof(val));
+    } else {
+        memcpy(&val, vdev->rom + addr,
+               (addr < vdev->rom_size) ? MIN(size, vdev->rom_size - addr) : 0);
+    }
 
     switch (size) {
     case 1:
