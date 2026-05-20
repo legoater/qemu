@@ -69,7 +69,7 @@ VMChangeStateEntry *qdev_add_vm_change_state_handler(DeviceState *dev,
                                                      void *opaque);
 VMChangeStateEntry *qdev_add_vm_change_state_handler_full(
     DeviceState *dev, VMChangeStateHandler *cb, VMChangeStateHandler *prepare_cb,
-    VMChangeStateHandlerWithRet *cb_ret, void *opaque);
+    VMChangeStateHandlerWithRet *cb_ret, void *opaque, int adj);
 void qemu_del_vm_change_state_handler(VMChangeStateEntry *e);
 /**
  * vm_state_notify: Notify the state of the VM

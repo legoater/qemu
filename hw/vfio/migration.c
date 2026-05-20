@@ -1214,7 +1214,7 @@ static bool vfio_migration_init(VFIODevice *vbasedev, Error **errp)
                      vfio_vmstate_change_prepare :
                      NULL;
     migration->vm_state = qdev_add_vm_change_state_handler_full(
-        vbasedev->dev, vfio_vmstate_change, prepare_cb, NULL, vbasedev);
+        vbasedev->dev, vfio_vmstate_change, prepare_cb, NULL, vbasedev, 0);
     migration_add_notifier(&migration->migration_state,
                            vfio_migration_state_notifier);
 

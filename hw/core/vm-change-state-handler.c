@@ -19,9 +19,9 @@
 #include "hw/core/qdev.h"
 #include "system/runstate.h"
 
-static int qdev_get_dev_tree_depth(DeviceState *dev)
+static unsigned int qdev_get_dev_tree_depth(DeviceState *dev)
 {
-    int depth;
+    unsigned int depth;
 
     for (depth = 0; dev; depth++) {
         BusState *bus = dev->parent_bus;
@@ -61,20 +61,28 @@ VMChangeStateEntry *qdev_add_vm_change_state_handler(DeviceState *dev,
                                                      void *opaque)
 {
     assert(!cb || !cb_ret);
-    return qdev_add_vm_change_state_handler_full(dev, cb, NULL, cb_ret, opaque);
+    return qdev_add_vm_change_state_handler_full(dev, cb, NULL, cb_ret, opaque, 0);
 }
 
 /*
  * Exactly like qdev_add_vm_change_state_handler() but passes a prepare_cb
- * and the cb_ret arguments too.
+ * and the cb_ret arguments too and allows for adjustment of priority.
  */
 VMChangeStateEntry *qdev_add_vm_change_state_handler_full(
     DeviceState *dev, VMChangeStateHandler *cb, VMChangeStateHandler *prepare_cb,
-    VMChangeStateHandlerWithRet *cb_ret, void *opaque)
+    VMChangeStateHandlerWithRet *cb_ret, void *opaque, int adj)
 {
-    int depth = qdev_get_dev_tree_depth(dev);
+    unsigned int depth = qdev_get_dev_tree_depth(dev);
+    int prio;
+
+    /* 32k depth should be enough for everyone */
+    assert(depth <= INT16_MAX);
+
+    /* encode depth on 15 MSB and adj on 16 LSB */
+    assert(adj >= INT16_MIN && adj <= INT16_MAX);
+    prio = (depth << 16) + (adj - INT16_MIN);
 
     assert(!cb || !cb_ret);
     return qemu_add_vm_change_state_handler_prio_full(cb, prepare_cb, cb_ret,
-                                                      opaque, depth);
+                                                      opaque, prio);
 }
