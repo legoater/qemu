@@ -3842,6 +3842,8 @@ static const Property vfio_pci_properties[] = {
                             ON_OFF_AUTO_AUTO),
     DEFINE_PROP_SIZE("x-migration-max-queued-buffers-size", VFIOPCIDevice,
                      vbasedev.migration_max_queued_buffers_size, UINT64_MAX),
+    DEFINE_PROP_BOOL("x-migration-parallel-states", VFIOPCIDevice,
+                     vbasedev.migration_parallel_states, true),
     DEFINE_PROP_BOOL("migration-events", VFIOPCIDevice,
                      vbasedev.migration_events, false),
     DEFINE_PROP_BOOL("x-no-mmap", VFIOPCIDevice, vbasedev.no_mmap, false),

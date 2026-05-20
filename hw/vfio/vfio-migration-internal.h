@@ -38,7 +38,9 @@ typedef struct VFIOMultifd VFIOMultifd;
 
 typedef struct VFIOMigration {
     struct VFIODevice *vbasedev;
-    VMChangeStateEntry *vm_state;
+    VMChangeStateEntry *vm_state_lower_prio, *vm_state_higher_prio;
+    QemuThread vm_state_thread;
+    bool vm_state_thread_running;
     NotifierWithReturn migration_state;
     uint32_t device_state;
     int data_fd;

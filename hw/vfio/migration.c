@@ -1053,6 +1053,135 @@ static void vfio_vmstate_change(void *opaque, bool running, RunState state)
                               mig_state_to_str(new_state));
 }
 
+typedef struct VMStateChangeThreadData {
+    VFIODevice *vbasedev;
+    bool is_prepare;
+    bool running;
+    RunState state;
+} VMStateChangeThreadData;
+
+static void *vfio_vmstate_change_thread(void *opaque)
+{
+    g_autofree VMStateChangeThreadData *data = opaque;
+
+    if (data->is_prepare) {
+        vfio_vmstate_change_prepare(data->vbasedev, data->running, data->state);
+    } else {
+        vfio_vmstate_change(data->vbasedev, data->running, data->state);
+    }
+
+    return NULL;
+}
+
+static void vfio_vmstate_change_thread_launch(VFIODevice *vbasedev,
+                                              bool is_prepare,
+                                              bool running,
+                                              RunState state)
+{
+    VFIOMigration *migration = vbasedev->migration;
+    VMStateChangeThreadData *data = g_new(VMStateChangeThreadData, 1);
+
+    data->vbasedev = vbasedev;
+    data->is_prepare = is_prepare;
+    data->running = running;
+    data->state = state;
+
+    assert(!migration->vm_state_thread_running);
+    migration->vm_state_thread_running = true;
+
+    qemu_thread_create(&migration->vm_state_thread,
+                       is_prepare ? "vfio_vmstate_change_prepare" :
+                       "vfio_vmstate_change",
+                       vfio_vmstate_change_thread, data,
+                       QEMU_THREAD_JOINABLE);
+}
+
+static void vfio_vmstate_change_thread_join(VFIODevice *vbasedev)
+{
+    VFIOMigration *migration = vbasedev->migration;
+
+    assert(migration->vm_state_thread_running);
+
+    qemu_thread_join(&migration->vm_state_thread);
+
+    migration->vm_state_thread_running = false;
+}
+
+/*
+ * The first handler called during a vmstate change at a particular depth -
+ * launch the VFIO device state change thread.
+ */
+static void vfio_vmstate_change_first(VFIODevice *vbasedev,
+                                      bool is_prepare,
+                                      bool running, RunState state)
+{
+    vfio_vmstate_change_thread_launch(vbasedev,
+                                      is_prepare,
+                                      running,
+                                      state);
+}
+
+/*
+ * The last handler called during a vmstate change at a particular depth -
+ * wait for the VFIO device state change thread to finish.
+ */
+static void vfio_vmstate_change_second(VFIODevice *vbasedev)
+{
+    vfio_vmstate_change_thread_join(vbasedev);
+}
+
+/*
+ * Lower priority number handler:
+ * Called before higher number handler when VM is starting
+ * but after higher number handler when VM is stopping.
+ */
+static void vfio_vmstate_change_prepare_lower_prio(void *opaque, bool running,
+                                                   RunState state)
+{
+    if (running) {
+        vfio_vmstate_change_first(opaque, true, running, state);
+    } else {
+        vfio_vmstate_change_second(opaque);
+    }
+}
+
+/*
+ * Higher priority number handler:
+ * Called after lower number handler when VM is starting
+ * but before lower number handler when VM is stopping.
+ */
+static void vfio_vmstate_change_prepare_higher_prio(void *opaque, bool running,
+                                                    RunState state)
+{
+    if (running) {
+        vfio_vmstate_change_second(opaque);
+    } else {
+        vfio_vmstate_change_first(opaque, true, running, state);
+    }
+}
+
+/* Same ordering issues as for vfio_vmstate_change_prepare_lower_prio() */
+static void vfio_vmstate_change_lower_prio(void *opaque, bool running,
+                                           RunState state)
+{
+    if (running) {
+        vfio_vmstate_change_first(opaque, false, running, state);
+    } else {
+        vfio_vmstate_change_second(opaque);
+    }
+}
+
+/* Same ordering issues as for vfio_vmstate_change_prepare_higher_prio() */
+static void vfio_vmstate_change_higher_prio(void *opaque, bool running,
+                                            RunState state)
+{
+    if (running) {
+        vfio_vmstate_change_second(opaque);
+    } else {
+        vfio_vmstate_change_first(opaque, false, running, state);
+    }
+}
+
 static int vfio_migration_state_notifier(NotifierWithReturn *notifier,
                                          MigrationEvent *e, Error **errp)
 {
@@ -1069,6 +1198,8 @@ static int vfio_migration_state_notifier(NotifierWithReturn *notifier,
          * MigrationNotifyFunc may not return an error code and an Error
          * object for MIG_EVENT_FAILED. Hence, report the error
          * locally and ignore the errp argument.
+         * This state change is not parallelized as it is not expected to be
+         * performance critical.
          */
         ret = vfio_migration_set_state_or_reset(vbasedev,
                                                 VFIO_DEVICE_STATE_RUNNING,
@@ -1149,7 +1280,7 @@ static bool vfio_migration_init(VFIODevice *vbasedev, Error **errp)
     g_autofree char *path = NULL, *oid = NULL;
     uint64_t mig_flags = 0;
     bool precopy_info_v2_used = false;
-    VMChangeStateHandler *prepare_cb;
+    VMChangeStateHandler *prepare_cb, *prepare_cb_lower, *prepare_cb_higher;
 
     if (!vbasedev->ops->vfio_get_object) {
         error_setg(errp, "no vfio_get_object handler");
@@ -1210,11 +1341,34 @@ static bool vfio_migration_init(VFIODevice *vbasedev, Error **errp)
     register_savevm_live(id, VMSTATE_INSTANCE_ID_ANY, 1, &savevm_vfio_handlers,
                          vbasedev);
 
-    prepare_cb = migration->mig_flags & VFIO_MIGRATION_P2P ?
-                     vfio_vmstate_change_prepare :
-                     NULL;
-    migration->vm_state = qdev_add_vm_change_state_handler_full(
-        vbasedev->dev, vfio_vmstate_change, prepare_cb, NULL, vbasedev, 0);
+    if (vbasedev->migration_parallel_states) {
+        /*
+         * Unfortunately, the order in which vmstate handlers are called depends
+         * on whether the VM is starting or stopping.
+         * Because of this, one extra layer of indirection is necessary
+         * to make the (first, second) ordering of these handlers constant.
+         */
+        prepare_cb_lower = migration->mig_flags & VFIO_MIGRATION_P2P ?
+            vfio_vmstate_change_prepare_lower_prio : NULL;
+        prepare_cb_higher = migration->mig_flags & VFIO_MIGRATION_P2P ?
+            vfio_vmstate_change_prepare_higher_prio : NULL;
+        migration->vm_state_lower_prio = qdev_add_vm_change_state_handler_full(
+            vbasedev->dev, vfio_vmstate_change_lower_prio, prepare_cb_lower,
+            NULL, vbasedev, -1);
+        migration->vm_state_higher_prio = qdev_add_vm_change_state_handler_full(
+            vbasedev->dev, vfio_vmstate_change_higher_prio, prepare_cb_higher,
+            NULL, vbasedev, 1);
+    } else {
+        prepare_cb = migration->mig_flags & VFIO_MIGRATION_P2P ?
+            vfio_vmstate_change_prepare : NULL;
+        /* Arbitrarily use lower_prio field to store non-parallel handler */
+        migration->vm_state_lower_prio =
+            qdev_add_vm_change_state_handler_full(vbasedev->dev,
+                                                  vfio_vmstate_change,
+                                                  prepare_cb, NULL,
+                                                  vbasedev, 0);
+    }
+
     migration_add_notifier(&migration->migration_state,
                            vfio_migration_state_notifier);
 
@@ -1289,7 +1443,13 @@ static void vfio_migration_deinit(VFIODevice *vbasedev)
     VFIOMigration *migration = vbasedev->migration;
 
     migration_remove_notifier(&migration->migration_state);
-    qemu_del_vm_change_state_handler(migration->vm_state);
+
+    if (vbasedev->migration_parallel_states) {
+        qemu_del_vm_change_state_handler(migration->vm_state_higher_prio);
+    }
+    /* Non-parallel state change uses lower_prio field to store its handler */
+    qemu_del_vm_change_state_handler(migration->vm_state_lower_prio);
+
     unregister_savevm(VMSTATE_IF(vbasedev->dev), "vfio", vbasedev);
     vfio_migration_free(vbasedev);
     vfio_unblock_multiple_devices_migration();
