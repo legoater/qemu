@@ -147,6 +147,7 @@ system_ss.add(when: 'CONFIG_ASPEED_SOC', if_true: files(
   'aspeed_sdmc.c',
   'aspeed_xdma.c',
   'aspeed_cptra_mbox.c',
+  'cptra_mbox_peer_extern.c',
   'aspeed_peci.c',
   'aspeed_sli.c'))
 
