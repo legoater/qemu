@@ -1025,6 +1025,8 @@ static void vfio_update_msi(VFIOPCIDevice *vdev)
         msg = msi_get_message(pdev, i);
         vfio_update_kvm_msi_virq(vector, msg, pdev);
     }
+
+    vfio_rom_quirk_setup(vdev);
 }
 
 static bool vfio_pci_load_rom(VFIOPCIDevice *vdev, Error **errp)
