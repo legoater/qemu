@@ -15,6 +15,7 @@
 #include "qemu/module.h"
 #include "qemu/main-loop.h"
 #include "trace.h"
+#include "qom/object.h"
 
 #define I2C_BROADCAST 0x00
 
@@ -381,6 +382,9 @@ bool i2c_slave_realize_and_unref(I2CSlave *dev, I2CBus *bus, Error **errp)
 I2CSlave *i2c_slave_create_simple(I2CBus *bus, const char *name, uint8_t addr)
 {
     I2CSlave *dev = i2c_slave_new(name, addr);
+    g_autofree char *childname = g_strdup_printf("0x%02x", addr);
+
+    object_property_add_child(OBJECT(bus), childname, OBJECT(dev));
 
     i2c_slave_realize_and_unref(dev, bus, &error_abort);
 
