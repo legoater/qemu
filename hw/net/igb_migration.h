@@ -76,6 +76,7 @@
 /* MIG_STATUS bits */
 #define IGB_MIG_STATUS_DATA_AVAIL   (1u << 0)
 #define IGB_MIG_STATUS_ERROR        (1u << 1)
+#define IGB_MIG_STATUS_QUIESCED     (1u << 2)
 
 /* MIG_STATUS error codes in bits [15:8], valid when ERROR bit is set */
 #define IGB_MIG_STATUS_ERR_SHIFT    8
@@ -144,6 +145,9 @@ typedef struct IgbVfMigState {
     uint32_t mig_data[IGB_VF_STATE_MAX_SIZE / sizeof(uint32_t)];
     uint32_t mig_data_size;
     uint64_t mig_data_buf_addr;
+
+    bool mig_saved_vfre;
+    bool mig_saved_vfte;
 
     uint32_t mig_dirty_pgsize;
     uint64_t mig_dirty_range_iova;
