@@ -592,6 +592,40 @@ static bool igb_core_vf_dirty_query(IgbVfState *s,
     return false;
 }
 
+/* Quiesce a VF by disabling its RX and TX at the PF level. */
+static void igb_core_vf_quiesce(IgbVfState *s)
+{
+    IGBCore *core = igbvf_get_core(s);
+
+    core->mac[VFRE] &= ~BIT(s->vfn);
+    core->mac[VFTE] &= ~BIT(s->vfn);
+    trace_igbvf_mig_quiesce(s->vfn, core->mac[VFRE], core->mac[VFTE]);
+}
+
+static void igb_core_vf_unquiesce(IgbVfState *s)
+{
+    IGBCore *core = igbvf_get_core(s);
+    bool re = core->mac[VFRE] & BIT(s->vfn); /* TODO */
+    bool te = core->mac[VFTE] & BIT(s->vfn); /* TODO */
+
+    if (re) {
+        core->mac[VFRE] |= BIT(s->vfn);
+    } else {
+        core->mac[VFRE] &= ~BIT(s->vfn);
+    }
+    if (te) {
+        core->mac[VFTE] |= BIT(s->vfn);
+    } else {
+        core->mac[VFTE] &= ~BIT(s->vfn);
+    }
+
+    trace_igbvf_mig_unquiesce(s->vfn, core->mac[VFRE], core->mac[VFTE]);
+
+    if (re) {
+        igb_start_recv(core);
+    }
+}
+
 /* ================================================================
  * Migration BAR register read/write handlers
  * ================================================================ */
@@ -635,6 +669,10 @@ static bool igbvf_mig_set_state(IgbVfState *s, uint32_t new_state)
             old == IGB_MIG_STATE_ERROR) {
             igb_core_vf_dirty_disable(s);
         }
+        if (old == IGB_MIG_STATE_RUNNING ||
+            old == IGB_MIG_STATE_PRE_COPY) {
+            igb_core_vf_quiesce(s);
+        }
         break;
 
     case IGB_MIG_STATE_RUNNING:
@@ -645,12 +683,18 @@ static bool igbvf_mig_set_state(IgbVfState *s, uint32_t new_state)
         if (old == IGB_MIG_STATE_PRE_COPY) {
             igb_core_vf_dirty_disable(s);
         }
+        if (old == IGB_MIG_STATE_STOP) {
+            igb_core_vf_unquiesce(s);
+        }
         break;
 
     case IGB_MIG_STATE_STOP_COPY:
         if (old != IGB_MIG_STATE_STOP &&
             old != IGB_MIG_STATE_PRE_COPY) {
             return false;
+        }
+        if (old == IGB_MIG_STATE_PRE_COPY) {
+            igb_core_vf_quiesce(s);
         }
         ret = igb_core_vf_save_state(s, ms->mig_data, sizeof(ms->mig_data));
         if (ret < 0) {
@@ -690,6 +734,20 @@ static uint32_t igbvf_mig_get_status(IgbVfState *s)
     if ((ms->mig_state == IGB_MIG_STATE_STOP_COPY ||
          ms->mig_state == IGB_MIG_STATE_PRE_COPY) && ms->mig_data_size > 0) {
         status |= IGB_MIG_STATUS_DATA_AVAIL;
+    }
+
+    /*
+     * QUIESCED tells the driver it is safe to read device state.
+     * STOP and STOP_COPY must guarantee that no VF DMA is in flight;
+     * igb_core_vf_quiesce() enforces this by disabling RX/TX for the
+     * VF.
+     *
+     * Under QEMU, DMA completes synchronously within the MMIO handler
+     * so there is nothing to drain, but real hardware would need this.
+     */
+    if (ms->mig_state == IGB_MIG_STATE_STOP ||
+        ms->mig_state == IGB_MIG_STATE_STOP_COPY) {
+        status |= IGB_MIG_STATUS_QUIESCED;
     }
 
     return status;
