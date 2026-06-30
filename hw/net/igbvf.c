@@ -317,6 +317,7 @@ static void igbvf_pci_uninit(PCIDevice *dev)
     IgbVfState *s = IGBVF(dev);
 
     if (s->mig.migration_cap) {
+        igb_core_vf_dirty_disable(s);
         igbvf_mig_bar_force(&s->mig, dev, false);
     }
 
