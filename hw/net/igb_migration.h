@@ -77,6 +77,7 @@
 /* MIG_STATUS bits */
 #define IGB_MIG_STATUS_DATA_AVAIL   (1u << 0)
 #define IGB_MIG_STATUS_ERROR        (1u << 1)
+#define IGB_MIG_STATUS_QUIESCED     (1u << 2)
 
 /* MIG_STATUS error codes in bits [15:8], valid when ERROR bit is set */
 #define IGB_MIG_STATUS_ERR_SHIFT    8
