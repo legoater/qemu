@@ -131,6 +131,7 @@ static IGBCore *igbvf_get_core(IgbVfState *s)
  *   { uint32_t offset; uint32_t value; } regs[num_regs]
  *   uint32_t  num_tx_ctx   (number of TX queue context blocks)
  *   { raw struct igb_tx data } tx_ctx[num_tx_ctx]
+ *   uint32_t  vfre_vfte    (VFRE in [7:0], VFTE in [15:8])
  */
 
 /* Maximum number of registers in the VF state slice */
@@ -263,6 +264,13 @@ static uint32_t *igb_core_vf_save_ra(IGBCore *core, uint16_t vfn,
     return p;
 }
 
+static uint32_t *igb_core_vf_save_vfre_vfte(uint32_t *p,
+                                            bool vfre, bool vfte)
+{
+    *p++ = cpu_to_le32((uint32_t)vfre | ((uint32_t)vfte << 8));
+    return p;
+}
+
 static uint32_t *igb_core_vf_save_tx_ctx(IGBCore *core, int queue,
                                          uint32_t *p)
 {
@@ -279,12 +287,14 @@ static size_t igb_core_vf_state_max_size(int num_fixed_regs)
          + num_fixed_regs * 2 * sizeof(uint32_t)   /* fixed reg pairs */
          + max_ra_regs * 2 * sizeof(uint32_t)      /* RA reg pairs */
          + sizeof(uint32_t)                        /* num_tx_ctx */
-         + 2 * sizeof(struct igb_tx);              /* TX context */
+         + 2 * sizeof(struct igb_tx)               /* TX context */
+         + sizeof(uint32_t);                        /* VFRE + VFTE */
 }
 
 static int igb_core_vf_save_state(IgbVfState *s,
                                   void *buf, size_t buf_size)
 {
+    IgbVfMigState *ms = &s->mig;
     IGBCore *core = igbvf_get_core(s);
     uint32_t offsets[IGB_VF_MAX_REGS];
     int num_regs, total_regs;
@@ -332,9 +342,15 @@ static int igb_core_vf_save_state(IgbVfState *s,
     p = igb_core_vf_save_tx_ctx(core, q0, p);
     p = igb_core_vf_save_tx_ctx(core, q1, p);
 
+    /* Per-VF VFRE/VFTE enable bits */
+    p = igb_core_vf_save_vfre_vfte(p, ms->mig_saved_vfre,
+                                   ms->mig_saved_vfte);
+
     size = (uint8_t *)p - (uint8_t *)buf;
 
-    trace_igbvf_mig_save_state(s->vfn, size);
+    trace_igbvf_mig_save_state(s->vfn, size, ms->mig_saved_vfre,
+                               ms->mig_saved_vfte,
+                               core->mac[VFRE]);
     return size;
 }
 
@@ -344,6 +360,16 @@ static int igb_core_vf_max_data_size(IgbVfState *s)
 
     g_assert(size > 0 && size <= IGB_VF_STATE_MAX_SIZE);
     return size;
+}
+
+static const void *igb_core_vf_load_vfre_vfte(const void *p,
+                                              bool *out_vfre, bool *out_vfte)
+{
+    uint32_t val = le32_to_cpu(*(const uint32_t *)p);
+
+    *out_vfre = !!(val & 0xff);
+    *out_vfte = !!((val >> 8) & 0xff);
+    return (const uint8_t *)p + sizeof(uint32_t);
 }
 
 static const void *igb_core_vf_load_tx_ctx(IGBCore *core, int queue,
@@ -359,6 +385,7 @@ static const void *igb_core_vf_load_tx_ctx(IGBCore *core, int queue,
 static int igb_core_vf_load_state(IgbVfState *s,
                                   const void *buf, size_t size)
 {
+    IgbVfMigState *ms = &s->mig;
     IGBCore *core = igbvf_get_core(s);
     const uint32_t *p = buf;
     uint32_t magic, version, saved_vfn, num_regs, num_tx;
@@ -414,7 +441,13 @@ static int igb_core_vf_load_state(IgbVfState *s,
      * destination-specific IRTE references after migration.
      */
 
-    trace_igbvf_mig_load_state(s->vfn, (uint32_t)size);
+    /* Per-VF VFRE/VFTE enable bits */
+    p = igb_core_vf_load_vfre_vfte(p, &ms->mig_saved_vfre,
+                                   &ms->mig_saved_vfte);
+
+    trace_igbvf_mig_load_state(s->vfn, (uint32_t)size,
+                               ms->mig_saved_vfre,
+                               ms->mig_saved_vfte);
     return 0;
 }
 
@@ -422,6 +455,12 @@ static int igbvf_mig_load(IgbVfState *s, const void *buf, size_t size)
 {
     IGBCore *core = igbvf_get_core(s);
     int ret;
+
+    /*
+     * Pre-load: Clear the VFLRE bit before restoring state so the PF
+     * watchdog does not overwrite what we are about to load.
+     */
+    core->mac[VFLRE] &= ~BIT(s->vfn);
 
     ret = igb_core_vf_load_state(s, buf, size);
     if (ret < 0) {
@@ -595,7 +634,11 @@ static bool igb_core_vf_dirty_query(IgbVfState *s,
 /* Quiesce a VF by disabling its RX and TX at the PF level. */
 static void igb_core_vf_quiesce(IgbVfState *s)
 {
+    IgbVfMigState *ms = &s->mig;
     IGBCore *core = igbvf_get_core(s);
+
+    ms->mig_saved_vfre = !!(core->mac[VFRE] & BIT(s->vfn));
+    ms->mig_saved_vfte = !!(core->mac[VFTE] & BIT(s->vfn));
 
     core->mac[VFRE] &= ~BIT(s->vfn);
     core->mac[VFTE] &= ~BIT(s->vfn);
@@ -604,9 +647,10 @@ static void igb_core_vf_quiesce(IgbVfState *s)
 
 static void igb_core_vf_unquiesce(IgbVfState *s)
 {
+    IgbVfMigState *ms = &s->mig;
     IGBCore *core = igbvf_get_core(s);
-    bool re = core->mac[VFRE] & BIT(s->vfn); /* TODO */
-    bool te = core->mac[VFTE] & BIT(s->vfn); /* TODO */
+    bool re = ms->mig_saved_vfre;
+    bool te = ms->mig_saved_vfte;
 
     if (re) {
         core->mac[VFRE] |= BIT(s->vfn);
@@ -1086,5 +1130,7 @@ void igbvf_mig_state_reset(IgbVfState *s)
     ms->mig_dirty_range_size = 0;
     ms->mig_dirty_buf_addr = 0;
     ms->mig_dirty_status = IGB_MIG_DIRTY_STATUS_OK;
+    ms->mig_saved_vfre = true;
+    ms->mig_saved_vfte = true;
     trace_igbvf_mig_reset(s->vfn);
 }

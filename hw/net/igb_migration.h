@@ -146,6 +146,9 @@ typedef struct IgbVfMigState {
     uint32_t mig_data_size;
     uint64_t mig_data_buf_addr;
 
+    bool mig_saved_vfre;
+    bool mig_saved_vfte;
+
     uint32_t mig_dirty_pgsize;
     uint64_t mig_dirty_range_iova;
     uint32_t mig_dirty_range_size;
