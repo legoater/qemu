@@ -537,6 +537,7 @@ config ASPEED_SOC
     imply PCI_DEVICES
     imply E1000E_PCI_EXPRESS
     select DS1338
+    select ASPEED_UDC
     select FTGMAC100
     select I2C
     select I3C
