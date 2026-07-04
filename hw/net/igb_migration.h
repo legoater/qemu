@@ -35,9 +35,12 @@
 typedef struct IgbVfMigState {
     bool migration_cap;
     MemoryRegion mig_bar;
+    pcibus_t mig_bar_addr;
+    bool mig_bar_forced;
 } IgbVfMigState;
 
 void igb_pf_init_migration_bar(PCIDevice *dev);
 bool igbvf_add_migration_cap(PCIDevice *dev, Error **errp);
+void igbvf_mig_bar_force(IgbVfMigState *ms, PCIDevice *dev, bool force);
 
 #endif

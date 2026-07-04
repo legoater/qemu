@@ -70,3 +70,38 @@ bool igbvf_add_migration_cap(PCIDevice *dev, Error **errp)
     trace_igbvf_mig_cap_add(pcie_sriov_vf_number(dev), offset);
     return true;
 }
+
+/*
+ * The migration BAR is accessed by the host VFIO driver, not by the
+ * guest. Keep it mapped even when PCI_COMMAND_MEMORY is cleared or
+ * after.
+ */
+void igbvf_mig_bar_force(IgbVfMigState *ms, PCIDevice *dev, bool force)
+{
+    PCIIORegion *r = &dev->io_regions[IGB_MIG_BAR_IDX];
+
+    if (!force) {
+        /*
+         * Capture the migration BAR address while it is still mapped.
+         * At VF realize time r->addr is PCI_BAR_UNMAPPED because
+         * PCI_COMMAND_MEMORY has not been set yet.
+         */
+        if (r->addr != PCI_BAR_UNMAPPED) {
+            ms->mig_bar_addr = r->addr;
+        }
+
+        if (ms->mig_bar_forced) {
+            memory_region_del_subregion(r->address_space, r->memory);
+            r->addr = PCI_BAR_UNMAPPED;
+            ms->mig_bar_forced = false;
+        }
+    } else {
+        if (r->addr == PCI_BAR_UNMAPPED &&
+            ms->mig_bar_addr != PCI_BAR_UNMAPPED) {
+            r->addr = ms->mig_bar_addr;
+            memory_region_add_subregion_overlap(r->address_space, r->addr,
+                                                r->memory, 1);
+            ms->mig_bar_forced = true;
+        }
+    }
+}

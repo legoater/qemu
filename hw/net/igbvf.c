@@ -205,11 +205,21 @@ static hwaddr vf_to_pf_addr(hwaddr addr, uint16_t vfn, bool write)
 static void igbvf_write_config(PCIDevice *dev, uint32_t addr, uint32_t val,
     int len)
 {
+    IgbVfMigState *ms = &IGBVF(dev)->mig;
+
+    if (ms->migration_cap) {
+        igbvf_mig_bar_force(ms, dev, false);
+    }
+
     trace_igbvf_write_config(addr, val, len);
     pci_default_write_config(dev, addr, val, len);
     if (object_property_get_bool(OBJECT(pcie_sriov_get_pf(dev)),
                                  "x-pcie-flr-init", &error_abort)) {
         pcie_cap_flr_write_config(dev, addr, val, len);
+    }
+
+    if (ms->migration_cap) {
+        igbvf_mig_bar_force(ms, dev, true);
     }
 }
 
@@ -305,6 +315,10 @@ static void igbvf_qdev_reset_hold(Object *obj, ResetType type)
 static void igbvf_pci_uninit(PCIDevice *dev)
 {
     IgbVfState *s = IGBVF(dev);
+
+    if (s->mig.migration_cap) {
+        igbvf_mig_bar_force(&s->mig, dev, false);
+    }
 
     pcie_aer_exit(dev);
     pcie_cap_exit(dev);
