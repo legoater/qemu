@@ -27,10 +27,6 @@ class AST2x00MachineSDK(QemuSystemTest):
 
         self.vm.launch()
 
-    def disable_kernel_crypto_selftest(self):
-         exec_command_and_wait_for_pattern(self,
-            'setenv bootargs "${bootargs} cryptomgr.notests=1"', '=>')
-
     def enable_ast2700_ssp_tsp(self):
         exec_command_and_wait_for_pattern(self,
             'setenv bootcmd "mw 12c02204 40000000; mw 12c02120 1; '
@@ -53,7 +49,6 @@ class AST2x00MachineSDK(QemuSystemTest):
         wait_for_console_pattern(self, 'U-Boot 2023.10')
         wait_for_console_pattern(self, 'Hit any key to stop autoboot')
         exec_command_and_wait_for_pattern(self, '\012', '=>')
-        self.disable_kernel_crypto_selftest()
         self.enable_ast2700_ssp_tsp()
         self.enable_ast2700_pcie2()
         wait_for_console_pattern(self, 'Starting kernel ...')
