@@ -48,6 +48,7 @@
 #define VFIO_MIG_STOP_COPY_SIZE (100 * GiB)
 
 static unsigned long bytes_transferred;
+static uint64_t dirty_pages_total;
 
 static const char *mig_state_to_str(enum vfio_device_mig_state state)
 {
@@ -1323,6 +1324,21 @@ void vfio_migration_reset_bytes_transferred(void)
 void vfio_migration_add_bytes_transferred(unsigned long val)
 {
     qatomic_add(&bytes_transferred, val);
+}
+
+uint64_t vfio_migration_dirty_pages(void)
+{
+    return qatomic_read(&dirty_pages_total);
+}
+
+void vfio_migration_reset_dirty_pages(void)
+{
+    qatomic_set(&dirty_pages_total, 0);
+}
+
+void vfio_migration_add_dirty_pages(uint64_t val)
+{
+    qatomic_add(&dirty_pages_total, val);
 }
 
 bool vfio_migration_active(void)

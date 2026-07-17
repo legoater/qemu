@@ -195,10 +195,18 @@
 # @transferred: amount of bytes transferred to the target VM by VFIO
 #     devices
 #
+# @dirty-pages: cumulative number of dirty pages detected
+#     by VFIO device DMA dirty tracking across all bitmap
+#     sync rounds.  These pages overlap with the RAM dirty
+#     page count in @MigrationRAMStats -- this field shows
+#     which portion was dirtied by device DMA rather than
+#     by the guest CPU.  (Since 11.2)
+#
 # Since: 5.2
 ##
 { 'struct': 'VfioStats',
-  'data': {'transferred': 'int' } }
+  'data': {'transferred': 'int',
+           '*dirty-pages': 'uint64' } }
 
 ##
 # @MigrationInfo:
