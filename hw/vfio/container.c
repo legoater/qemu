@@ -19,6 +19,7 @@
 #include "qemu/error-report.h"
 #include "hw/vfio/vfio-container.h"
 #include "hw/vfio/vfio-device.h" /* vfio_device_reset_handler */
+#include "hw/vfio/vfio-migration.h"
 #include "system/physmem.h"
 #include "system/reset.h"
 #include "vfio-helpers.h"
@@ -273,6 +274,8 @@ int vfio_container_query_dirty_bitmap(const VFIOContainer *bcontainer,
     dirty_pages = physical_memory_set_dirty_lebitmap(vbmap.bitmap,
                                                          translated_addr,
                                                          vbmap.pages);
+
+    vfio_migration_add_dirty_pages(dirty_pages);
 
     trace_vfio_container_query_dirty_bitmap(iova, size, backend_flag,
                                             vbmap.size, translated_addr,
