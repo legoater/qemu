@@ -933,6 +933,9 @@ static void aspeed_ast2700_scu_reset_hold(Object *obj, ResetType type)
 
 static void aspeed_2700_scu_realize(DeviceState *dev, Error **errp)
 {
+    Aspeed2700SCUState *a = ASPEED_2700_SCU(dev);
+
+    a->ssp_cpuid = -1;
     aspeed_scu_realize(dev, errp);
 }
 
