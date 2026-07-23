@@ -184,6 +184,12 @@ static void aspeed_soc_ast27x0tsp_realize(DeviceState *dev_soc, Error **errp)
         return;
     }
 
+    if (!a->dram) {
+        error_setg(errp, TYPE_ASPEED27X0TSP_COPROCESSOR
+                   ": 'dram' link is not set");
+        return;
+    }
+
     /* AST27X0 TSP Core */
     armv7m = DEVICE(&a->armv7m);
     qdev_prop_set_uint32(armv7m, "num-irq", 256);
@@ -200,6 +206,12 @@ static void aspeed_soc_ast27x0tsp_realize(DeviceState *dev_soc, Error **errp)
     object_property_set_bool(OBJECT(&a->armv7m), "start-powered-off", true,
                              &error_abort);
     sysbus_realize(SYS_BUS_DEVICE(&a->armv7m), &error_abort);
+
+    /*
+     * cpu_index is only known once the armv7m core above is realized;
+     * write it directly into the shared SCU.
+     */
+    a->scu->tsp_cpuid = CPU(a->armv7m.cpu)->cpu_index;
 
     /* SDRAM */
     sdram_name = g_strdup_printf("aspeed.sdram.%d",
@@ -231,6 +243,22 @@ static void aspeed_soc_ast27x0tsp_realize(DeviceState *dev_soc, Error **errp)
                              memory_region_size(&a->scuio->iomem));
     memory_region_add_subregion(s->memory, sc->memmap[ASPEED_DEV_SCUIO],
                                 &a->scuio_alias);
+
+    /*
+     * DRAM remap alias used by PSP to access TSP SDRAM:
+     * - remap maps PSP DRAM at 0x42E000000 (size: 32MB) to TSP SDRAM
+     *   offset 0x0
+     */
+    memory_region_init_alias(&a->dram_remap[0], OBJECT(a), "tsp.dram.remap",
+                             a->dram, 0x2e000000, 32 * MiB);
+    memory_region_add_subregion(&s->sdram, 0, &a->dram_remap[0]);
+
+    /*
+     * The SCU is already realized at this point (it belongs to the PSP,
+     * which is realized before the TSP), so the remap is linked in
+     * directly instead of via a QOM property.
+     */
+    a->scu->tsp_remap = &a->dram_remap[0];
 
     /* INTC */
     if (!sysbus_realize(SYS_BUS_DEVICE(&a->intc[0]), errp)) {
@@ -317,6 +345,8 @@ static const Property aspeed_27x0_coprocessor_properties[] = {
                      TYPE_ASPEED_SCU, AspeedSCUState *),
     DEFINE_PROP_LINK("fmc", Aspeed27x0CoprocessorState, fmc, TYPE_ASPEED_SMC,
                      AspeedSMCState *),
+    DEFINE_PROP_LINK("dram", Aspeed27x0CoprocessorState, dram,
+                     TYPE_MEMORY_REGION, MemoryRegion *),
 };
 
 static void aspeed_soc_ast27x0tsp_class_init(ObjectClass *klass,
