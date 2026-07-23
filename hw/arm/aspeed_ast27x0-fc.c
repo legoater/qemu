@@ -153,6 +153,8 @@ static bool ast2700fc_ssp_init(Ast2700FCState *s, AspeedSoCState *psp,
                             &error_abort);
     object_property_set_link(OBJECT(&s->ssp), "sram",
                              OBJECT(&psp->sram), &error_abort);
+    object_property_set_link(OBJECT(&s->ssp), "dram",
+                             OBJECT(psp->dram_mr), &error_abort);
     object_property_set_link(OBJECT(&s->ssp), "scu",
                              OBJECT(&s->ca35.scu), &error_abort);
     object_property_set_link(OBJECT(&s->ssp), "scuio",
