@@ -190,6 +190,8 @@ static bool ast2700fc_tsp_init(Ast2700FCState *s, AspeedSoCState *psp,
                             &error_abort);
     object_property_set_link(OBJECT(&s->tsp), "sram",
                              OBJECT(&psp->sram), &error_abort);
+    object_property_set_link(OBJECT(&s->tsp), "dram",
+                             OBJECT(psp->dram_mr), &error_abort);
     object_property_set_link(OBJECT(&s->tsp), "scu",
                              OBJECT(&s->ca35.scu), &error_abort);
     object_property_set_link(OBJECT(&s->tsp), "scuio",
