@@ -22,7 +22,7 @@ enum {
     ASPEED_AST1700_DEV_PWM,
     ASPEED_AST1700_DEV_SRAM,
     ASPEED_AST1700_DEV_ADC,
-    ASPEED_AST1700_DEV_SCU,
+    ASPEED_AST1700_DEV_SCUIO,
     ASPEED_AST1700_DEV_GPIO,
     ASPEED_AST1700_DEV_SGPIOM0,
     ASPEED_AST1700_DEV_SGPIOM1,
@@ -39,7 +39,7 @@ static const hwaddr aspeed_ast1700_io_memmap[] = {
     [ASPEED_AST1700_DEV_PWM]       =  0x000C0000,
     [ASPEED_AST1700_DEV_SRAM]      =  0x00BC0000,
     [ASPEED_AST1700_DEV_ADC]       =  0x00C00000,
-    [ASPEED_AST1700_DEV_SCU]       =  0x00C02000,
+    [ASPEED_AST1700_DEV_SCUIO]     =  0x00C02000,
     [ASPEED_AST1700_DEV_GPIO]      =  0x00C0B000,
     [ASPEED_AST1700_DEV_SGPIOM0]   =  0x00C0C000,
     [ASPEED_AST1700_DEV_SGPIOM1]   =  0x00C0D000,
@@ -108,15 +108,15 @@ static void aspeed_ast1700_realize(DeviceState *dev, Error **errp)
                         aspeed_ast1700_io_memmap[ASPEED_AST1700_DEV_ADC],
                         sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->adc), 0));
 
-    /* SCU */
-    qdev_prop_set_uint32(DEVICE(&s->scu), "silicon-rev",
+    /* SCUIO */
+    qdev_prop_set_uint32(DEVICE(&s->scuio), "silicon-rev",
                          s->silicon_rev);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->scu), errp)) {
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->scuio), errp)) {
         return;
     }
     memory_region_add_subregion(&s->iomem,
-                        aspeed_ast1700_io_memmap[ASPEED_AST1700_DEV_SCU],
-                        sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->scu), 0));
+                        aspeed_ast1700_io_memmap[ASPEED_AST1700_DEV_SCUIO],
+                        sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->scuio), 0));
 
     /* GPIO */
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->gpio), errp)) {
@@ -171,7 +171,7 @@ static void aspeed_ast1700_realize(DeviceState *dev, Error **errp)
         hwaddr wdt_offset = aspeed_ast1700_io_memmap[ASPEED_AST1700_DEV_WDT] +
                             i * awc->iosize;
 
-        object_property_set_link(OBJECT(&s->wdt[i]), "scu", OBJECT(&s->scu),
+        object_property_set_link(OBJECT(&s->wdt[i]), "scu", OBJECT(&s->scuio),
                                  errp);
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->wdt[i]), errp)) {
             return;
@@ -207,9 +207,9 @@ static void aspeed_ast1700_instance_init(Object *obj)
     object_initialize_child(obj, "ioexp-adc", &s->adc,
                             "aspeed.adc-ast2700");
 
-    /* SCU */
-    object_initialize_child(obj, "ioexp-scu", &s->scu,
-                            TYPE_ASPEED_2700_SCU);
+    /* SCUIO */
+    object_initialize_child(obj, "ioexp-scu", &s->scuio,
+                            TYPE_ASPEED_2700_SCUIO);
 
     /* GPIO */
     object_initialize_child(obj, "ioexp-gpio", &s->gpio,
