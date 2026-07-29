@@ -152,5 +152,6 @@ IGBCore *igb_pf_get_core(void *pf);
 
 void igb_core_vf_propagate_ivar(IGBCore *core, uint16_t vfn);
 void igb_core_vf_raise_causes(IGBCore *core, uint16_t vfn);
+bool igb_core_vf_get_mac(IGBCore *core, uint16_t vfn, uint8_t *mac);
 
 #endif
