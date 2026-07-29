@@ -4552,3 +4552,41 @@ igb_core_post_load(IGBCore *core)
 
     return 0;
 }
+
+/*
+ * Re-apply VTIVAR -> IVAR0 interrupt routing. The L1 PF driver
+ * may have overwritten the shared IVAR0 entries with its own
+ * queue routing after L0 vmstate restore.
+ */
+void igb_core_vf_propagate_ivar(IGBCore *core, uint16_t vfn)
+{
+    uint32_t vtivar = core->mac[VTIVAR + vfn];
+    int n;
+    uint8_t ent;
+    uint32_t mask;
+
+    n = igb_ivar_entry_rx(vfn);
+    mask = 0xffU << (8 * (n % 4));
+    if (vtivar & E1000_IVAR_VALID) {
+        ent = E1000_IVAR_VALID |
+              (24 - vfn * IGBVF_MSIX_VEC_NUM - (2 - (vtivar & 0x7)));
+        core->mac[IVAR0 + n / 4] =
+            (core->mac[IVAR0 + n / 4] & ~mask) |
+            ((uint32_t)ent << (8 * (n % 4)));
+    } else {
+        core->mac[IVAR0 + n / 4] &= ~mask;
+    }
+
+    n = igb_ivar_entry_tx(vfn);
+    mask = 0xffU << (8 * (n % 4));
+    ent = vtivar >> 8;
+    if (ent & E1000_IVAR_VALID) {
+        ent = E1000_IVAR_VALID |
+              (24 - vfn * IGBVF_MSIX_VEC_NUM - (2 - (ent & 0x7)));
+        core->mac[IVAR0 + n / 4] =
+            (core->mac[IVAR0 + n / 4] & ~mask) |
+            ((uint32_t)ent << (8 * (n % 4)));
+    } else {
+        core->mac[IVAR0 + n / 4] &= ~mask;
+    }
+}

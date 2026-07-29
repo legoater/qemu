@@ -251,6 +251,9 @@ static int igb_core_vf_load_state(IgbVfState *s, const void *buf, size_t size)
         }
     }
 
+    /* Re-apply VTIVAR -> IVAR0 routing bypassed by direct write */
+    igb_core_vf_propagate_ivar(core, s->vfn);
+
     trace_igbvf_mig_load_state(s->vfn, (uint32_t)size);
     return 0;
 }
