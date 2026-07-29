@@ -510,6 +510,21 @@ static void igb_core_vf_save_tx_ctx(IGBCore *core, int queue,
     tx->skip_cp = cpu_to_le32(src->skip_cp);
 }
 
+static bool igb_core_vf_has_hash_entries(IGBCore *core, uint16_t vfn)
+{
+    uint32_t vmolr = core->mac[VMOLR0 + vfn];
+
+    for (int i = 0; i < E1000_MC_TBL_SIZE; i++) {
+        if ((vmolr & E1000_VMOLR_ROMPE) && core->mac[MTA + i]) {
+            return true;
+        }
+        if ((vmolr & E1000_VMOLR_ROPE) && core->mac[UTA + i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static int igb_core_vf_save_state(IgbVfState *s, void *buf, size_t buf_size)
 {
     int size = IGB_MIG_BLOB_SIZE;
@@ -528,6 +543,12 @@ static int igb_core_vf_save_state(IgbVfState *s, void *buf, size_t buf_size)
 
     if (size > buf_size) {
         return -IGB_MIG_ERR_BAD_SIZE;
+    }
+
+    /* MTA/UTA are PF-wide with no per-VF ownership; reject if in use */
+    if (igb_core_vf_has_hash_entries(core, s->vfn)) {
+        warn_report("igb: VF%u: MTA/UTA hash filter in use", s->vfn);
+//        return -IGB_MIG_ERR_UNSUPPORTED;
     }
 
     blob->magic = cpu_to_le32(IGB_MIG_BLOB_MAGIC);
