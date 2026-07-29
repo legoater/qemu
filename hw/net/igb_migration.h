@@ -65,6 +65,7 @@
 #define IGB_MIG_STATUS_ERROR_CODE_SHIFT 8
 #define IGB_MIG_STATUS_ERR(code) \
     ((uint32_t)(code) << IGB_MIG_STATUS_ERROR_CODE_SHIFT)
+#define IGB_MIG_STATUS_QUIESCED         (1u << 16)
 
 /* Device states (mirrors VFIO migration v2) */
 #define IGB_MIG_STATE_ERROR             0
@@ -110,6 +111,8 @@ typedef struct IgbVfMigState {
     uint32_t mig_data[IGB_VF_STATE_MAX_SIZE / sizeof(uint32_t)];
     uint32_t mig_data_size;
     uint64_t mig_data_buf_addr;
+    bool mig_saved_vfre;
+    bool mig_saved_vfte;
 } IgbVfMigState;
 
 
