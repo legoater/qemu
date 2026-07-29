@@ -106,6 +106,15 @@ typedef struct IGBVfDirtyState {
     uint32_t num_ranges;
 } IGBVfDirtyState;
 
+typedef struct IgbVfMigStats {
+    uint64_t dma_writes;
+    uint64_t dma_bytes;
+    uint32_t dirty_pages_set;
+    uint32_t dirty_pages_cleared;
+    uint32_t dirty_page_count;
+    uint32_t dirty_query_count;
+} IgbVfMigStats;
+
 typedef struct IgbVfMigState {
     uint32_t mig_state;
     uint32_t mig_data[IGB_VF_STATE_MAX_SIZE / sizeof(uint32_t)];
@@ -143,6 +152,18 @@ struct igb_mig_dirty_query {
     uint64_t dma_writes;
     uint32_t reserved[4];
     uint8_t bitmap[];
+};
+
+/*
+ * GET_STATS:    device writes igb_mig_stats_resp to buffer.
+ */
+struct igb_mig_stats_resp {
+    uint64_t dma_writes;
+    uint64_t dma_bytes;
+    uint32_t dirty_pages_set;
+    uint32_t dirty_pages_cleared;
+    uint32_t dirty_page_count;
+    uint32_t dirty_query_count;
 };
 
 typedef struct IGBCore IGBCore;
