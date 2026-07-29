@@ -202,6 +202,24 @@ bitmap). ``flags`` and ``reserved`` must be zero::
   0x28    reserved[4]        -           Reserved, must be 0
   0x38    bitmap[]           device      Dirty page bitmap
 
+Migration statistics
+~~~~~~~~~~~~~~~~~~~~
+
+The ``GET_STATS`` command DMA-writes a statistics response into the
+driver-provided buffer. The driver sets ``BUF_ADDR_LO/HI`` and issues
+the command; the device writes the response and returns::
+
+  Offset  Field                Type      Description
+  0x00    dma_writes           uint64    DMA write operations tracked
+  0x08    dma_bytes            uint64    DMA bytes written
+  0x10    dirty_pages_set      uint32    Dirty pages marked since enable
+  0x14    dirty_pages_cleared  uint32    Dirty pages cleared by queries
+  0x18    dirty_page_count     uint32    Current dirty pages (set - cleared)
+  0x1C    dirty_query_count    uint32    Number of QUERY operations
+
+The variant driver exposes these via debugfs at
+``/sys/kernel/debug/vfio/<device>/migration/dirty/stats``.
+
 Testing setup
 ~~~~~~~~~~~~~
 
