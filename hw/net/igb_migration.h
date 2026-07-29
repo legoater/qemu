@@ -25,10 +25,11 @@
  *   +0x14  STATUS                     (RO: completion + error code)
  *   +0x18  BUF_ADDR_LO                (RW: shared buffer GPA low)
  *   +0x1C  BUF_ADDR_HI                (RW: shared buffer GPA high)
+ *   +0x20  DATA_SIZE                  (RO: max state blob size in bytes)
  */
 
 #define IGB_MIG_DVSEC_OFFSET    0x160
-#define IGB_MIG_DVSEC_SIZE      0x20
+#define IGB_MIG_DVSEC_SIZE      0x24
 #define IGB_MIG_DVSEC_VER       1
 #define IGB_MIG_DVSEC_ID        1
 
@@ -38,6 +39,7 @@
 #define IGB_MIG_STATUS          0x14
 #define IGB_MIG_BUF_ADDR_LO     0x18
 #define IGB_MIG_BUF_ADDR_HI     0x1C
+#define IGB_MIG_DATA_SIZE       0x20
 
 /* CAPS register layout */
 #define IGB_MIG_CAP_F_STATE             (1u << 0)
@@ -48,6 +50,8 @@
 
 /* CTRL commands */
 #define IGB_MIG_CMD_SET_STATE           1
+#define IGB_MIG_CMD_SAVE                2
+#define IGB_MIG_CMD_LOAD                3
 
 /* STATUS register: state in [7:0], error code [15:8] */
 #define IGB_MIG_STATUS_STATE_MASK       0xFF
@@ -62,8 +66,21 @@
 #define IGB_MIG_STATE_STOP_COPY         3
 #define IGB_MIG_STATE_RESUMING          4
 
+/* Error codes */
+#define IGB_MIG_ERR_UNK_CMD             1
+#define IGB_MIG_ERR_BAD_STATE           2
+#define IGB_MIG_ERR_NO_BUFFER           3
+#define IGB_MIG_ERR_DMA_FAILED          4
+#define IGB_MIG_ERR_BAD_SIZE            5
+#define IGB_MIG_ERR_BAD_VFN             6
+
+/* Shared buffer constants */
+#define IGB_VF_STATE_MAX_SIZE           4096
+
 typedef struct IgbVfMigState {
     uint32_t mig_state;
+    uint32_t mig_data[IGB_VF_STATE_MAX_SIZE / sizeof(uint32_t)];
+    uint32_t mig_data_size;
     uint64_t mig_data_buf_addr;
 } IgbVfMigState;
 
