@@ -30,6 +30,7 @@ test_arm_timeouts = {
 }
 
 tests_arm_system_quick = [
+  'device_locator',
   'migration',
 ]
 
