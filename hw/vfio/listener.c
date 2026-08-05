@@ -84,6 +84,14 @@ static bool vfio_listener_skipped_section(MemoryRegionSection *section,
             !memory_region_is_iommu(section->mr)) ||
            memory_region_is_protected(section->mr) ||
            /*
+            * The TPM CRB device uses RAM-backed regions for its command
+            * response buffer and physical presence interface. These are
+            * device-owned buffers at fixed MMIO addresses, not guest
+            * system memory. No passthrough device will DMA to them, so
+            * skip them to avoid breaking VFIO dirty page tracking.
+            */
+           TPM_IS_CRB(section->mr->owner) ||
+           /*
             * Sizing an enabled 64-bit BAR can cause spurious mappings to
             * addresses in the upper part of the 64-bit address space.  These
             * are never accessed by the CPU and beyond the address width of
