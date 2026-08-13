@@ -41,5 +41,6 @@ guest hardware that is specific to QEMU.
    riscv-aia
    aspeed-intc
    ucd90320
+   aspeed-ufs
    iommu-testdev
    s390x-secure-ipl
