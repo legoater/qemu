@@ -21,6 +21,7 @@
 #define UFS_MAX_MCQ_QNUM 32
 #define UFS_BLOCK_SIZE_SHIFT 12
 #define UFS_BLOCK_SIZE (1 << UFS_BLOCK_SIZE_SHIFT)
+#define UFS_MIN_BLOCK_SIZE 512
 
 typedef struct UfsBusClass {
     BusClass parent_class;
@@ -80,6 +81,7 @@ typedef UfsReqResult (*UfsScsiOp)(struct UfsLu *, UfsRequest *);
 typedef struct UfsLu {
     DeviceState qdev;
     uint8_t lun;
+    uint32_t logical_block_size;
     UnitDescriptor unit_desc;
     SCSIBus bus;
     SCSIDevice *scsi_dev;
@@ -303,6 +305,7 @@ void ufs_build_query_response(UfsRequest *req);
 void ufs_complete_req(UfsRequest *req, UfsReqResult req_result);
 void ufs_wb_update_avail_buffer(UfsHc *u);
 void ufs_init_wlu(UfsLu *wlu, uint8_t wlun);
+UfsReqResult ufs_emulate_absent_lun(UfsRequest *req);
 bool ufs_realize(UfsHc *u, DeviceState *dev, AddressSpace *dma_as,
                  Error **errp);
 void ufs_unrealize(UfsHc *u);
