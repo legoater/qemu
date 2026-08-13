@@ -308,6 +308,44 @@ static int ufs_emulate_wlun_inquiry(UfsRequest *req, uint8_t *outbuf,
     return SCSI_INQUIRY_LEN;
 }
 
+/*
+ * A logical unit that is not mapped answers a standard INQUIRY as "not
+ * connected" with GOOD status, as hardware does, so that a host bus scan
+ * skips it instead of reporting a controller error. Any other command is
+ * rejected.
+ */
+UfsReqResult ufs_emulate_absent_lun(UfsRequest *req)
+{
+    QEMU_UNINITIALIZED uint8_t outbuf[SCSI_INQUIRY_LEN];
+    uint8_t sense_buf[UFS_SENSE_SIZE];
+    uint8_t scsi_status;
+    int len = 0;
+
+    if (req->req_upiu.sc.cdb[0] == INQUIRY &&
+        !(req->req_upiu.sc.cdb[1] & 0x1)) {
+        memset(outbuf, 0, sizeof(outbuf));
+        outbuf[0] = TYPE_NO_LUN;
+        outbuf[3] = 0x2;
+        outbuf[4] = SCSI_INQUIRY_LEN - 5;
+        len = SCSI_INQUIRY_LEN;
+        scsi_status = GOOD;
+    } else {
+        scsi_build_sense(sense_buf, SENSE_CODE(LUN_NOT_SUPPORTED));
+        scsi_status = CHECK_CONDITION;
+    }
+
+    len = MIN(len, (int)req->data_len);
+    if (scsi_status == GOOD && len > 0 &&
+        dma_buf_read(outbuf, len, NULL, req->sg, MEMTXATTRS_UNSPECIFIED) !=
+            MEMTX_OK) {
+        return UFS_REQUEST_FAIL;
+    }
+
+    ufs_build_scsi_response_upiu(req, sense_buf, sizeof(sense_buf), len,
+                                 scsi_status);
+    return UFS_REQUEST_SUCCESS;
+}
+
 static UfsReqResult ufs_emulate_scsi_cmd(UfsLu *lu, UfsRequest *req)
 {
     uint8_t lun = lu->lun;
@@ -394,6 +432,8 @@ static UfsReqResult ufs_process_scsi_cmd(UfsLu *lu, UfsRequest *req)
 static const Property ufs_lu_props[] = {
     DEFINE_PROP_DRIVE("drive", UfsLu, conf.blk),
     DEFINE_PROP_UINT8("lun", UfsLu, lun, 0),
+    DEFINE_PROP_UINT32("logical-block-size", UfsLu, logical_block_size,
+                       UFS_BLOCK_SIZE),
 };
 
 static bool ufs_add_lu(UfsHc *u, UfsLu *lu, Error **errp)
@@ -435,7 +475,7 @@ static void ufs_init_lu(UfsLu *lu)
     lu->unit_desc.length = sizeof(UnitDescriptor);
     lu->unit_desc.descriptor_idn = UFS_QUERY_DESC_IDN_UNIT;
     lu->unit_desc.lu_enable = 0x01;
-    lu->unit_desc.logical_block_size = UFS_BLOCK_SIZE_SHIFT;
+    lu->unit_desc.logical_block_size = ctz32(lu->logical_block_size);
     lu->unit_desc.unit_index = lu->lun;
     lu->unit_desc.logical_block_count =
         cpu_to_be64(brdv_len / (1 << lu->unit_desc.logical_block_size));
@@ -452,6 +492,25 @@ static bool ufs_lu_check_constraints(UfsLu *lu, Error **errp)
 
     if (lu->lun >= UFS_MAX_LUS) {
         error_setg(errp, "lun must be between 0 and %d", UFS_MAX_LUS - 1);
+        return false;
+    }
+
+    if (!is_power_of_2(lu->logical_block_size)) {
+        error_setg(errp, "logical-block-size must be a power of 2, not %"
+                   PRIu32, lu->logical_block_size);
+        return false;
+    }
+
+    if (lu->logical_block_size < UFS_MIN_BLOCK_SIZE ||
+        lu->logical_block_size > UFS_BLOCK_SIZE) {
+        error_setg(errp, "logical-block-size must be between %d and %d bytes",
+                   UFS_MIN_BLOCK_SIZE, UFS_BLOCK_SIZE);
+        return false;
+    }
+
+    if (blk_getlength(lu->conf.blk) < lu->logical_block_size) {
+        error_setg(errp, "drive is smaller than one %" PRIu32 "-byte block",
+                   lu->logical_block_size);
         return false;
     }
 
@@ -475,8 +534,10 @@ static void ufs_init_scsi_device(UfsLu *lu, BlockBackend *blk, Error **errp)
     scsi_dev = qdev_new("scsi-hd");
     object_property_add_child(OBJECT(&lu->bus), "ufs-scsi", OBJECT(scsi_dev));
 
-    qdev_prop_set_uint32(scsi_dev, "physical_block_size", UFS_BLOCK_SIZE);
-    qdev_prop_set_uint32(scsi_dev, "logical_block_size", UFS_BLOCK_SIZE);
+    qdev_prop_set_uint32(scsi_dev, "physical_block_size",
+                         lu->logical_block_size);
+    qdev_prop_set_uint32(scsi_dev, "logical_block_size",
+                         lu->logical_block_size);
     qdev_prop_set_uint32(scsi_dev, "scsi-id", 0);
     qdev_prop_set_uint32(scsi_dev, "lun", lu->lun);
     if (!qdev_prop_set_drive_err(scsi_dev, "drive", blk, errp)) {
