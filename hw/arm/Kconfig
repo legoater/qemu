@@ -562,6 +562,7 @@ config ASPEED_SOC
     select ADC128D818
     select UCD90320
     select FSI_APB2OPB_ASPEED
+    select UFS_SYSBUS
     select AT24C
     select PCI_EXPRESS_ASPEED
     select USB_EHCI_SYSBUS

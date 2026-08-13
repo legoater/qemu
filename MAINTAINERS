@@ -2719,6 +2719,8 @@ M: Jeuk Kim <jeuk20.kim@samsung.com>
 S: Supported
 F: hw/ufs/*
 F: include/block/ufs.h
+F: include/hw/ufs/aspeed_ufs.h
+F: docs/specs/aspeed-ufs.rst
 F: tests/qtest/ufs-test.c
 
 megasas
