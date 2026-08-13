@@ -25,7 +25,7 @@ typedef struct FSIMasterState {
     FSIBus bus;
 
     uint32_t regs[FSI_MASTER_NR_REGS];
-    FSICFAMState cfam;
+    FSICFAM cfam;
 } FSIMasterState;
 
 
