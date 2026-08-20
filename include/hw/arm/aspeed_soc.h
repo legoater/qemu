@@ -25,6 +25,7 @@
 #include "hw/i2c/aspeed_i2c.h"
 #include "hw/i3c/aspeed_i3c.h"
 #include "hw/ssi/aspeed_smc.h"
+#include "hw/misc/aspeed_acry.h"
 #include "hw/misc/aspeed_hace.h"
 #include "hw/misc/aspeed_sbc.h"
 #include "hw/misc/aspeed_sli.h"
@@ -83,6 +84,7 @@ struct AspeedSoCState {
     AspeedSCUState scu;
     AspeedSCUState scuio;
     AspeedHACEState hace;
+    AspeedACRYState acry;
     AspeedXDMAState xdma;
     AspeedADCState adc;
     AspeedSMCState fmc;
@@ -273,6 +275,7 @@ enum {
     ASPEED_DEV_EMMC,
     ASPEED_DEV_KCS,
     ASPEED_DEV_HACE,
+    ASPEED_DEV_ACRY,
     ASPEED_DEV_DPMCU,
     ASPEED_DEV_DP,
     ASPEED_DEV_I3C,
