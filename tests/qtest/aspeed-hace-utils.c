@@ -579,6 +579,59 @@ void aspeed_test_sha512_accum(const char *machine, const uint32_t base,
     qtest_quit(s);
 }
 
+/*
+ * Regression test for an off-by-one OOB read in has_padding().
+ *
+ * When total_msg_len == total_req_len, padding_size is zero and
+ * pad_offset equals req_len, causing a read one byte past the mapped
+ * buffer.  Craft an SG accumulate request where the last 8 bytes of
+ * the buffer encode a total message length equal to the buffer length
+ * so that padding_size == 0.  The operation must complete without
+ * crashing.
+ */
+static const uint8_t test_vector_accum_zero_pad[64] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00,
+};
+
+void aspeed_test_sha256_accum_zero_padding(const char *machine,
+                                           const uint32_t base,
+                                           const uint64_t src_addr,
+                                           const uint64_t dram_size)
+{
+    QTestState *s = qtest_init(machine);
+
+    const uint32_t len = sizeof(test_vector_accum_zero_pad);
+    const uint64_t buffer_addr = src_addr + dram_size - len;
+    const uint64_t digest_addr = src_addr + 0x40000;
+    struct AspeedSgList array[] = {
+        {  cpu_to_le32(len | SG_LIST_LEN_LAST),
+           cpu_to_le32(buffer_addr) },
+    };
+
+    g_assert_cmphex(qtest_readl(s, base + HACE_STS), ==, 0);
+
+    qtest_memwrite(s, buffer_addr, test_vector_accum_zero_pad, len);
+    qtest_memwrite(s, src_addr, array, sizeof(array));
+
+    write_regs(s, base, src_addr, len,
+               digest_addr, HACE_ALGO_SHA256 | HACE_SG_EN | HACE_ACCUM_EN);
+
+    /* The operation must complete (no OOB crash) */
+    g_assert_cmphex(qtest_readl(s, base + HACE_STS), ==, 0x00000200);
+
+    qtest_writel(s, base + HACE_STS, 0x00000200);
+    g_assert_cmphex(qtest_readl(s, base + HACE_STS), ==, 0);
+
+    qtest_quit(s);
+}
+
 void aspeed_test_addresses(const char *machine, const uint32_t base,
                            const struct AspeedMasks *expected)
 {
