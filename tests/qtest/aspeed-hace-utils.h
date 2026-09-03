@@ -76,6 +76,10 @@ void aspeed_test_sha384_accum(const char *machine, const uint32_t base,
                               const uint64_t src_addr);
 void aspeed_test_sha512_accum(const char *machine, const uint32_t base,
                               const uint64_t src_addr);
+void aspeed_test_sha256_accum_zero_padding(const char *machine,
+                                           const uint32_t base,
+                                           const uint64_t src_addr,
+                                           const uint64_t dram_size);
 void aspeed_test_addresses(const char *machine, const uint32_t base,
                            const struct AspeedMasks *expected);
 
