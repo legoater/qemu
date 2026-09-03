@@ -8,6 +8,7 @@
 #include "qemu/osdep.h"
 #include "libqtest.h"
 #include "qemu/bitops.h"
+#include "qemu/units.h"
 #include "aspeed-hace-utils.h"
 
 static const struct AspeedMasks ast1030_masks = {
@@ -145,6 +146,13 @@ static void test_sha512_accum_ast2600(void)
     aspeed_test_sha512_accum("-machine ast2600-evb", 0x1e6d0000, 0x80000000);
 }
 
+static void test_sha256_accum_zero_padding_ast2600(void)
+{
+    aspeed_test_sha256_accum_zero_padding("-machine ast2600-evb",
+                                         0x1e6d0000, 0x80000000,
+                                         1 * GiB);
+}
+
 static void test_addresses_ast2600(void)
 {
     aspeed_test_addresses("-machine ast2600-evb", 0x1e6d0000, &ast2600_masks);
@@ -229,6 +237,8 @@ int main(int argc, char **argv)
     qtest_add_func("ast2600/hace/sha512_accum", test_sha512_accum_ast2600);
     qtest_add_func("ast2600/hace/sha384_accum", test_sha384_accum_ast2600);
     qtest_add_func("ast2600/hace/sha256_accum", test_sha256_accum_ast2600);
+    qtest_add_func("ast2600/hace/sha256_accum_zero_padding",
+                   test_sha256_accum_zero_padding_ast2600);
 
     /* The AST2600 crypto engine uses scatter-gather mode and adds CTR. */
     aspeed_add_crypto_tests("ast2600", "-machine ast2600-evb", 0x1e6d0000,
