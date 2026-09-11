@@ -232,6 +232,7 @@ void vfio_update_msi(VFIOPCIDevice *vdev);
 bool vfio_msix_early_setup(VFIOPCIDevice *vdev, Error **errp);
 void vfio_mmap_set_enabled(VFIOPCIDevice *vdev, bool enabled);
 bool vfio_pci_interrupt_setup(VFIOPCIDevice *vdev, Error **errp);
+void vfio_pci_interrupt_teardown(VFIOPCIDevice *vdev);
 void vfio_pci_intx_eoi(VFIODevice *vbasedev);
 void vfio_pci_teardown_msi(VFIOPCIDevice *vdev);
 
@@ -245,6 +246,8 @@ void vfio_pci_write_config(PCIDevice *pdev,
                            uint32_t addr, uint32_t val, int len);
 bool vfio_pci_config_setup(VFIOPCIDevice *vdev, Error **errp);
 void vfio_pci_config_register_vga(VFIOPCIDevice *vdev);
+int vfio_pci_save_config(VFIODevice *vbasedev, QEMUFile *f, Error **errp);
+int vfio_pci_load_config(VFIODevice *vbasedev, QEMUFile *f);
 
 /* ROM */
 void vfio_pci_size_rom(VFIOPCIDevice *vdev);
