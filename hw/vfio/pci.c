@@ -27,7 +27,12 @@
 #include "hw/pci/msi.h"
 #include "hw/pci/msix.h"
 #include "hw/pci/pci_bridge.h"
+#include "hw/pci/pci_host.h"
+#include "hw/pci/pcie_port.h"
 #include "hw/cxl/cxl.h"
+#include "hw/cxl/cxl_host.h"
+#include "hw/cxl/cxl_component.h"
+#include "system/system.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/core/qdev-properties-system.h"
 #include "hw/vfio/vfio-cpr.h"
@@ -3658,6 +3663,171 @@ static bool vfio_cxl_check_topology(VFIOPCIDevice *vdev, Error **errp)
 }
 
 /*
+ * Count the CXL fixed memory windows that target this device's pxb-cxl and
+ * report the matched window's base, size and target count. Match on the target
+ * names: cxl_fmws_link_targets() resolves target_hbs[] only at machine_done,
+ * which may run after this, so the resolved pointers can still be NULL here.
+ */
+static int vfio_cxl_match_fmws(PXBCXLDev *pxb, hwaddr *base, uint64_t *size,
+                               int *nwindows, int *ntargets)
+{
+    GSList *list = cxl_fmws_get_all_sorted();
+    GSList *iter;
+    int matches = 0;
+
+    *nwindows = g_slist_length(list);
+    *base = 0;
+    *size = 0;
+    *ntargets = 0;
+
+    for (iter = list; iter; iter = iter->next) {
+        CXLFixedWindow *fw = CXL_FMW(iter->data);
+        int i;
+
+        for (i = 0; i < fw->num_targets; i++) {
+            bool ambiguous = false;
+            Object *t = object_resolve_path_type(fw->targets[i],
+                                                 TYPE_PXB_CXL_DEV, &ambiguous);
+
+            if (t && !ambiguous && PXB_CXL_DEV(t) == pxb) {
+                *base = fw->base;
+                *size = fw->size;
+                *ntargets = fw->num_targets;
+                matches++;
+                break;
+            }
+        }
+    }
+    g_slist_free(list);
+    return matches;
+}
+
+/*
+ * Fix the bounds of the device's memory window once the topology has settled.
+ * Exactly one single-target CFMWS, with an assigned base and room for the HDM
+ * memory, is required; anything else is a misconfiguration the guest cannot
+ * recover from, so reject it rather than guess a window.
+ */
+static bool vfio_cxl_do_bind_fmws(VFIOPCIDevice *vdev, Error **errp)
+{
+    VFIOCXL *cxl = &vdev->cxl;
+    const char *name = vdev->vbasedev.name;
+    int nwindows = 0, ntargets = 0, matches;
+    hwaddr base = 0;
+    uint64_t size = 0, need;
+    PXBCXLDev *pxb;
+
+    pxb = vfio_cxl_find_pxb(vdev, errp);
+    if (!pxb) {
+        return false;
+    }
+
+    if (pcie_count_ds_ports(PCI_HOST_BRIDGE(pxb->cxl_host_bridge)->bus) != 1) {
+        error_setg(errp,
+                   "vfio-cxl: %s: pxb-cxl not in HDM passthrough mode "
+                   "(use a single cxl-rp)", name);
+        return false;
+    }
+
+    /*
+     * Count every present function, not one per slot, and require exactly one
+     * endpoint below the root port.
+     */
+    {
+        PCIBus *ep_bus = pci_get_bus(&vdev->parent_obj);
+        int slot, fn, nendpoints = 0;
+
+        for (slot = 0; slot < PCI_SLOT_MAX; slot++) {
+            for (fn = 0; fn < PCI_FUNC_MAX; fn++) {
+                if (ep_bus->devices[PCI_DEVFN(slot, fn)]) {
+                    nendpoints++;
+                }
+            }
+        }
+        if (nendpoints != 1) {
+            error_setg(errp,
+                       "vfio-cxl: %s: %d devices below the cxl-rp; a passed "
+                       "through CXL endpoint must be alone below its root port",
+                       name, nendpoints);
+            return false;
+        }
+    }
+
+    matches = vfio_cxl_match_fmws(pxb, &base, &size, &nwindows, &ntargets);
+    if (matches == 1 && ntargets == 1) {
+        if (!base) {
+            error_setg(errp,
+                       "vfio-cxl: %s: matched CFMWS has no base; reduce its "
+                       "size or grow the guest PA space", name);
+            return false;
+        }
+        /*
+         * QEMU reads the endpoint's HDM size from the kernel region, so the
+         * window size is really device information, not a value to make the
+         * caller guess. Sizing the CFMWS from the device the way firmware does
+         * is not possible here: the window is placed in the guest PA map by
+         * cxl_fmws_set_memmap() before this device is realized, so its size is
+         * fixed before dpa_size is known. Until a core change can size the
+         * window from the device, take the device geometry as the source of
+         * truth: reject a window too small to hold the endpoint, and warn when
+         * it is larger than needed, since the padding becomes guest CEDT that
+         * migration has to preserve.
+         */
+        need = ROUND_UP(cxl->dpa_size, 256 * MiB);
+        if (size < need) {
+            error_setg(errp,
+                       "vfio-cxl: %s: CFMWS size 0x%" PRIx64 " cannot hold the "
+                       "endpoint; set the cxl-fmw size to 0x%" PRIx64,
+                       name, size, need);
+            return false;
+        }
+        if (size > need) {
+            warn_report("vfio-cxl: %s: CFMWS size 0x%" PRIx64 " exceeds the "
+                        "endpoint's 0x%" PRIx64 "; set the cxl-fmw size to 0x%"
+                        PRIx64 " to keep the guest memory map stable across "
+                        "migration", name, size, cxl->dpa_size, need);
+        }
+        cxl->fmws_base = base;
+        cxl->fmws_size = size;
+        return true;
+    }
+
+    if (matches == 1) {
+        error_setg(errp,
+                   "vfio-cxl: %s: its CFMWS interleaves %d targets; use a "
+                   "single-target window", name, ntargets);
+    } else if (matches > 1) {
+        error_setg(errp,
+                   "vfio-cxl: %s: pxb-cxl is targeted by %d CFMWS; use one",
+                   name, matches);
+    } else {
+        error_setg(errp,
+                   "vfio-cxl: %s: no CFMWS targets this device (%d present)",
+                   name, nwindows);
+    }
+    return false;
+}
+
+/*
+ * Cold-plug path: the CFMWS windows are placed at machine init done, so the
+ * binding can only be validated from this notifier. The VM has not run yet, so
+ * a configuration error is fatal to startup. A hotplugged device is validated
+ * in realize instead (see vfio_cxl_setup), where the failure fails device_add
+ * without taking down the running VM.
+ */
+static void vfio_cxl_bind_fmws(Notifier *n, void *data)
+{
+    VFIOCXL *cxl = container_of(n, VFIOCXL, machine_done);
+    VFIOPCIDevice *vdev = container_of(cxl, VFIOPCIDevice, cxl);
+    Error *err = NULL;
+
+    if (!vfio_cxl_do_bind_fmws(vdev, &err)) {
+        error_report_err(err);
+        exit(1);
+    }
+}
+
+/*
  * Learn the CXL geometry the kernel reports: the HPA-backed HDM memory region
  * and the trapped HDM decoder block (which BAR carries it and at what offset).
  * A non-CXL device leaves cxl.enabled false and takes no CXL paths.
@@ -3733,6 +3903,22 @@ static bool vfio_cxl_setup(VFIOPCIDevice *vdev, Error **errp)
                     "performance may be slow", vbasedev->name);
     }
 
+    if (DEVICE(vdev)->hotplugged) {
+        /*
+         * The machine is already up, so the CFMWS windows are placed and the
+         * binding can be validated now. Report a failure through errp so a bad
+         * device_add fails cleanly instead of aborting the running VM.
+         */
+        if (!vfio_cxl_do_bind_fmws(vdev, errp)) {
+            vfio_region_exit(&cxl->mem_region);
+            vfio_region_finalize(&cxl->mem_region);
+            return false;
+        }
+    } else {
+        cxl->machine_done.notify = vfio_cxl_bind_fmws;
+        qemu_add_machine_init_done_notifier(&cxl->machine_done);
+    }
+
     cxl->enabled = true;
 
     return true;
@@ -3745,6 +3931,12 @@ static void vfio_cxl_teardown(VFIOPCIDevice *vdev)
     if (!cxl->enabled) {
         return;
     }
+
+    if (cxl->machine_done.notify) {
+        qemu_remove_machine_init_done_notifier(&cxl->machine_done);
+        cxl->machine_done.notify = NULL;
+    }
+
     if (cxl->mem_region.mem) {
         vfio_region_exit(&cxl->mem_region);
         vfio_region_finalize(&cxl->mem_region);
