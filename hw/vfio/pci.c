@@ -3223,8 +3223,11 @@ bool vfio_pci_populate_device(VFIOPCIDevice *vdev, Error **errp)
     return true;
 }
 
+static void vfio_cxl_teardown(VFIOPCIDevice *vdev);
+
 void vfio_pci_put_device(VFIOPCIDevice *vdev)
 {
+    vfio_cxl_teardown(vdev);
     vfio_display_finalize(vdev);
     vfio_bars_finalize(vdev);
     vfio_cpr_pci_unregister_device(vdev);
@@ -3712,9 +3715,40 @@ static bool vfio_cxl_setup(VFIOPCIDevice *vdev, Error **errp)
         return false;
     }
 
+    /*
+     * The HDM memory is host physical. Set up the region, which installs the
+     * fd read/write path, and mmap it for direct guest access; it is added to
+     * the guest address space only once the guest commits its endpoint decoder.
+     */
+    if (vfio_region_setup(OBJECT(vdev), vbasedev, &cxl->mem_region,
+                          cxl->mem_region_index, "cxl-mem", errp)) {
+        return false;
+    }
+    if (vfio_region_mmap(&cxl->mem_region)) {
+        /*
+         * Without mmap the region falls back to the kernel's fd read/write
+         * path, which works but traps every access. Warn rather than fail.
+         */
+        warn_report("vfio-cxl: %s: failed to mmap the HDM memory region; "
+                    "performance may be slow", vbasedev->name);
+    }
+
     cxl->enabled = true;
 
     return true;
+}
+
+static void vfio_cxl_teardown(VFIOPCIDevice *vdev)
+{
+    VFIOCXL *cxl = &vdev->cxl;
+
+    if (!cxl->enabled) {
+        return;
+    }
+    if (cxl->mem_region.mem) {
+        vfio_region_exit(&cxl->mem_region);
+        vfio_region_finalize(&cxl->mem_region);
+    }
 }
 
 static void vfio_pci_realize(PCIDevice *pdev, Error **errp)
