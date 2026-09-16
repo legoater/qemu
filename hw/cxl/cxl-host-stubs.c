@@ -23,3 +23,8 @@ GSList *cxl_fmws_get_all_sorted(void)
 {
     g_assert_not_reached();
 }
+
+int cxl_decoder_count_dec(int enc_cnt)
+{
+    g_assert_not_reached();
+}

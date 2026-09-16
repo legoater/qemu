@@ -1453,6 +1453,39 @@ uint32_t vfio_pci_read_config(PCIDevice *pdev, uint32_t addr, int len)
     return val;
 }
 
+static void vfio_cxl_decoder_changed(VFIOPCIDevice *vdev);
+static void vfio_cxl_unmap_mem(VFIOPCIDevice *vdev);
+
+/*
+ * Return true if this config write sets a Function Level Reset bit the kernel
+ * acts on: the PCIe Device Control FLR bit or the Advanced Features FLR bit.
+ * FLR bits are write-1-to-trigger and self-clearing, so inspect the written
+ * value rather than the post-write config.
+ */
+static bool vfio_cxl_flr_write(VFIOPCIDevice *vdev, uint32_t addr,
+                               uint32_t val, int len)
+{
+    PCIDevice *pdev = &vdev->parent_obj;
+    uint32_t off;
+
+    if (pdev->exp.exp_cap) {
+        /* PCI_EXP_DEVCTL_BCR_FLR (bit 15) is the high byte of Device Ctrl. */
+        off = pdev->exp.exp_cap + PCI_EXP_DEVCTL + 1;
+        if (off >= addr && off < addr + len &&
+            ((val >> (8 * (off - addr))) & (PCI_EXP_DEVCTL_BCR_FLR >> 8))) {
+            return true;
+        }
+    }
+    if (vdev->cxl.af_offset) {
+        off = vdev->cxl.af_offset + PCI_AF_CTRL;
+        if (off >= addr && off < addr + len &&
+            ((val >> (8 * (off - addr))) & PCI_AF_CTRL_FLR)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void vfio_pci_write_config(PCIDevice *pdev,
                            uint32_t addr, uint32_t val, int len)
 {
@@ -1522,9 +1555,74 @@ void vfio_pci_write_config(PCIDevice *pdev,
                 vfio_sub_page_bar_update_mapping(pdev, bar);
             }
         }
+
+        /*
+         * A firmware-committed CXL decoder is already committed at boot, so no
+         * guest control write triggers the HDM mapping. Map it once the guest
+         * enables memory decoding, so the region enters the guest address space
+         * and the IOAS while the device is live. On a clear of memory decoding,
+         * withdraw the overlay: the kernel revokes the HDM PTEs on the same
+         * write, so a retained memslot would fault a guest access during the
+         * disabled interval onto a zapped VMA and stop the VM; the enable path
+         * re-maps it.
+         */
+        if (vdev->cxl.enabled &&
+            range_covers_byte(addr, len, PCI_COMMAND)) {
+            if (pci_get_word(pdev->config + PCI_COMMAND) & PCI_COMMAND_MEMORY) {
+                vfio_cxl_decoder_changed(vdev);
+            } else {
+                vfio_cxl_unmap_mem(vdev);
+            }
+        }
     } else {
         /* Write everything to QEMU to keep emulated bits correct */
         pci_default_write_config(pdev, addr, val, len);
+
+        /*
+         * A guest CXL reset is a write to the CXL Device DVSEC ctrl2 register,
+         * forwarded to the kernel above, which re-commits this firmware-fixed
+         * decoder. If the guest decommitted the decoder before the reset, which
+         * unmapped the HDM memory, that re-commit is not otherwise visible to
+         * QEMU, so rescan the decoder here to restore the mapping. Gated on
+         * memory decoding still being enabled, like the enable path above.
+         */
+        if (vdev->cxl.enabled && vdev->cxl.dvsec_offset &&
+            ranges_overlap(addr, len,
+                           vdev->cxl.dvsec_offset +
+                               offsetof(CXLDVSECDevice, ctrl2),
+                           sizeof_field(CXLDVSECDevice, ctrl2)) &&
+            (pci_get_word(pdev->config + PCI_COMMAND) & PCI_COMMAND_MEMORY)) {
+            vfio_cxl_decoder_changed(vdev);
+        }
+
+        /*
+         * A NoSoftRst- device the guest cycles D3hot->D0 has its physical
+         * decoder restored by the kernel on resume, which re-commits this
+         * firmware-fixed decoder just like a reset. That re-commit is not
+         * otherwise visible to QEMU, so on the transition back to D0 rescan
+         * the decoder to restore a mapping the guest dropped before it
+         * suspended. Gated on memory decoding, like the paths above.
+         */
+        if (vdev->cxl.enabled && pdev->pm_cap &&
+            range_covers_byte(addr, len, pdev->pm_cap + PCI_PM_CTRL) &&
+            (pci_get_word(pdev->config + pdev->pm_cap + PCI_PM_CTRL) &
+             PCI_PM_CTRL_STATE_MASK) == 0 &&
+            (pci_get_word(pdev->config + PCI_COMMAND) & PCI_COMMAND_MEMORY)) {
+            vfio_cxl_decoder_changed(vdev);
+        }
+
+        /*
+         * A Function Level Reset the guest triggers through the PCIe Device
+         * Control or Advanced Features FLR bit is forwarded to the kernel,
+         * which re-commits this firmware-fixed decoder just like a CXL reset.
+         * That re-commit is not otherwise visible to QEMU, so rescan the
+         * decoder to restore a mapping the guest dropped before the FLR. Gated
+         * on memory decoding, like the paths above.
+         */
+        if (vdev->cxl.enabled && vfio_cxl_flr_write(vdev, addr, val, len) &&
+            (pci_get_word(pdev->config + PCI_COMMAND) & PCI_COMMAND_MEMORY)) {
+            vfio_cxl_decoder_changed(vdev);
+        }
     }
 }
 
@@ -3828,6 +3926,239 @@ static void vfio_cxl_bind_fmws(Notifier *n, void *data)
 }
 
 /*
+ * HDM decoder registers, relative to the trapped decoder block. The block holds
+ * the HDM Decoder Capability register followed by one register set per decoder,
+ * each VFIO_CXL_HDM_DECODER_STRIDE apart, indexed by decoder.
+ */
+#define VFIO_CXL_HDM_CAP                  0x00
+#define VFIO_CXL_HDM_DECODER_STRIDE       0x20
+#define VFIO_CXL_HDM_DECODER_BASE_LOW(n) \
+    (0x10 + (n) * VFIO_CXL_HDM_DECODER_STRIDE)
+#define VFIO_CXL_HDM_DECODER_BASE_HIGH(n) \
+    (0x14 + (n) * VFIO_CXL_HDM_DECODER_STRIDE)
+#define VFIO_CXL_HDM_DECODER_CTRL(n) \
+    (0x20 + (n) * VFIO_CXL_HDM_DECODER_STRIDE)
+#define VFIO_CXL_HDM_CTRL_COMMITTED       (1 << 10)
+#define VFIO_CXL_HDM_BASE_LOW_MASK        0xf0000000U
+
+static void vfio_cxl_unmap_mem(VFIOPCIDevice *vdev)
+{
+    VFIOCXL *cxl = &vdev->cxl;
+
+    if (!cxl->dpa_mapped) {
+        return;
+    }
+    memory_region_del_subregion(get_system_memory(), cxl->mem_region.mem);
+    cxl->dpa_mapped = false;
+    cxl->mapped_base = 0;
+}
+
+/*
+ * The HDM Decoder Capability register encodes the decoder count in its low
+ * nibble (CXL r3.1 8.2.4.20.1, encodings 0h..Ch for 1..32). Decode it with the
+ * shared cxl_decoder_count_dec() helper so the commit handler walks every
+ * decoder rather than assuming decoder 0. An unreadable register or a reserved
+ * encoding (which the helper decodes to 0) is treated as a single decoder.
+ */
+static unsigned vfio_cxl_decoder_count(VFIOPCIDevice *vdev)
+{
+    off_t off = vdev->cxl.comp_regs_region.fd_offset;
+    uint32_t cap = 0;
+    int count;
+
+    if (pread(vdev->vbasedev.fd, &cap, 4, off + VFIO_CXL_HDM_CAP) != 4) {
+        return 1;
+    }
+    count = cxl_decoder_count_dec(le32_to_cpu(cap) & 0xf);
+    return count > 0 ? count : 1;
+}
+
+/*
+ * The guest committed or tore down an endpoint decoder. Walk each decoder in
+ * the trapped HDM block and (un)map the HDM memory at the CFMWS window base,
+ * not the base the guest programmed (see vfio_cxl_comp_regs_read). This
+ * generation commits one non-interleaved decoder, so the walk stops at the
+ * first committed decoder.
+ */
+static void vfio_cxl_decoder_changed(VFIOPCIDevice *vdev)
+{
+    VFIOCXL *cxl = &vdev->cxl;
+    VFIODevice *vbasedev = &vdev->vbasedev;
+    off_t off = cxl->comp_regs_region.fd_offset;
+    unsigned n, count = vfio_cxl_decoder_count(vdev);
+
+    for (n = 0; n < count; n++) {
+        uint32_t ctrl = 0;
+
+        if (pread(vbasedev->fd, &ctrl, 4,
+                  off + VFIO_CXL_HDM_DECODER_CTRL(n)) != 4) {
+            return;
+        }
+        if (!(le32_to_cpu(ctrl) & VFIO_CXL_HDM_CTRL_COMMITTED)) {
+            continue;
+        }
+
+        /*
+         * QEMU always maps at the device's CFMWS base and presents that base
+         * back to the guest, so a decoder the guest committed at any other base
+         * would leave the guest's view and the actual mapping diverged. Reject
+         * it rather than silently relocate. A firmware-committed decoder the
+         * guest never reprogrammed (guest_base_written == false) keeps the
+         * CFMWS base.
+         */
+        if (cxl->guest_base_written) {
+            hwaddr guest_base = ((hwaddr)cxl->guest_base_hi << 32) |
+                                cxl->guest_base_lo;
+
+            if (guest_base != cxl->fmws_base) {
+                warn_report("vfio-cxl: %s: guest committed decoder %u at 0x%"
+                            HWADDR_PRIx ", not the CFMWS base 0x%" HWADDR_PRIx
+                            "; not mapping", vbasedev->name, n, guest_base,
+                            cxl->fmws_base);
+                vfio_cxl_unmap_mem(vdev);
+                return;
+            }
+        }
+
+        if (cxl->dpa_mapped && cxl->mapped_base == cxl->fmws_base) {
+            return;
+        }
+        /*
+         * Overlap the CFMWS window MemoryRegion the CXL host bridge already
+         * maps at this base, at a higher priority, so precedence is defined by
+         * priority rather than subregion insertion order.
+         */
+        memory_region_transaction_begin();
+        vfio_cxl_unmap_mem(vdev);
+        memory_region_add_subregion_overlap(get_system_memory(),
+                                            cxl->fmws_base,
+                                            cxl->mem_region.mem, 1);
+        memory_region_transaction_commit();
+        cxl->mapped_base = cxl->fmws_base;
+        cxl->dpa_mapped = true;
+        return;
+    }
+
+    /* No committed decoder in the block: tear down any existing mapping. */
+    vfio_cxl_unmap_mem(vdev);
+}
+
+static uint64_t vfio_cxl_comp_regs_read(void *opaque, hwaddr addr,
+                                        unsigned size)
+{
+    VFIORegion *region = opaque;
+    VFIODevice *vbasedev = region->vbasedev;
+    VFIOPCIDevice *vdev =
+        container_of(region, VFIOPCIDevice, cxl.comp_regs_region);
+    VFIOCXL *cxl = &vdev->cxl;
+    uint32_t val = 0xffffffff;
+
+    if (pread(vbasedev->fd, &val, size, region->fd_offset + addr) != size) {
+        error_report("vfio-cxl: %s: HDM decoder read at 0x%" HWADDR_PRIx
+                     " failed", vbasedev->name, addr);
+    }
+    val = le32_to_cpu(val);
+
+    /*
+     * The kernel shadow holds the host physical base for a firmware-committed
+     * decoder. Never expose that to the guest: present the guest physical base
+     * QEMU maps the HDM memory at (the device's CFMWS window). Any decoder's
+     * base registers are virtualized; ctrl, size and the capability header pass
+     * through. The base registers repeat every VFIO_CXL_HDM_DECODER_STRIDE.
+     */
+    if (addr >= VFIO_CXL_HDM_DECODER_BASE_LOW(0) &&
+        (addr - VFIO_CXL_HDM_DECODER_BASE_LOW(0)) %
+                VFIO_CXL_HDM_DECODER_STRIDE == 0) {
+        val = (val & ~VFIO_CXL_HDM_BASE_LOW_MASK) |
+              ((uint32_t)cxl->fmws_base & VFIO_CXL_HDM_BASE_LOW_MASK);
+    } else if (addr >= VFIO_CXL_HDM_DECODER_BASE_HIGH(0) &&
+               (addr - VFIO_CXL_HDM_DECODER_BASE_HIGH(0)) %
+                       VFIO_CXL_HDM_DECODER_STRIDE == 0) {
+        val = (uint32_t)(cxl->fmws_base >> 32);
+    }
+
+    return val;
+}
+
+static void vfio_cxl_comp_regs_write(void *opaque, hwaddr addr, uint64_t data,
+                                     unsigned size)
+{
+    VFIORegion *region = opaque;
+    VFIODevice *vbasedev = region->vbasedev;
+    VFIOPCIDevice *vdev =
+        container_of(region, VFIOPCIDevice, cxl.comp_regs_region);
+    uint32_t val = cpu_to_le32((uint32_t)data);
+
+    if (pwrite(vbasedev->fd, &val, size, region->fd_offset + addr) != size) {
+        error_report("vfio-cxl: %s: HDM decoder write at 0x%" HWADDR_PRIx
+                     " failed", vbasedev->name, addr);
+        return;
+    }
+
+    /*
+     * Record the base the guest programs into a decoder so the commit handler
+     * can reject a base other than the device's CFMWS window. The base low
+     * register carries HPA bits [31:28]; the high register carries [63:32].
+     */
+    if (addr >= VFIO_CXL_HDM_DECODER_BASE_LOW(0) &&
+        (addr - VFIO_CXL_HDM_DECODER_BASE_LOW(0)) %
+                VFIO_CXL_HDM_DECODER_STRIDE == 0) {
+        vdev->cxl.guest_base_lo = (uint32_t)data & VFIO_CXL_HDM_BASE_LOW_MASK;
+        vdev->cxl.guest_base_written = true;
+    } else if (addr >= VFIO_CXL_HDM_DECODER_BASE_HIGH(0) &&
+               (addr - VFIO_CXL_HDM_DECODER_BASE_HIGH(0)) %
+                       VFIO_CXL_HDM_DECODER_STRIDE == 0) {
+        vdev->cxl.guest_base_hi = (uint32_t)data;
+        vdev->cxl.guest_base_written = true;
+    }
+
+    /*
+     * The kernel runs the lock-on-commit FSM in the write above, so the
+     * committed state is settled by now; a control write on any decoder can
+     * change the mapping.
+     */
+    if (addr >= VFIO_CXL_HDM_DECODER_CTRL(0) &&
+        (addr - VFIO_CXL_HDM_DECODER_CTRL(0)) %
+        VFIO_CXL_HDM_DECODER_STRIDE == 0) {
+        vfio_cxl_decoder_changed(vdev);
+    }
+}
+
+static const MemoryRegionOps vfio_cxl_comp_regs_ops = {
+    .read = vfio_cxl_comp_regs_read,
+    .write = vfio_cxl_comp_regs_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = { .min_access_size = 4, .max_access_size = 4 },
+    .impl = { .min_access_size = 4, .max_access_size = 4 },
+};
+
+/*
+ * Locate the CXL Device DVSEC (CXL r3.1 8.1.3) in config space. The guest
+ * triggers a CXL reset by writing its ctrl2 register; QEMU rescans the decoder
+ * after that write so the HDM mapping is restored (see vfio_pci_write_config).
+ * Returns the DVSEC config offset, or 0 if the device does not expose it.
+ */
+static uint16_t vfio_cxl_find_device_dvsec(PCIDevice *pdev)
+{
+    uint16_t offset;
+
+    for (offset = PCI_CONFIG_SPACE_SIZE; offset;
+         offset = PCI_EXT_CAP_NEXT(pci_get_long(pdev->config + offset))) {
+        uint32_t hdr = pci_get_long(pdev->config + offset);
+
+        if (PCI_EXT_CAP_ID(hdr) == PCI_EXT_CAP_ID_DVSEC &&
+            (pci_get_long(pdev->config + offset + PCI_DVSEC_HEADER1) & 0xffff)
+                == CXL_VENDOR_ID &&
+            pci_get_word(pdev->config + offset + PCI_DVSEC_HEADER2)
+                == PCIE_CXL_DEVICE_DVSEC) {
+            return offset;
+        }
+    }
+
+    return 0;
+}
+
+/*
  * Learn the CXL geometry the kernel reports: the HPA-backed HDM memory region
  * and the trapped HDM decoder block (which BAR carries it and at what offset).
  * A non-CXL device leaves cxl.enabled false and takes no CXL paths.
@@ -3880,6 +4211,8 @@ static bool vfio_cxl_setup(VFIOPCIDevice *vdev, Error **errp)
     cxl->dpa_size = mem_info->size;
     cxl->comp_bar = cap->bar;
     cxl->hdm_offset = cap->offset;
+    cxl->dvsec_offset = vfio_cxl_find_device_dvsec(&vdev->parent_obj);
+    cxl->af_offset = pci_find_capability(&vdev->parent_obj, PCI_CAP_ID_AF);
 
     if (!vfio_cxl_check_topology(vdev, errp)) {
         return false;
@@ -3903,6 +4236,26 @@ static bool vfio_cxl_setup(VFIOPCIDevice *vdev, Error **errp)
                     "performance may be slow", vbasedev->name);
     }
 
+    /*
+     * Trap the HDM decoder block: overlay it, priority 1, over the directly
+     * mapped component BAR, so guest decoder accesses reach the kernel FSM and
+     * the commit becomes visible to QEMU.
+     */
+    if (!vdev->bars[cxl->comp_bar].mr) {
+        error_setg(errp, "vfio-cxl: %s: component BAR %u is not present",
+                   vbasedev->name, cxl->comp_bar);
+        goto err;
+    }
+    if (vfio_region_setup_with_ops(OBJECT(vdev), vbasedev,
+                                   &cxl->comp_regs_region,
+                                   cxl->comp_regs_region_index, "cxl-comp-regs",
+                                   &vfio_cxl_comp_regs_ops, errp)) {
+        goto err;
+    }
+    memory_region_add_subregion_overlap(vdev->bars[cxl->comp_bar].mr,
+                                        cxl->hdm_offset,
+                                        cxl->comp_regs_region.mem, 1);
+
     if (DEVICE(vdev)->hotplugged) {
         /*
          * The machine is already up, so the CFMWS windows are placed and the
@@ -3910,9 +4263,7 @@ static bool vfio_cxl_setup(VFIOPCIDevice *vdev, Error **errp)
          * device_add fails cleanly instead of aborting the running VM.
          */
         if (!vfio_cxl_do_bind_fmws(vdev, errp)) {
-            vfio_region_exit(&cxl->mem_region);
-            vfio_region_finalize(&cxl->mem_region);
-            return false;
+            goto err;
         }
     } else {
         cxl->machine_done.notify = vfio_cxl_bind_fmws;
@@ -3922,6 +4273,10 @@ static bool vfio_cxl_setup(VFIOPCIDevice *vdev, Error **errp)
     cxl->enabled = true;
 
     return true;
+
+err:
+    vfio_cxl_teardown(vdev);
+    return false;
 }
 
 static void vfio_cxl_teardown(VFIOPCIDevice *vdev)
@@ -3932,14 +4287,25 @@ static void vfio_cxl_teardown(VFIOPCIDevice *vdev)
         return;
     }
 
-    if (cxl->machine_done.notify) {
-        qemu_remove_machine_init_done_notifier(&cxl->machine_done);
-        cxl->machine_done.notify = NULL;
+    if (cxl->comp_regs_region.mem) {
+        if (vdev->bars[cxl->comp_bar].mr) {
+            memory_region_del_subregion(vdev->bars[cxl->comp_bar].mr,
+                                        cxl->comp_regs_region.mem);
+        }
+        vfio_region_exit(&cxl->comp_regs_region);
+        vfio_region_finalize(&cxl->comp_regs_region);
     }
+
+    vfio_cxl_unmap_mem(vdev);
 
     if (cxl->mem_region.mem) {
         vfio_region_exit(&cxl->mem_region);
         vfio_region_finalize(&cxl->mem_region);
+    }
+
+    if (cxl->machine_done.notify) {
+        qemu_remove_machine_init_done_notifier(&cxl->machine_done);
+        cxl->machine_done.notify = NULL;
     }
 }
 
@@ -4136,6 +4502,14 @@ static void vfio_exitfn(PCIDevice *pdev)
     vfio_pci_teardown_msi(vdev);
     vfio_pci_disable_rp_atomics(vdev);
     vfio_pci_bars_exit(vdev);
+    /*
+     * The committed HDM overlay is a subregion of system memory owned by this
+     * device, so it holds a reference that would keep the object alive past
+     * unrealize and block instance_finalize (where vfio_cxl_teardown otherwise
+     * runs). Drop it here; the call is idempotent for a device that never
+     * mapped or is not CXL.
+     */
+    vfio_cxl_unmap_mem(vdev);
     vfio_migration_exit(vbasedev);
     if (!vbasedev->mdev) {
         pci_device_unset_iommu_device(pdev);
