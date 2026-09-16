@@ -23,6 +23,7 @@
 #include "hw/pci/pci_host.h"
 #include "hw/cxl/cxl.h"
 #include "hw/cxl/cxl_host.h"
+#include "hw/acpi/pci.h"
 #include "hw/mem/memory-device.h"
 #include "hw/acpi/acpi.h"
 #include "hw/acpi/aml-build.h"
@@ -320,11 +321,20 @@ static Aml *__build_cxl_osc_method(void)
     return method;
 }
 
-void build_cxl_osc_method(Aml *dev)
+void acpi_dsdt_add_cxl_host_bridge_methods(Aml *dev, bool preserve_config)
 {
     aml_append(dev, aml_name_decl("SUPP", aml_int(0)));
     aml_append(dev, aml_name_decl("CTRL", aml_int(0)));
     aml_append(dev, aml_name_decl("SUPC", aml_int(0)));
     aml_append(dev, aml_name_decl("CTRC", aml_int(0)));
     aml_append(dev, __build_cxl_osc_method());
+    /*
+     * Only a machine that asks OSPM to preserve the firmware PCI configuration
+     * needs the _DSM (function 5). Emitting it unconditionally would change the
+     * DSDT of machines that pass preserve_config=false (x86 q35), breaking the
+     * golden-table tests for no functional gain, so gate it on preserve_config.
+     */
+    if (preserve_config) {
+        aml_append(dev, build_pci_host_bridge_dsm_method(preserve_config));
+    }
 }
