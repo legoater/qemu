@@ -363,6 +363,8 @@ static int vfio_user_recv_one(VFIOUserProxy *proxy, Error **errp)
         }
 
         memcpy(msg->fds->fds, fdp, numfds * sizeof(int));
+    } else if (msg->fds != NULL) {
+        msg->fds->recv_fds = 0;
     }
 
     /*
@@ -740,6 +742,10 @@ bool vfio_user_send_wait(VFIOUserProxy *proxy, VFIOUserHdr *hdr,
 
     qemu_mutex_unlock(&proxy->lock);
 
+    if (!ok && fds != NULL) {
+        fds->recv_fds = 0;
+    }
+
     return ok;
 }
 
@@ -867,17 +873,30 @@ void vfio_user_send_error(VFIOUserProxy *proxy, VFIOUserHdr *hdr, int error)
 }
 
 /*
+ * Close and free received FDs.
+ */
+void vfio_user_free_fds(VFIOUserFDs *fds)
+{
+    int i;
+
+    if (!fds) {
+        return;
+    }
+
+    for (i = 0; i < fds->recv_fds; i++) {
+        if (fds->fds[i] >= 0) {
+            close(fds->fds[i]);
+        }
+    }
+    g_free(fds);
+}
+
+/*
  * Close FDs erroneously received in an incoming request.
  */
 void vfio_user_putfds(VFIOUserMsg *msg)
 {
-    VFIOUserFDs *fds = msg->fds;
-    int i;
-
-    for (i = 0; i < fds->recv_fds; i++) {
-        close(fds->fds[i]);
-    }
-    g_free(fds);
+    vfio_user_free_fds(msg->fds);
     msg->fds = NULL;
 }
 
@@ -967,6 +986,7 @@ void vfio_user_set_handler(VFIODevice *vbasedev,
 void vfio_user_disconnect(VFIOUserProxy *proxy)
 {
     VFIOUserMsg *r1, *r2;
+    int i;
 
     qemu_mutex_lock(&proxy->lock);
 
@@ -1025,6 +1045,10 @@ void vfio_user_disconnect(VFIOUserProxy *proxy)
     if (QLIST_EMPTY(&vfio_user_sockets)) {
         iothread_destroy(vfio_user_iothread);
         vfio_user_iothread = NULL;
+    }
+
+    for (i = 0; i < VFIO_USER_MAX_REGIONS; i++) {
+        vfio_user_free_fds(proxy->region_fds[i]);
     }
 
     g_free(proxy->sockname);
