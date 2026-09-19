@@ -902,6 +902,10 @@ igb_start_xmit(IGBCore *core, const IGB_TxRing *txr)
         d = core->owner;
     }
 
+    if (!(d->config[PCI_COMMAND] & PCI_COMMAND_MASTER)) {
+        return;
+    }
+
     while (!igb_ring_empty(core, txi)) {
         base = igb_ring_head_descr(core, txi);
 
