@@ -33,12 +33,14 @@ static void rp_write_config(PCIDevice *d, uint32_t address,
     uint32_t root_cmd =
         pci_get_long(d->config + d->exp.aer_cap + PCI_ERR_ROOT_COMMAND);
     uint16_t slt_ctl, slt_sta;
+    uint16_t bctl = pci_get_word(d->config + PCI_BRIDGE_CONTROL);
 
     pcie_cap_slot_get(d, &slt_ctl, &slt_sta);
 
     pci_bridge_write_config(d, address, val, len);
     rp_aer_vector_update(d);
     pcie_cap_slot_write_config(d, slt_ctl, slt_sta, address, val, len);
+    pcie_cap_bridge_write_config(d, bctl, address, val, len);
     pcie_aer_write_config(d, address, val, len);
     pcie_aer_root_write_config(d, address, val, len, root_cmd);
 }

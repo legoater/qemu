@@ -928,6 +928,32 @@ void pcie_cap_slot_push_attention_button(PCIDevice *dev)
     pcie_cap_slot_event(dev, PCI_EXP_HP_EV_ABP);
 }
 
+void pcie_cap_bridge_write_config(PCIDevice *dev,
+                                  uint16_t oldctl,
+                                  uint32_t addr, uint32_t val, int len)
+{
+    uint16_t newctl = pci_get_word(dev->config + PCI_BRIDGE_CONTROL);
+
+    if (oldctl & ~newctl & PCI_BRIDGE_CTL_BUS_RESET) {
+        /*
+         * On 1->0 transition (SBR de-assertion), re-establish the data
+         * link. If the port reports DLLLA and a device is still present
+         * on the secondary bus, re-assert DLLLA to model the link coming
+         * back up after reset.
+         */
+        PCIBridge *s = PCI_BRIDGE(dev);
+        uint8_t *exp_cap = dev->config + dev->exp.exp_cap;
+        uint32_t lnkcap = pci_get_long(exp_cap + PCI_EXP_LNKCAP);
+
+        if (s->sec_bus.devices[0] &&
+            (dev->cap_present & QEMU_PCIE_LNKSTA_DLLLA ||
+             (lnkcap & PCI_EXP_LNKCAP_DLLLARC))) {
+            pci_word_test_and_set_mask(exp_cap + PCI_EXP_LNKSTA,
+                                       PCI_EXP_LNKSTA_DLLLA);
+        }
+    }
+}
+
 /* root control/capabilities/status. PME isn't emulated for now */
 void pcie_cap_root_init(PCIDevice *dev)
 {
