@@ -23,8 +23,6 @@
 #include "system/system.h"
 #include "target/arm/cpu-qom.h"
 
-#define ASPEED_SOC_IOMEM_SIZE       0x00200000
-
 static const hwaddr aspeed_soc_ast2400_memmap[] = {
     [ASPEED_DEV_SPI_BOOT]  = 0x00000000,
     [ASPEED_DEV_IOMEM]  = 0x1E600000,
@@ -134,6 +132,12 @@ static const int aspeed_soc_ast2400_irqmap[] = {
 
 #define aspeed_soc_ast2500_irqmap aspeed_soc_ast2400_irqmap
 
+static const AspeedUnimpDevice aspeed_soc_ast2400_unimp_devs[] = {
+    { "iomem", "aspeed.io",    ASPEED_DEV_IOMEM, 0x00200000 },
+    { "video", "aspeed.video", ASPEED_DEV_VIDEO, 0x1000 },
+};
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(aspeed_soc_ast2400_unimp_devs) > ASPEED_UNIMP_NUM);
+
 static qemu_irq aspeed_soc_ast2400_get_irq(AspeedSoCState *s, int dev)
 {
     Aspeed2400SoCState *a = ASPEED2400_SOC(s);
@@ -240,8 +244,10 @@ static void aspeed_ast2400_soc_init(Object *obj)
     snprintf(typename, sizeof(typename), "aspeed.hace-%s", socname);
     object_initialize_child(obj, "hace", &s->hace, typename);
 
-    object_initialize_child(obj, "iomem", &s->iomem, TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "video", &s->video, TYPE_UNIMPLEMENTED_DEVICE);
+    for (i = 0; i < ARRAY_SIZE(aspeed_soc_ast2400_unimp_devs); i++) {
+        object_initialize_child(obj, aspeed_soc_ast2400_unimp_devs[i].qom_name,
+                                &s->unimp[i], TYPE_UNIMPLEMENTED_DEVICE);
+    }
 }
 
 static void aspeed_ast2400_soc_realize(DeviceState *dev, Error **errp)
@@ -251,6 +257,7 @@ static void aspeed_ast2400_soc_realize(DeviceState *dev, Error **errp)
     AspeedSoCState *s = ASPEED_SOC(dev);
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
     g_autofree char *sram_name = NULL;
+    const AspeedUnimpDevice *unimp;
     int uart;
 
     /* Default boot region (SPI memory or ROMs) */
@@ -259,16 +266,14 @@ static void aspeed_ast2400_soc_realize(DeviceState *dev, Error **errp)
     memory_region_add_subregion(s->memory, sc->memmap[ASPEED_DEV_SPI_BOOT],
                                 &s->spi_boot_container);
 
-    /* IO space */
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->iomem),
-                                  "aspeed.io",
-                                  sc->memmap[ASPEED_DEV_IOMEM],
-                                  ASPEED_SOC_IOMEM_SIZE);
-
-    /* Video engine stub */
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->video),
-                                  "aspeed.video",
-                                  sc->memmap[ASPEED_DEV_VIDEO], 0x1000);
+    /* Unimplemented devices */
+    for (i = 0; i < ARRAY_SIZE(aspeed_soc_ast2400_unimp_devs); i++) {
+        unimp = &aspeed_soc_ast2400_unimp_devs[i];
+        aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->unimp[i]),
+                                      unimp->region_name,
+                                      sc->memmap[unimp->memmap_idx],
+                                      unimp->size);
+    }
 
     /* CPU */
     for (i = 0; i < sc->num_cpus; i++) {
