@@ -23,6 +23,7 @@ struct AspeedCoprocessorState {
     Clock *sysclk;
 
     AspeedTimerCtrlState timerctrl;
+    UnimplementedDeviceState unimp[ASPEED_UNIMP_NUM];
     SerialMM *uart;
     int uart_dev;
 };
