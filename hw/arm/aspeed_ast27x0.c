@@ -24,10 +24,6 @@
 #include "qobject/qlist.h"
 #include "qemu/log.h"
 
-#define AST2700_SOC_IO_SIZE          0x00FE0000
-#define AST2700_SOC_IOMEM_SIZE       0x01000000
-#define AST2700_SOC_DPMCU_SIZE       0x00040000
-
 static const hwaddr aspeed_soc_ast2700_memmap[] = {
     [ASPEED_DEV_VBOOTROM]  =  0x00000000,
     [ASPEED_DEV_IOMEM]     =  0x00020000,
@@ -262,6 +258,14 @@ static const struct gic_intc_irq_info ast2700_gic_intcmap[] = {
     {200, 3, 0, ast2700_gic200_intcmap},
     {201, 3, 1, ast2700_gic201_intcmap},
 };
+
+static const AspeedUnimpDevice aspeed_soc_ast2700_unimp_devs[] = {
+    { "dpmcu",  "aspeed.dpmcu",  ASPEED_DEV_DPMCU,  0x00040000 },
+    { "iomem",  "aspeed.io",     ASPEED_DEV_IOMEM,  0x00FE0000 },
+    { "iomem0", "aspeed.iomem0", ASPEED_DEV_IOMEM0, 0x01000000 },
+    { "iomem1", "aspeed.iomem1", ASPEED_DEV_IOMEM1, 0x01000000 },
+};
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(aspeed_soc_ast2700_unimp_devs) > ASPEED_UNIMP_NUM);
 
 static qemu_irq aspeed_soc_ast2700_get_irq(AspeedSoCState *s, int dev)
 {
@@ -559,14 +563,10 @@ static void aspeed_soc_ast2700_init(Object *obj)
                              sc->silicon_rev);
     }
 
-    object_initialize_child(obj, "dpmcu", &s->dpmcu,
-                            TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "iomem", &s->iomem,
-                            TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "iomem0", &s->iomem0,
-                            TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "iomem1", &s->iomem1,
-                            TYPE_UNIMPLEMENTED_DEVICE);
+    for (i = 0; i < ARRAY_SIZE(aspeed_soc_ast2700_unimp_devs); i++) {
+        object_initialize_child(obj, aspeed_soc_ast2700_unimp_devs[i].qom_name,
+                                &s->unimp[i], TYPE_UNIMPLEMENTED_DEVICE);
+    }
 }
 
 /*
@@ -699,6 +699,7 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
     AspeedINTCClass *ic = ASPEED_INTC_GET_CLASS(&a->intc[0]);
     AspeedINTCClass *icio = ASPEED_INTC_GET_CLASS(&a->intc[1]);
+    const AspeedUnimpDevice *unimp;
     g_autofree char *name = NULL;
     qemu_irq irq;
     int uart;
@@ -1137,22 +1138,14 @@ static void aspeed_soc_ast2700_realize(DeviceState *dev, Error **errp)
         }
     }
 
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->dpmcu),
-                                  "aspeed.dpmcu",
-                                  sc->memmap[ASPEED_DEV_DPMCU],
-                                  AST2700_SOC_DPMCU_SIZE);
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->iomem),
-                                  "aspeed.io",
-                                  sc->memmap[ASPEED_DEV_IOMEM],
-                                  AST2700_SOC_IO_SIZE);
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->iomem0),
-                                  "aspeed.iomem0",
-                                  sc->memmap[ASPEED_DEV_IOMEM0],
-                                  AST2700_SOC_IOMEM_SIZE);
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->iomem1),
-                                  "aspeed.iomem1",
-                                  sc->memmap[ASPEED_DEV_IOMEM1],
-                                  AST2700_SOC_IOMEM_SIZE);
+    /* Unimplemented devices */
+    for (i = 0; i < ARRAY_SIZE(aspeed_soc_ast2700_unimp_devs); i++) {
+        unimp = &aspeed_soc_ast2700_unimp_devs[i];
+        aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->unimp[i]),
+                                      unimp->region_name,
+                                      sc->memmap[unimp->memmap_idx],
+                                      unimp->size);
+    }
 }
 
 static void aspeed_soc_ast2700a1_class_init(ObjectClass *oc, const void *data)
