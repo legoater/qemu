@@ -64,6 +64,14 @@
 #define ASPEED_INTC_NUM  2
 #define ASPEED_IOEXP_NUM 2
 #define ASPEED_SRAM_NUM 2
+#define ASPEED_UNIMP_NUM 10
+
+typedef struct AspeedUnimpDevice {
+    const char *qom_name;
+    const char *region_name;
+    int memmap_idx;
+    uint64_t size;
+} AspeedUnimpDevice;
 
 struct AspeedSoCState {
     DeviceState parent;
@@ -119,6 +127,7 @@ struct AspeedSoCState {
     UnimplementedDeviceState espi;
     UnimplementedDeviceState udc;
     UnimplementedDeviceState jtag[ASPEED_JTAG_NUM];
+    UnimplementedDeviceState unimp[ASPEED_UNIMP_NUM];
     AspeedAPB2OPBState fsi[2];
     AspeedLTPIState ltpi_ctrl[ASPEED_IOEXP_NUM];
     AspeedAST1700SoCState ioexp[ASPEED_IOEXP_NUM];
