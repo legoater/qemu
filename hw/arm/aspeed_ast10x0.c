@@ -17,8 +17,6 @@
 #include "hw/misc/unimp.h"
 #include "hw/arm/aspeed_soc.h"
 
-#define ASPEED_SOC_IOMEM_SIZE 0x00200000
-
 static const hwaddr aspeed_soc_ast1030_memmap[] = {
     [ASPEED_DEV_SRAM0]     = 0x00000000,
     [ASPEED_DEV_SRAM1]     = 0x79000000, /* SEC SRAM */
@@ -99,6 +97,17 @@ static const int aspeed_soc_ast1030_irqmap[] = {
     [ASPEED_DEV_JTAG1]     = 53,
 };
 
+static const AspeedUnimpDevice aspeed_soc_ast10x0_unimp_devs[] = {
+    { "iomem",   "aspeed.io",     ASPEED_DEV_IOMEM,   0x00200000 },
+    { "pwm",     "aspeed.pwm",    ASPEED_DEV_PWM,     0x100 },
+    { "espi",    "aspeed.espi",   ASPEED_DEV_ESPI,    0x800 },
+    { "udc",     "aspeed.udc",    ASPEED_DEV_UDC,     0x1000 },
+    { "sgpiom",  "aspeed.sgpiom", ASPEED_DEV_SGPIOM0, 0x100 },
+    { "jtag[0]", "aspeed.jtag0",  ASPEED_DEV_JTAG0,   0x20 },
+    { "jtag[1]", "aspeed.jtag1",  ASPEED_DEV_JTAG1,   0x20 },
+};
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(aspeed_soc_ast10x0_unimp_devs) > ASPEED_UNIMP_NUM);
+
 static qemu_irq aspeed_soc_ast1030_get_irq(AspeedSoCState *s, int dev)
 {
     Aspeed10x0SoCState *a = ASPEED10X0_SOC(s);
@@ -162,16 +171,10 @@ static void aspeed_soc_ast10x0_init(Object *obj, const char *socname)
     snprintf(typename, sizeof(typename), "aspeed.hace-%s", socname);
     object_initialize_child(obj, "hace", &s->hace, typename);
 
-    object_initialize_child(obj, "iomem", &s->iomem, TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "pwm", &s->pwm, TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "espi", &s->espi, TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "udc", &s->udc, TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "sgpiom", &s->sgpiom,
-                            TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "jtag[0]", &s->jtag[0],
-                            TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "jtag[1]", &s->jtag[1],
-                            TYPE_UNIMPLEMENTED_DEVICE);
+    for (i = 0; i < ARRAY_SIZE(aspeed_soc_ast10x0_unimp_devs); i++) {
+        object_initialize_child(obj, aspeed_soc_ast10x0_unimp_devs[i].qom_name,
+                                &s->unimp[i], TYPE_UNIMPLEMENTED_DEVICE);
+    }
 }
 
 static void aspeed_soc_ast1030_init(Object *obj)
@@ -209,17 +212,22 @@ static bool aspeed_soc_ast10x0_realize(Aspeed10x0SoCState *a, Error **errp)
     int uart;
     int i;
     g_autofree char *sram_name = NULL;
+    const AspeedUnimpDevice *unimp;
 
     if (!clock_has_source(s->sysclk)) {
         error_setg(errp, "sysclk clock must be wired up by the board code");
         return false;
     }
 
-    /* General I/O memory space to catch all unimplemented device */
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->iomem),
-                                  "aspeed.io",
-                                  sc->memmap[ASPEED_DEV_IOMEM],
-                                  ASPEED_SOC_IOMEM_SIZE);
+    /* Unimplemented devices */
+    for (i = 0; i < ARRAY_SIZE(aspeed_soc_ast10x0_unimp_devs); i++) {
+        unimp = &aspeed_soc_ast10x0_unimp_devs[i];
+        aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->unimp[i]),
+                                      unimp->region_name,
+                                      sc->memmap[unimp->memmap_idx],
+                                      unimp->size);
+    }
+
     /* AST10x0 CPU Core */
     armv7m = DEVICE(&a->armv7m);
     qdev_prop_set_uint32(armv7m, "num-irq", 256);
@@ -393,28 +401,6 @@ static bool aspeed_soc_ast10x0_realize(Aspeed10x0SoCState *a, Error **errp)
                     sc->memmap[ASPEED_DEV_GPIO]);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->gpio), 0,
                        aspeed_soc_ast1030_get_irq(s, ASPEED_DEV_GPIO));
-
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->pwm),
-                                  "aspeed.pwm",
-                                  sc->memmap[ASPEED_DEV_PWM], 0x100);
-
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->espi),
-                                  "aspeed.espi",
-                                  sc->memmap[ASPEED_DEV_ESPI], 0x800);
-
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->udc),
-                                  "aspeed.udc",
-                                  sc->memmap[ASPEED_DEV_UDC], 0x1000);
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->sgpiom),
-                                  "aspeed.sgpiom",
-                                  sc->memmap[ASPEED_DEV_SGPIOM0], 0x100);
-
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->jtag[0]),
-                                  "aspeed.jtag",
-                                  sc->memmap[ASPEED_DEV_JTAG0], 0x20);
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->jtag[1]),
-                                  "aspeed.jtag",
-                                  sc->memmap[ASPEED_DEV_JTAG1], 0x20);
 
     return true;
 }
