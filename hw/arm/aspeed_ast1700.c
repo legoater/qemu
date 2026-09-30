@@ -12,10 +12,10 @@
 #include "qapi/error.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/arm/aspeed_ast1700.h"
+#include "hw/arm/aspeed_soc.h"
 
 #define AST2700_SOC_LTPI_SIZE        0x01000000
 #define AST1700_SOC_SRAM_SIZE        0x00040000
-#define AST1700_SOC_I3C_SIZE         0x00010000
 
 enum {
     ASPEED_AST1700_DEV_SPI0,
@@ -51,11 +51,18 @@ static const hwaddr aspeed_ast1700_io_memmap[] = {
     [ASPEED_AST1700_DEV_SPI0_MEM]  =  0x04000000,
 };
 
+static const AspeedUnimpDevice aspeed_ast1700_unimp_devs[] = {
+    { "ioexp-i3c", "ioexp-i3c", ASPEED_AST1700_DEV_I3C, 0x00010000 },
+};
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(aspeed_ast1700_unimp_devs) > AST1700_UNIMP_NUM);
+
 static void aspeed_ast1700_realize(DeviceState *dev, Error **errp)
 {
     AspeedAST1700SoCState *s = ASPEED_AST1700(dev);
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
+    const AspeedUnimpDevice *unimp;
     char dev_name[32];
+    int i;
 
     if (!s->dram_mr) {
         error_setg(errp, TYPE_ASPEED_AST1700 ": 'dram' link not set");
@@ -156,7 +163,7 @@ static void aspeed_ast1700_realize(DeviceState *dev, Error **errp)
                         sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->ltpi), 0));
 
     /* SGPIOM */
-    for (int i = 0; i < AST1700_SGPIO_NUM; i++) {
+    for (i = 0; i < AST1700_SGPIO_NUM; i++) {
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->sgpiom[i]), errp)) {
             return;
         }
@@ -166,7 +173,7 @@ static void aspeed_ast1700_realize(DeviceState *dev, Error **errp)
     }
 
     /* WDT */
-    for (int i = 0; i < AST1700_WDT_NUM; i++) {
+    for (i = 0; i < AST1700_WDT_NUM; i++) {
         AspeedWDTClass *awc = ASPEED_WDT_GET_CLASS(&s->wdt[i]);
         hwaddr wdt_offset = aspeed_ast1700_io_memmap[ASPEED_AST1700_DEV_WDT] +
                             i * awc->iosize;
@@ -181,19 +188,20 @@ static void aspeed_ast1700_realize(DeviceState *dev, Error **errp)
                         sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->wdt[i]), 0));
     }
 
-    /* I3C */
-    qdev_prop_set_string(DEVICE(&s->i3c), "name", "ioexp-i3c");
-    qdev_prop_set_uint64(DEVICE(&s->i3c), "size", AST1700_SOC_I3C_SIZE);
-    sysbus_realize(SYS_BUS_DEVICE(&s->i3c), errp);
-    memory_region_add_subregion_overlap(&s->iomem,
-                        aspeed_ast1700_io_memmap[ASPEED_AST1700_DEV_I3C],
-                        sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->i3c), 0),
-                        -1000);
+    /* Unimplemented devices */
+    for (i = 0; i < ARRAY_SIZE(aspeed_ast1700_unimp_devs); i++) {
+        unimp = &aspeed_ast1700_unimp_devs[i];
+        aspeed_mmio_map_unimplemented(&s->iomem, SYS_BUS_DEVICE(&s->unimp[i]),
+                        unimp->region_name,
+                        aspeed_ast1700_io_memmap[unimp->memmap_idx],
+                        unimp->size);
+    }
 }
 
 static void aspeed_ast1700_instance_init(Object *obj)
 {
     AspeedAST1700SoCState *s = ASPEED_AST1700(obj);
+    int i;
 
     /* UART */
     object_initialize_child(obj, "uart", &s->uart,
@@ -227,20 +235,22 @@ static void aspeed_ast1700_instance_init(Object *obj)
                             &s->ltpi, TYPE_ASPEED_LTPI);
 
     /* SGPIOM */
-    for (int i = 0; i < AST1700_SGPIO_NUM; i++) {
+    for (i = 0; i < AST1700_SGPIO_NUM; i++) {
         object_initialize_child(obj, "ioexp-sgpiom[*]", &s->sgpiom[i],
                                 "aspeed.sgpio-ast2700");
     }
 
     /* WDT */
-    for (int i = 0; i < AST1700_WDT_NUM; i++) {
+    for (i = 0; i < AST1700_WDT_NUM; i++) {
         object_initialize_child(obj, "ioexp-wdt[*]",
                                 &s->wdt[i], "aspeed.wdt-ast2700");
     }
 
-    /* I3C */
-    object_initialize_child(obj, "ioexp-i3c", &s->i3c,
-                            TYPE_UNIMPLEMENTED_DEVICE);
+    /* Unimplemented devices */
+    for (i = 0; i < ARRAY_SIZE(aspeed_ast1700_unimp_devs); i++) {
+        object_initialize_child(obj, aspeed_ast1700_unimp_devs[i].qom_name,
+                                &s->unimp[i], TYPE_UNIMPLEMENTED_DEVICE);
+    }
 
     return;
 }

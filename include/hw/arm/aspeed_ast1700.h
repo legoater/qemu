@@ -23,6 +23,7 @@
 
 #define AST1700_SGPIO_NUM            2
 #define AST1700_WDT_NUM              9
+#define AST1700_UNIMP_NUM            1
 
 #define TYPE_ASPEED_AST1700 "aspeed.ast1700"
 
@@ -49,6 +50,7 @@ struct AspeedAST1700SoCState {
     AspeedWDTState wdt[AST1700_WDT_NUM];
 
     UnimplementedDeviceState i3c;
+    UnimplementedDeviceState unimp[AST1700_UNIMP_NUM];
 };
 
 #endif /* ASPEED_AST1700_H */
