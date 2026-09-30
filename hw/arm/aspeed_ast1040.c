@@ -81,6 +81,15 @@ static const int aspeed_soc_ast1040_irqmap[] = {
     [ASPEED_DEV_PECI]      = 164,
 };
 
+static const AspeedUnimpDevice aspeed_soc_ast1040_unimp_devs[] = {
+    { "pwm",     "aspeed.pwm",   ASPEED_DEV_PWM,   0x10000 },
+    { "espi",    "aspeed.espi",  ASPEED_DEV_ESPI,  0x1000 },
+    { "udc",     "aspeed.udc",   ASPEED_DEV_UDC,   0x4000 },
+    { "jtag[0]", "aspeed.jtag0", ASPEED_DEV_JTAG0, 0x100 },
+    { "jtag[1]", "aspeed.jtag1", ASPEED_DEV_JTAG1, 0x100 },
+};
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(aspeed_soc_ast1040_unimp_devs) > ASPEED_UNIMP_NUM);
+
 static qemu_irq aspeed_soc_ast1040_get_irq(AspeedSoCState *s, int dev)
 {
     Aspeed10x0SoCState *a = ASPEED10X0_SOC(s);
@@ -124,13 +133,10 @@ static void aspeed_soc_ast1040_init(Object *obj)
                                 "aspeed.wdt-ast2700");
     }
 
-    object_initialize_child(obj, "pwm", &s->pwm, TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "espi", &s->espi, TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "udc", &s->udc, TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "jtag[0]", &s->jtag[0],
-                            TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "jtag[1]", &s->jtag[1],
-                            TYPE_UNIMPLEMENTED_DEVICE);
+    for (i = 0; i < ARRAY_SIZE(aspeed_soc_ast1040_unimp_devs); i++) {
+        object_initialize_child(obj, aspeed_soc_ast1040_unimp_devs[i].qom_name,
+                                &s->unimp[i], TYPE_UNIMPLEMENTED_DEVICE);
+    }
 }
 
 static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
@@ -140,6 +146,7 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
     g_autofree char *hyperram_name = NULL;
     g_autofree char *sram_name = NULL;
+    const AspeedUnimpDevice *unimp;
     DeviceState *armv7m;
     Error *err = NULL;
     int uart;
@@ -267,26 +274,14 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
         aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->wdt[i]), 0, wdt_offset);
     }
 
-    /* Unimplemented peripherals */
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->pwm),
-                                  "aspeed.pwm",
-                                  sc->memmap[ASPEED_DEV_PWM], 0x10000);
-
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->espi),
-                                  "aspeed.espi",
-                                  sc->memmap[ASPEED_DEV_ESPI], 0x1000);
-
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->udc),
-                                  "aspeed.udc",
-                                  sc->memmap[ASPEED_DEV_UDC], 0x4000);
-
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->jtag[0]),
-                                  "aspeed.jtag0",
-                                  sc->memmap[ASPEED_DEV_JTAG0], 0x100);
-
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->jtag[1]),
-                                  "aspeed.jtag1",
-                                  sc->memmap[ASPEED_DEV_JTAG1], 0x100);
+    /* Unimplemented devices */
+    for (i = 0; i < ARRAY_SIZE(aspeed_soc_ast1040_unimp_devs); i++) {
+        unimp = &aspeed_soc_ast1040_unimp_devs[i];
+        aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->unimp[i]),
+                                      unimp->region_name,
+                                      sc->memmap[unimp->memmap_idx],
+                                      unimp->size);
+    }
 }
 
 static void aspeed_soc_ast1040_class_init(ObjectClass *klass, const void *data)
