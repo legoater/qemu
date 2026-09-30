@@ -49,7 +49,6 @@ struct AspeedAST1700SoCState {
     AspeedPWMState pwm;
     AspeedWDTState wdt[AST1700_WDT_NUM];
 
-    UnimplementedDeviceState i3c;
     UnimplementedDeviceState unimp[AST1700_UNIMP_NUM];
 };
 
