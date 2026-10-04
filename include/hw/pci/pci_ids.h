@@ -55,6 +55,7 @@
 #define PCI_CLASS_MEMORY_RAM             0x0500
 #define PCI_CLASS_MEMORY_FLASH           0x0501
 #define PCI_CLASS_MEMORY_CXL             0x0502
+#define PCI_CLASS_CXL_QEMU_ACCEL         0x0503
 #define PCI_CLASS_MEMORY_OTHER           0x0580
 
 #define PCI_BASE_CLASS_BRIDGE            0x06
