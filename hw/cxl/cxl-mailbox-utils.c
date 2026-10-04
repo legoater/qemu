@@ -258,12 +258,23 @@ static CXLRetCode cmd_tunnel_management_cmd(const struct cxl_cmd *cmd,
     return CXL_MBOX_SUCCESS;
 }
 
+static CXLDeviceState *cxl_cci_get_dstate(CXLCCI *cci)
+{
+    if (object_dynamic_cast(OBJECT(cci->d), TYPE_CXL_TYPE3)) {
+        return &CXL_TYPE3(cci->d)->cxl_dstate;
+    } else if (object_dynamic_cast(OBJECT(cci->d),
+                                   TYPE_CXL_SWITCH_MAILBOX_CCI)) {
+        return &CXL_SWITCH_MAILBOX_CCI(cci->d)->cxl_dstate;
+    }
+    g_assert_not_reached();
+}
+
 static CXLRetCode cmd_events_get_records(const struct cxl_cmd *cmd,
                                          uint8_t *payload_in, size_t len_in,
                                          uint8_t *payload_out, size_t *len_out,
                                          CXLCCI *cci)
 {
-    CXLDeviceState *cxlds = &CXL_TYPE3(cci->d)->cxl_dstate;
+    CXLDeviceState *cxlds = cxl_cci_get_dstate(cci);
     CXLGetEventPayload *pl;
     uint8_t log_type;
     int max_recs;
@@ -292,7 +303,7 @@ static CXLRetCode cmd_events_clear_records(const struct cxl_cmd *cmd,
                                            size_t *len_out,
                                            CXLCCI *cci)
 {
-    CXLDeviceState *cxlds = &CXL_TYPE3(cci->d)->cxl_dstate;
+    CXLDeviceState *cxlds = cxl_cci_get_dstate(cci);
     CXLClearEventPayload *pl;
 
     pl = (CXLClearEventPayload *)payload_in;
@@ -313,7 +324,7 @@ static CXLRetCode cmd_events_get_interrupt_policy(const struct cxl_cmd *cmd,
                                                   size_t *len_out,
                                                   CXLCCI *cci)
 {
-    CXLDeviceState *cxlds = &CXL_TYPE3(cci->d)->cxl_dstate;
+    CXLDeviceState *cxlds = cxl_cci_get_dstate(cci);
     CXLEventInterruptPolicy *policy;
     CXLEventLog *log;
 
@@ -356,7 +367,7 @@ static CXLRetCode cmd_events_set_interrupt_policy(const struct cxl_cmd *cmd,
                                                   size_t *len_out,
                                                   CXLCCI *cci)
 {
-    CXLDeviceState *cxlds = &CXL_TYPE3(cci->d)->cxl_dstate;
+    CXLDeviceState *cxlds = cxl_cci_get_dstate(cci);
     CXLEventInterruptPolicy *policy;
     CXLEventLog *log;
 
@@ -1116,7 +1127,7 @@ static CXLRetCode cmd_timestamp_get(const struct cxl_cmd *cmd,
                                     size_t *len_out,
                                     CXLCCI *cci)
 {
-    CXLDeviceState *cxl_dstate = &CXL_TYPE3(cci->d)->cxl_dstate;
+    CXLDeviceState *cxl_dstate = cxl_cci_get_dstate(cci);
     uint64_t final_time = cxl_device_get_timestamp(cxl_dstate);
 
     stq_le_p(payload_out, final_time);
@@ -1133,7 +1144,7 @@ static CXLRetCode cmd_timestamp_set(const struct cxl_cmd *cmd,
                                     size_t *len_out,
                                     CXLCCI *cci)
 {
-    CXLDeviceState *cxl_dstate = &CXL_TYPE3(cci->d)->cxl_dstate;
+    CXLDeviceState *cxl_dstate = cxl_cci_get_dstate(cci);
 
     cxl_dstate->timestamp.set = true;
     cxl_dstate->timestamp.last_set = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
