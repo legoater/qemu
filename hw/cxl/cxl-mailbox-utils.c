@@ -265,6 +265,8 @@ static CXLDeviceState *cxl_cci_get_dstate(CXLCCI *cci)
     } else if (object_dynamic_cast(OBJECT(cci->d),
                                    TYPE_CXL_SWITCH_MAILBOX_CCI)) {
         return &CXL_SWITCH_MAILBOX_CCI(cci->d)->cxl_dstate;
+    } else if (object_dynamic_cast(OBJECT(cci->d), TYPE_CXL_ACCEL)) {
+        return &CXL_ACCEL(cci->d)->cxl_dstate;
     }
     g_assert_not_reached();
 }
@@ -4896,5 +4898,78 @@ void cxl_initialize_t3_fm_owned_ld_mctpcci(CXLCCI *cci, DeviceState *d,
     }
     cci->d = d;
     cci->intf = intf;
+    cxl_init_cci(cci, payload_max);
+}
+
+static CXLRetCode cmd_identify_memory_device_accel(const struct cxl_cmd *cmd,
+                                                   uint8_t *payload_in,
+                                                   size_t len_in,
+                                                   uint8_t *payload_out,
+                                                   size_t *len_out,
+                                                   CXLCCI *cci)
+{
+    struct {
+        char fw_revision[0x10];
+        uint64_t total_capacity;
+        uint64_t volatile_capacity;
+        uint64_t persistent_capacity;
+        uint64_t partition_align;
+        uint16_t info_event_log_size;
+        uint16_t warning_event_log_size;
+        uint16_t failure_event_log_size;
+        uint16_t fatal_event_log_size;
+        uint32_t lsa_size;
+        uint8_t poison_list_max_mer[3];
+        uint16_t inject_poison_limit;
+        uint8_t poison_caps;
+        uint8_t qos_telemetry_caps;
+        uint16_t dc_event_log_size;
+    } QEMU_PACKED *id;
+    QEMU_BUILD_BUG_ON(sizeof(*id) != 0x45);
+    CXLAccelDev *acceld = CXL_ACCEL(cci->d);
+    uint64_t vmem_size = 0;
+
+    if (acceld->hostvmem) {
+        vmem_size = acceld->hostvmem->size;
+    }
+
+    id = (void *)payload_out;
+    memset(id, 0, sizeof(*id));
+
+    snprintf(id->fw_revision, 0x10, "ACCEL FW %02d", 0);
+
+    stq_le_p(&id->total_capacity, vmem_size / CXL_CAPACITY_MULTIPLIER);
+    stq_le_p(&id->volatile_capacity, vmem_size / CXL_CAPACITY_MULTIPLIER);
+
+    *len_out = sizeof(*id);
+    return CXL_MBOX_SUCCESS;
+}
+
+static const struct cxl_cmd cxl_cmd_set_accel[256][256] = {
+    [EVENTS][GET_RECORDS] = { "EVENTS_GET_RECORDS",
+        cmd_events_get_records, 1, 0 },
+    [EVENTS][CLEAR_RECORDS] = { "EVENTS_CLEAR_RECORDS",
+        cmd_events_clear_records, ~0, CXL_MBOX_IMMEDIATE_LOG_CHANGE },
+    [EVENTS][GET_INTERRUPT_POLICY] = { "EVENTS_GET_INTERRUPT_POLICY",
+                                      cmd_events_get_interrupt_policy, 0, 0 },
+    [EVENTS][SET_INTERRUPT_POLICY] = { "EVENTS_SET_INTERRUPT_POLICY",
+                                      cmd_events_set_interrupt_policy,
+                                      ~0, CXL_MBOX_IMMEDIATE_CONFIG_CHANGE },
+    [TIMESTAMP][GET] = { "TIMESTAMP_GET", cmd_timestamp_get, 0, 0 },
+    [TIMESTAMP][SET] = { "TIMESTAMP_SET", cmd_timestamp_set,
+                         8, CXL_MBOX_IMMEDIATE_POLICY_CHANGE },
+    [LOGS][GET_SUPPORTED] = { "LOGS_GET_SUPPORTED", cmd_logs_get_supported,
+                              0, 0 },
+    [LOGS][GET_LOG] = { "LOGS_GET_LOG", cmd_logs_get_log, 0x18, 0 },
+    [IDENTIFY][MEMORY_DEVICE] = { "IDENTIFY_MEMORY_DEVICE",
+        cmd_identify_memory_device_accel, 0, 0 },
+};
+
+void cxl_initialize_mailbox_accel(CXLCCI *cci, DeviceState *d,
+                                  size_t payload_max)
+{
+    cxl_copy_cci_commands(cci, cxl_cmd_set_accel);
+    cci->d = d;
+    cci->intf = d;
     cxl_init_cci(cci, payload_max);
 }

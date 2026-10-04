@@ -70,6 +70,8 @@ static uint64_t mailbox_reg_read(void *opaque, hwaddr offset, unsigned size)
     } else if (object_dynamic_cast(OBJECT(cci->intf),
                                    TYPE_CXL_SWITCH_MAILBOX_CCI)) {
         cxl_dstate = &CXL_SWITCH_MAILBOX_CCI(cci->intf)->cxl_dstate;
+    } else if (object_dynamic_cast(OBJECT(cci->intf), TYPE_CXL_ACCEL)) {
+        cxl_dstate = &CXL_ACCEL(cci->intf)->cxl_dstate;
     } else {
         return 0;
     }
@@ -163,6 +165,8 @@ static void mailbox_reg_write(void *opaque, hwaddr offset, uint64_t value,
     } else if (object_dynamic_cast(OBJECT(cci->intf),
                                    TYPE_CXL_SWITCH_MAILBOX_CCI)) {
         cxl_dstate = &CXL_SWITCH_MAILBOX_CCI(cci->intf)->cxl_dstate;
+    } else if (object_dynamic_cast(OBJECT(cci->intf), TYPE_CXL_ACCEL)) {
+        cxl_dstate = &CXL_ACCEL(cci->intf)->cxl_dstate;
     } else {
         return;
     }
@@ -429,6 +433,32 @@ void cxl_device_register_init_swcci(CSWMBCCIDev *sw, int msi_n)
 
     cxl_device_cap_init(cxl_dstate, MEMORY_DEVICE, 0x4000, 1);
     memdev_reg_init_common(cxl_dstate);
+}
+
+void cxl_device_register_init_accel(CXLAccelDev *acceld, int msi_n)
+{
+    CXLDeviceState *cxl_dstate = &acceld->cxl_dstate;
+    uint64_t *cap_h = cxl_dstate->caps_reg_state64;
+    const int cap_count = 3;
+
+    /* CXL Device Capabilities Array Register */
+    ARRAY_FIELD_DP64(cap_h, CXL_DEV_CAP_ARRAY, CAP_ID, 0);
+    ARRAY_FIELD_DP64(cap_h, CXL_DEV_CAP_ARRAY, CAP_VERSION, 1);
+    ARRAY_FIELD_DP64(cap_h, CXL_DEV_CAP_ARRAY, CAP_COUNT, cap_count);
+
+    cxl_device_cap_init(cxl_dstate, DEVICE_STATUS, 1,
+                        CXL_DEVICE_STATUS_VERSION);
+    device_reg_init_common(cxl_dstate);
+
+    cxl_device_cap_init(cxl_dstate, MAILBOX, 2, CXL_DEV_MAILBOX_VERSION);
+    mailbox_reg_init_common(cxl_dstate, msi_n);
+
+    cxl_device_cap_init(cxl_dstate, MEMORY_DEVICE, 0x4000,
+        CXL_MEM_DEV_STATUS_VERSION);
+    memdev_reg_init_common(cxl_dstate);
+
+    cxl_initialize_mailbox_accel(&acceld->cci, DEVICE(acceld),
+                                 CXL_MAILBOX_MAX_PAYLOAD_SIZE);
 }
 
 uint64_t cxl_device_get_timestamp(CXLDeviceState *cxl_dstate)

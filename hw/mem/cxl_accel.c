@@ -53,6 +53,8 @@ static void update_dvsecs(CXLAccelDev *acceld)
         .rsvd         = 0,
         .reg0_base_lo = RBI_COMPONENT_REG | CXL_COMPONENT_REG_BAR_IDX,
         .reg0_base_hi = 0,
+        .reg1_base_lo = RBI_CXL_DEVICE_REG | CXL_DEVICE_REG_BAR_IDX,
+        .reg1_base_hi = 0,
     };
     cxl_component_update_dvsec(cxl_cstate, REG_LOC_DVSEC_LENGTH,
                                REG_LOC_DVSEC, dvsec);
@@ -213,21 +215,29 @@ static void setup_cxl_regs(PCIDevice *pci_dev)
     pci_register_bar(
         pci_dev, CXL_COMPONENT_REG_BAR_IDX,
         PCI_BASE_ADDRESS_SPACE_MEMORY | PCI_BASE_ADDRESS_MEM_TYPE_64, mr);
+
+    cxl_device_register_block_init(OBJECT(pci_dev), &acceld->cxl_dstate,
+                                   &acceld->cci);
+    pci_register_bar(pci_dev, CXL_DEVICE_REG_BAR_IDX,
+                     PCI_BASE_ADDRESS_SPACE_MEMORY |
+                         PCI_BASE_ADDRESS_MEM_TYPE_64,
+                     &acceld->cxl_dstate.device_registers);
 }
 
-#define MSIX_NUM 6
+#define CXL_ACCEL_MSIX_NUM      6
+#define CXL_ACCEL_MSIX_MBOX    0
 
 static int setup_msix(PCIDevice *pci_dev)
 {
     int i, rc;
 
     /* MSI(-X) Initialization */
-    rc = msix_init_exclusive_bar(pci_dev, MSIX_NUM, 4, NULL);
+    rc = msix_init_exclusive_bar(pci_dev, CXL_ACCEL_MSIX_NUM, 4, NULL);
     if (rc) {
         return rc;
     }
 
-    for (i = 0; i < MSIX_NUM; i++) {
+    for (i = 0; i < CXL_ACCEL_MSIX_NUM; i++) {
         msix_vector_use(pci_dev, i);
     }
     return 0;
@@ -236,6 +246,7 @@ static int setup_msix(PCIDevice *pci_dev)
 static void cxl_accel_realize(PCIDevice *pci_dev, Error **errp)
 {
     ERRP_GUARD();
+    CXLAccelDev *acceld = CXL_ACCEL(pci_dev);
     int rc;
     uint8_t *pci_conf = pci_dev->config;
 
@@ -254,10 +265,15 @@ static void cxl_accel_realize(PCIDevice *pci_dev, Error **errp)
         clean_memory(pci_dev);
         return;
     }
+
+    cxl_event_init(&acceld->cxl_dstate, CXL_ACCEL_MSIX_MBOX + 1);
 }
 
 static void cxl_accel_exit(PCIDevice *pci_dev)
 {
+    CXLAccelDev *acceld = CXL_ACCEL(pci_dev);
+
+    cxl_destroy_cci(&acceld->cci);
     clean_memory(pci_dev);
 }
 
@@ -271,6 +287,10 @@ static void cxl_accel_reset(DeviceState *dev)
     update_dvsecs(acceld);
     cxl_component_register_init_common(reg_state, write_msk, CXL3_TYPE2_DEVICE,
                                        false);
+    if (acceld->cci.initialized) {
+        cxl_destroy_cci(&acceld->cci);
+    }
+    cxl_device_register_init_accel(acceld, CXL_ACCEL_MSIX_MBOX);
 }
 
 static const Property cxl_accel_props[] = {
