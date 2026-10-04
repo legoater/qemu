@@ -824,12 +824,37 @@ struct CSWMBCCIDev {
     CXLCCI *cci;
 };
 
+struct CXLAccelDev {
+    /* Private */
+    PCIDevice parent_obj;
+
+    /* Properties */
+    HostMemoryBackend *hostvmem;
+
+    /* State */
+    AddressSpace hostvmem_as;
+    CXLComponentState cxl_cstate;
+};
+
+struct CXLAccelClass {
+    /* Private */
+    PCIDeviceClass parent_class;
+};
+
+#define TYPE_CXL_ACCEL "cxl-accel"
+OBJECT_DECLARE_TYPE(CXLAccelDev, CXLAccelClass, CXL_ACCEL)
+
 #define TYPE_CXL_SWITCH_MAILBOX_CCI "cxl-switch-mailbox-cci"
 OBJECT_DECLARE_TYPE(CSWMBCCIDev, CSWMBCCIClass, CXL_SWITCH_MAILBOX_CCI)
 
 MemTxResult cxl_type3_read(PCIDevice *d, hwaddr host_addr, uint64_t *data,
                            unsigned size, MemTxAttrs attrs);
 MemTxResult cxl_type3_write(PCIDevice *d, hwaddr host_addr, uint64_t data,
+                            unsigned size, MemTxAttrs attrs);
+
+MemTxResult cxl_accel_read(PCIDevice *d, hwaddr host_addr, uint64_t *data,
+                           unsigned size, MemTxAttrs attrs);
+MemTxResult cxl_accel_write(PCIDevice *d, hwaddr host_addr, uint64_t data,
                             unsigned size, MemTxAttrs attrs);
 
 uint64_t cxl_device_get_timestamp(CXLDeviceState *cxlds);

@@ -3347,6 +3347,7 @@ L: linux-cxl@vger.kernel.org
 S: Supported
 F: hw/cxl/
 F: hw/mem/cxl_type3.c
+F: hw/mem/cxl_accel.c
 F: include/hw/cxl/
 F: qapi/cxl.json
 

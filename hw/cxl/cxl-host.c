@@ -264,7 +264,8 @@ static PCIDevice *cxl_cfmws_find_device(CXLFixedWindow *fw, hwaddr addr,
         return NULL;
     }
 
-    if (object_dynamic_cast(OBJECT(d), TYPE_CXL_TYPE3)) {
+    if (object_dynamic_cast(OBJECT(d), TYPE_CXL_TYPE3) ||
+        object_dynamic_cast(OBJECT(d), TYPE_CXL_ACCEL)) {
         return d;
     }
 
@@ -524,7 +525,13 @@ static MemTxResult cxl_read_cfmws(void *opaque, hwaddr addr, uint64_t *data,
         return MEMTX_ERROR;
     }
 
-    return cxl_type3_read(d, addr + fw->base, data, size, attrs);
+    if (object_dynamic_cast(OBJECT(d), TYPE_CXL_TYPE3)) {
+        return cxl_type3_read(d, addr + fw->base, data, size, attrs);
+    } else if (object_dynamic_cast(OBJECT(d), TYPE_CXL_ACCEL)) {
+        return cxl_accel_read(d, addr + fw->base, data, size, attrs);
+    }
+
+    return MEMTX_ERROR;
 }
 
 static MemTxResult cxl_write_cfmws(void *opaque, hwaddr addr,
@@ -540,7 +547,13 @@ static MemTxResult cxl_write_cfmws(void *opaque, hwaddr addr,
         return MEMTX_OK;
     }
 
-    return cxl_type3_write(d, addr + fw->base, data, size, attrs);
+    if (object_dynamic_cast(OBJECT(d), TYPE_CXL_TYPE3)) {
+        return cxl_type3_write(d, addr + fw->base, data, size, attrs);
+    } else if (object_dynamic_cast(OBJECT(d), TYPE_CXL_ACCEL)) {
+        return cxl_accel_write(d, addr + fw->base, data, size, attrs);
+    }
+
+    return MEMTX_ERROR;
 }
 
 const MemoryRegionOps cfmws_ops = {
