@@ -275,9 +275,11 @@ void cxl_device_register_block_init(Object *obj, CXLDeviceState *dev,
 
 typedef struct CXLType3Dev CXLType3Dev;
 typedef struct CSWMBCCIDev CSWMBCCIDev;
+typedef struct CXLAccelDev CXLAccelDev;
 /* Set up default values for the register block */
 void cxl_device_register_init_t3(CXLType3Dev *ct3d, int msi_n);
 void cxl_device_register_init_swcci(CSWMBCCIDev *sw, int msi_n);
+void cxl_device_register_init_accel(CXLAccelDev *acceld, int msi_n);
 
 /*
  * CXL r3.1 Section 8.2.8.1: CXL Device Capabilities Array Register
@@ -325,6 +327,8 @@ CXL_DEVICE_CAPABILITY_HEADER_REGISTER(MEMORY_DEVICE,
                                           CXL_DEVICE_CAP_REG_SIZE * 2)
 
 void cxl_initialize_mailbox_t3(CXLCCI *cci, DeviceState *d, size_t payload_max);
+void cxl_initialize_mailbox_accel(CXLCCI *cci, DeviceState *d,
+                                  size_t payload_max);
 void cxl_initialize_mailbox_swcci(CXLCCI *cci, DeviceState *intf,
                                   DeviceState *d, size_t payload_max);
 void cxl_init_cci(CXLCCI *cci, size_t payload_max);
@@ -834,6 +838,8 @@ struct CXLAccelDev {
     /* State */
     AddressSpace hostvmem_as;
     CXLComponentState cxl_cstate;
+    CXLDeviceState cxl_dstate;
+    CXLCCI cci;
 };
 
 struct CXLAccelClass {
