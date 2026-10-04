@@ -837,6 +837,8 @@ struct CXLAccelDev {
     uint8_t hdm_decoders;
 
     /* State */
+    MemoryRegion direct_mr[CXL_HDM_DECODER_COUNT];
+    CXLFixedWindow *direct_mr_fw[CXL_HDM_DECODER_COUNT];
     AddressSpace hostvmem_as;
     CXLComponentState cxl_cstate;
     CXLDeviceState cxl_dstate;

@@ -312,7 +312,11 @@ static PCIDevice *cxl_cfmws_find_device(CXLFixedWindow *fw, hwaddr addr,
 }
 
 typedef struct CXLDirectPTState {
-    CXLType3Dev *ct3d;
+    Object *dev;
+    HostMemoryBackend *hostvmem;
+    HostMemoryBackend *hostpmem;
+    MemoryRegion *direct_mr;
+    CXLFixedWindow **direct_mr_fw;
     hwaddr decoder_base;
     hwaddr decoder_size;
     hwaddr dpa_base;
@@ -322,15 +326,14 @@ typedef struct CXLDirectPTState {
 static void cxl_fmws_direct_passthrough_setup(CXLDirectPTState *state,
                                               CXLFixedWindow *fw)
 {
-    CXLType3Dev *ct3d = state->ct3d;
     MemoryRegion *mr = NULL;
     uint64_t vmr_size = 0, pmr_size = 0, offset = 0;
     MemoryRegion *direct_mr;
     g_autofree char *direct_mr_name = NULL;
     unsigned int idx = state->hdm_decoder_idx;
 
-    if (ct3d->hostvmem) {
-        MemoryRegion *vmr = host_memory_backend_get_memory(ct3d->hostvmem);
+    if (state->hostvmem) {
+        MemoryRegion *vmr = host_memory_backend_get_memory(state->hostvmem);
 
         vmr_size = memory_region_size(vmr);
         if (state->dpa_base < vmr_size) {
@@ -338,8 +341,8 @@ static void cxl_fmws_direct_passthrough_setup(CXLDirectPTState *state,
             offset = state->dpa_base;
         }
     }
-    if (!mr && ct3d->hostpmem) {
-        MemoryRegion *pmr = host_memory_backend_get_memory(ct3d->hostpmem);
+    if (!mr && state->hostpmem) {
+        MemoryRegion *pmr = host_memory_backend_get_memory(state->hostpmem);
 
         pmr_size = memory_region_size(pmr);
         if (state->dpa_base - vmr_size < pmr_size) {
@@ -351,37 +354,37 @@ static void cxl_fmws_direct_passthrough_setup(CXLDirectPTState *state,
         return;
     }
 
-    if (ct3d->direct_mr_fw[idx]) {
+    if (state->direct_mr_fw[idx]) {
         return;
     }
 
-    direct_mr = &ct3d->direct_mr[idx];
+    direct_mr = &state->direct_mr[idx];
     direct_mr_name = g_strdup_printf("cxl-direct-mapping-alias-%u", idx);
     if (!direct_mr_name) {
         return;
     }
 
-    memory_region_init_alias(direct_mr, OBJECT(ct3d), direct_mr_name, mr,
+    memory_region_init_alias(direct_mr, state->dev, direct_mr_name, mr,
                              offset, state->decoder_size);
     memory_region_transaction_begin();
     memory_region_add_subregion(&fw->mr,
                                 state->decoder_base - fw->base, direct_mr);
     memory_region_transaction_commit();
-    ct3d->direct_mr_fw[idx] = fw;
+    state->direct_mr_fw[idx] = fw;
 }
 
-static void cxl_fmws_direct_passthrough_remove(CXLType3Dev *ct3d,
+static void cxl_fmws_direct_passthrough_remove(MemoryRegion *direct_mr,
+                                               CXLFixedWindow **direct_mr_fw,
                                                uint64_t decoder_base,
                                                unsigned int idx)
 {
-    CXLFixedWindow *owner_fw = ct3d->direct_mr_fw[idx];
-    MemoryRegion *direct_mr = &ct3d->direct_mr[idx];
+    CXLFixedWindow *owner_fw = direct_mr_fw[idx];
 
     if (!owner_fw) {
         return;
     }
 
-    if (!memory_region_is_mapped(direct_mr)) {
+    if (!memory_region_is_mapped(&direct_mr[idx])) {
         return;
     }
 
@@ -390,10 +393,10 @@ static void cxl_fmws_direct_passthrough_remove(CXLType3Dev *ct3d,
     }
 
     memory_region_transaction_begin();
-    memory_region_del_subregion(&owner_fw->mr, direct_mr);
-    object_unparent(OBJECT(direct_mr));
+    memory_region_del_subregion(&owner_fw->mr, &direct_mr[idx]);
+    object_unparent(OBJECT(&direct_mr[idx]));
     memory_region_transaction_commit();
-    ct3d->direct_mr_fw[idx] = NULL;
+    direct_mr_fw[idx] = NULL;
 }
 
 static int cxl_fmws_direct_passthrough(Object *obj, void *opaque)
@@ -421,19 +424,35 @@ static int update_non_interleaved(Object *obj, void *opaque)
 {
     const int hdm_inc = R_CXL_HDM_DECODER1_BASE_LO - R_CXL_HDM_DECODER0_BASE_LO;
     bool commit = *(bool *)opaque;
-    CXLType3Dev *ct3d;
+    HostMemoryBackend *hostvmem = NULL, *hostpmem = NULL;
+    MemoryRegion *direct_mr;
+    CXLFixedWindow **direct_mr_fw;
     uint32_t *cache_mem;
     unsigned int hdm_count, i;
     int interleave_ways_dec;
     uint32_t cap;
     uint64_t dpa_base = 0;
 
-    if (!object_dynamic_cast(obj, TYPE_CXL_TYPE3)) {
+    if (object_dynamic_cast(obj, TYPE_CXL_TYPE3)) {
+        CXLType3Dev *ct3d = CXL_TYPE3(obj);
+
+        cache_mem = ct3d->cxl_cstate.crb.cache_mem_registers;
+        hostvmem = ct3d->hostvmem;
+        hostpmem = ct3d->hostpmem;
+        direct_mr = ct3d->direct_mr;
+        direct_mr_fw = ct3d->direct_mr_fw;
+    } else if (object_dynamic_cast(obj, TYPE_CXL_ACCEL)) {
+        CXLAccelDev *acceld = CXL_ACCEL(obj);
+
+        cache_mem = acceld->cxl_cstate.crb.cache_mem_registers;
+        hostvmem = acceld->hostvmem;
+        hostpmem = NULL;
+        direct_mr = acceld->direct_mr;
+        direct_mr_fw = acceld->direct_mr_fw;
+    } else {
         return 0;
     }
 
-    ct3d = CXL_TYPE3(obj);
-    cache_mem = ct3d->cxl_cstate.crb.cache_mem_registers;
     cap = ldl_le_p(cache_mem + R_CXL_HDM_DECODER_CAPABILITY);
     hdm_count = cxl_decoder_count_dec(FIELD_EX32(cap,
                                                  CXL_HDM_DECODER_CAPABILITY,
@@ -447,8 +466,8 @@ static int update_non_interleaved(Object *obj, void *opaque)
         committed = FIELD_EX32(hdm_ctrl, CXL_HDM_DECODER0_CTRL, COMMITTED);
 
         /*
-         * Optimization: Looking for a fully committed path; if the type 3 HDM
-         * decoder is not commmitted, it cannot lie on such a path.
+         * Looking for a fully committed path; if the device HDM
+         * decoder is not committed, it cannot lie on such a path.
          */
         if (commit && !committed) {
             return 0;
@@ -473,10 +492,15 @@ static int update_non_interleaved(Object *obj, void *opaque)
 
         if (iw == 0) {
             if (!commit) {
-                cxl_fmws_direct_passthrough_remove(ct3d, decoder_base, i);
+                cxl_fmws_direct_passthrough_remove(direct_mr, direct_mr_fw,
+                                                   decoder_base, i);
             } else {
                 CXLDirectPTState state = {
-                    .ct3d = ct3d,
+                    .dev = obj,
+                    .hostvmem = hostvmem,
+                    .hostpmem = hostpmem,
+                    .direct_mr = direct_mr,
+                    .direct_mr_fw = direct_mr_fw,
                     .decoder_base = decoder_base,
                     .decoder_size = decoder_size,
                     .dpa_base = dpa_base,
