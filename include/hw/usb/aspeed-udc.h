@@ -24,11 +24,14 @@ OBJECT_DECLARE_SIMPLE_TYPE(AspeedUDCState, ASPEED_UDC)
 OBJECT_DECLARE_SIMPLE_TYPE(AspeedUDCGadget, ASPEED_UDC_GADGET)
 
 /*
- * Register map: root/global block at 0x000 - 0x087, then one 0x10 byte bank
- * per programmable endpoint from 0x200.
+ * Register map: root/global block at 0x000 - 0x07f, the SETUP buffer at
+ * 0x080 - 0x087, then one 0x10 byte bank per programmable endpoint from
+ * 0x200.
  */
 #define ASPEED_UDC_MEM_SIZE     0x300
-#define ASPEED_UDC_ROOT_NR_REGS (0x88 >> 2)
+#define ASPEED_UDC_ROOT_NR_REGS (0x80 >> 2)
+#define ASPEED_UDC_SETUP_BASE   0x80
+#define ASPEED_UDC_SETUP_SIZE   0x08
 #define ASPEED_UDC_EP_REG_BASE  0x200
 #define ASPEED_UDC_EP_NR_REGS   (0x10 >> 2)
 
@@ -62,9 +65,11 @@ struct AspeedUDCState {
 
     MemoryRegion udc_container;
     MemoryRegion root_mr;
+    MemoryRegion setup_mr;
     MemoryRegion *dram_mr;
     AddressSpace dram_as;
     uint32_t regs[ASPEED_UDC_ROOT_NR_REGS];
+    uint8_t setup_buf[ASPEED_UDC_SETUP_SIZE];
     AspeedUDCEP ep[ASPEED_UDC_NUM_EP];
     qemu_irq irq;
 

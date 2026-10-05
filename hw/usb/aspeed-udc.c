@@ -58,9 +58,6 @@ REG32(UDC_EP0_CTRL, 0x30)
     FIELD(UDC_EP0_CTRL, STALL,              0, 1)
 REG32(UDC_EP0_DATA_BUFF, 0x34)
     FIELD(UDC_EP0_DATA_BUFF, BASE_ADDR,     0, 31)
-/* EP0 SETUP packet buffer: SETUP0 = bytes 0...3, SETUP1 = bytes 4...7 */
-REG32(UDC_SETUP0, 0x80)
-REG32(UDC_SETUP1, 0x84)
 
 /* Per programmable-endpoint registers (offset from the EP register base) */
 REG32(EP_CONFIG, 0x00)
@@ -359,6 +356,45 @@ static const MemoryRegionOps aspeed_udc_ops = {
     },
     .impl = {
         .min_access_size = 4,
+        .max_access_size = 4,
+    },
+};
+
+static uint64_t aspeed_udc_setup_read(void *opaque, hwaddr offset,
+                                      unsigned size)
+{
+    AspeedUDCState *s = ASPEED_UDC(opaque);
+    uint64_t value = 0;
+    int i;
+
+    for (i = 0; i < size; i++) {
+        value |= (uint64_t)s->setup_buf[offset + i] << (8 * i);
+    }
+
+    trace_aspeed_udc_setup_read(offset, size, value);
+
+    return value;
+}
+
+static void aspeed_udc_setup_write(void *opaque, hwaddr offset,
+                                   uint64_t value, unsigned size)
+{
+    AspeedUDCState *s = ASPEED_UDC(opaque);
+    int i;
+
+    trace_aspeed_udc_setup_write(offset, size, value);
+
+    for (i = 0; i < size; i++) {
+        s->setup_buf[offset + i] = value >> (8 * i);
+    }
+}
+
+static const MemoryRegionOps aspeed_udc_setup_ops = {
+    .read = aspeed_udc_setup_read,
+    .write = aspeed_udc_setup_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 1,
         .max_access_size = 4,
     },
 };
@@ -708,6 +744,7 @@ static void aspeed_udc_reset_hold(Object *obj, ResetType type)
     int i;
 
     memset(s->regs, 0, sizeof(s->regs));
+    memset(s->setup_buf, 0, sizeof(s->setup_buf));
     for (i = 0; i < ASPEED_UDC_NUM_EP; i++) {
         memset(s->ep[i].regs, 0, sizeof(s->ep[i].regs));
         s->ep[i].pkt = NULL;
@@ -753,6 +790,12 @@ static void aspeed_udc_realize(DeviceState *dev, Error **errp)
                           TYPE_ASPEED_UDC ".root",
                           ASPEED_UDC_ROOT_NR_REGS << 2);
     memory_region_add_subregion(&s->udc_container, 0, &s->root_mr);
+
+    memory_region_init_io(&s->setup_mr, OBJECT(s), &aspeed_udc_setup_ops,
+                          s, TYPE_ASPEED_UDC ".setup",
+                          ASPEED_UDC_SETUP_SIZE);
+    memory_region_add_subregion(&s->udc_container,
+                                ASPEED_UDC_SETUP_BASE, &s->setup_mr);
 
     /* Each programmable endpoint has its own register bank */
     for (i = 0; i < ASPEED_UDC_NUM_EP; i++) {
@@ -918,8 +961,11 @@ static void aspeed_udc_gadget_handle_control(USBDevice *udev, USBPacket *p,
      * Reconstruct the 8-byte SETUP packet into the SETUP data buffer where
      * the guest gadget driver reads it from.
      */
-    s->regs[R_UDC_SETUP0] = type | (req << 8) | ((value & 0xffff) << 16);
-    s->regs[R_UDC_SETUP1] = (index & 0xffff) | ((length & 0xffff) << 16);
+    s->setup_buf[0] = type;
+    s->setup_buf[1] = req;
+    stw_le_p(&s->setup_buf[2], value);
+    stw_le_p(&s->setup_buf[4], index);
+    stw_le_p(&s->setup_buf[6], length);
 
     /* A new SETUP clears the EP0 STALL condition */
     s->regs[R_UDC_EP0_CTRL] &= ~R_UDC_EP0_CTRL_STALL_MASK;
