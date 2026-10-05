@@ -565,6 +565,9 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_in_desc(AspeedUDCState *s,
         aspeed_udc_raise_ep_ack(s, ep);
     }
 
+    trace_aspeed_udc_ep_xfer_in_desc(ep, (uint32_t)p->actual_length,
+                                     done ? "done" : "more");
+
     return done ? ASPEED_UDC_XFER_DONE : ASPEED_UDC_XFER_MORE;
 }
 
@@ -606,6 +609,9 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_in_single(AspeedUDCState *s,
      * buffer, and the next IN request sends the rest.
      */
     if (e->single_buf_off < buf_len) {
+        trace_aspeed_udc_ep_xfer_in_single(ep,
+                                           (uint32_t)p->actual_length,
+                                           "buffer left");
         return ASPEED_UDC_XFER_DONE;
     }
 
@@ -618,6 +624,9 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_in_single(AspeedUDCState *s,
     e->regs[R_EP_DMA_CTRL] = FIELD_DP32(e->regs[R_EP_DMA_CTRL], EP_DMA_CTRL,
                                         PROC_STS, EP_DMA_CTRL_STS_TX_IDLE);
     aspeed_udc_raise_ep_ack(s, ep);
+
+    trace_aspeed_udc_ep_xfer_in_single(ep, (uint32_t)p->actual_length,
+                                       "done");
 
     return ASPEED_UDC_XFER_DONE;
 }
@@ -664,8 +673,14 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_out_single(AspeedUDCState *s,
     aspeed_udc_raise_ep_ack(s, ep);
 
     if ((uint32_t)p->actual_length >= pktiov->size) {
+        trace_aspeed_udc_ep_xfer_out_single(ep,
+                                            (uint32_t)p->actual_length,
+                                            "done");
         return ASPEED_UDC_XFER_DONE;
     }
+
+    trace_aspeed_udc_ep_xfer_out_single(ep, (uint32_t)p->actual_length,
+                                        "more");
 
     return ASPEED_UDC_XFER_MORE;
 }
@@ -685,6 +700,8 @@ static void aspeed_udc_ep_in_kick_desc(AspeedUDCState *s, int ep,
     uint32_t new_wptr = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, WPTR);
     uint32_t cur_rptr = FIELD_EX32(old_val, EP_DMA_STS, RPTR);
     USBPacket *p = e->pkt;
+
+    trace_aspeed_udc_ep_in_kick_desc(ep);
 
     /*
      * A normal kick only sets the write pointer and leaves the read-pointer
@@ -735,6 +752,8 @@ static void aspeed_udc_ep_in_kick_single(AspeedUDCState *s, int ep)
     AspeedUDCEP *e = &s->ep[ep];
     USBPacket *p = e->pkt;
 
+    trace_aspeed_udc_ep_in_kick_single(ep);
+
     /* Do nothing if no host request is waiting, or no buffer was queued. */
     if (!p || !FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, WPTR)) {
         return;
@@ -769,6 +788,8 @@ static void aspeed_udc_ep_out_kick_single(AspeedUDCState *s, int ep)
 {
     AspeedUDCEP *e = &s->ep[ep];
     USBPacket *p = e->pkt;
+
+    trace_aspeed_udc_ep_out_kick_single(ep);
 
     /* nothing to do unless an OUT packet is waiting and a buffer is ready */
     if (!p || !FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, WPTR)) {
@@ -1154,6 +1175,8 @@ static void aspeed_udc_gadget_cancel_packet(USBDevice *udev, USBPacket *p)
 {
     AspeedUDCState *s = ASPEED_UDC_GADGET(udev)->udc;
     int i;
+
+    trace_aspeed_udc_cancel_packet(p->ep->nr);
 
     if (s->ep0_packet == p) {
         s->ep0_packet = NULL;

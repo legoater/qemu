@@ -395,6 +395,13 @@ aspeed_udc_handle_data(int ep_nr, const char *dir, uint32_t iov, int ep_idx) "ep
 aspeed_udc_ep_data_in(unsigned ep, uint32_t rptr, uint32_t wptr, uint32_t iov) "ep %u, rptr %u, wptr %u, iov %u"
 aspeed_udc_ep_data_out(unsigned ep, uint32_t wptr, uint32_t avail, uint32_t iov) "ep %u, wptr %u, avail %u, iov %u"
 aspeed_udc_ep_ack(unsigned ep) "ep %u"
+aspeed_udc_ep_in_kick_desc(int ep) "ep %d"
+aspeed_udc_ep_in_kick_single(int ep) "ep %d"
+aspeed_udc_ep_out_kick_single(int ep) "ep %d"
+aspeed_udc_ep_xfer_in_desc(int ep, uint32_t sent, const char *res) "ep %d, sent %u, %s"
+aspeed_udc_ep_xfer_in_single(int ep, uint32_t sent, const char *res) "ep %d, sent %u, %s"
+aspeed_udc_ep_xfer_out_single(int ep, uint32_t received, const char *res) "ep %d, received %u, %s"
+aspeed_udc_cancel_packet(int ep) "ep %d"
 
 # redirect-server.c
 usbredir_server_chardev_open(void) "chardev opened"
