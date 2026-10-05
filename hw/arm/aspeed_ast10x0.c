@@ -162,10 +162,11 @@ static void aspeed_soc_ast10x0_init(Object *obj, const char *socname)
     snprintf(typename, sizeof(typename), "aspeed.hace-%s", socname);
     object_initialize_child(obj, "hace", &s->hace, typename);
 
+    object_initialize_child(obj, "udc", &a->udc, TYPE_ASPEED_UDC);
+
     object_initialize_child(obj, "iomem", &s->iomem, TYPE_UNIMPLEMENTED_DEVICE);
     object_initialize_child(obj, "pwm", &s->pwm, TYPE_UNIMPLEMENTED_DEVICE);
     object_initialize_child(obj, "espi", &s->espi, TYPE_UNIMPLEMENTED_DEVICE);
-    object_initialize_child(obj, "udc", &s->udc, TYPE_UNIMPLEMENTED_DEVICE);
     object_initialize_child(obj, "sgpiom", &s->sgpiom,
                             TYPE_UNIMPLEMENTED_DEVICE);
     object_initialize_child(obj, "jtag[0]", &s->jtag[0],
@@ -394,6 +395,17 @@ static bool aspeed_soc_ast10x0_realize(Aspeed10x0SoCState *a, Error **errp)
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->gpio), 0,
                        aspeed_soc_ast1030_get_irq(s, ASPEED_DEV_GPIO));
 
+    /* UDC - USB 2.0 Device Controller */
+    object_property_set_link(OBJECT(&a->udc), "dram",
+                             OBJECT(&s->sram[0]), &error_abort);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&a->udc), errp)) {
+        return false;
+    }
+    aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&a->udc), 0,
+                    sc->memmap[ASPEED_DEV_UDC]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&a->udc), 0,
+                       aspeed_soc_ast1030_get_irq(s, ASPEED_DEV_UDC));
+
     aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->pwm),
                                   "aspeed.pwm",
                                   sc->memmap[ASPEED_DEV_PWM], 0x100);
@@ -402,9 +414,6 @@ static bool aspeed_soc_ast10x0_realize(Aspeed10x0SoCState *a, Error **errp)
                                   "aspeed.espi",
                                   sc->memmap[ASPEED_DEV_ESPI], 0x800);
 
-    aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->udc),
-                                  "aspeed.udc",
-                                  sc->memmap[ASPEED_DEV_UDC], 0x1000);
     aspeed_mmio_map_unimplemented(s->memory, SYS_BUS_DEVICE(&s->sgpiom),
                                   "aspeed.sgpiom",
                                   sc->memmap[ASPEED_DEV_SGPIOM0], 0x100);

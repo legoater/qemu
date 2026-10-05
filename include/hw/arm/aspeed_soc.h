@@ -167,6 +167,7 @@ struct Aspeed10x0SoCState {
     AspeedSoCState parent;
 
     ARMv7MState armv7m;
+    AspeedUDCState udc;
 };
 
 #define TYPE_ASPEED10X0_SOC "aspeed10x0-soc"
