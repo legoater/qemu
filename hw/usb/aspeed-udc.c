@@ -416,6 +416,13 @@ static const MemoryRegionOps aspeed_udc_setup_ops = {
     },
 };
 
+static uint32_t aspeed_udc_ep_get_max_packet(AspeedUDCEP *e)
+{
+    uint32_t mps = FIELD_EX32(e->regs[R_EP_CONFIG], EP_CONFIG, MAX_PKT);
+
+    return mps ? mps : ASPEED_UDC_EP_MAXPKT;
+}
+
 /*
  * Copy len bytes from guest memory at addr into the IN packet, going through
  * a bounce buffer one buf-full at a time. Returns false on DMA failure.
@@ -464,10 +471,10 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_in_desc(AspeedUDCState *s,
 {
     QEMUIOVector *pktiov = p->combined ? &p->combined->iov : &p->iov;
     AspeedUDCEP *e = &s->ep[ep];
-    uint32_t mps = FIELD_EX32(e->regs[R_EP_CONFIG], EP_CONFIG, MAX_PKT);
     uint32_t wptr = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, WPTR);
     uint32_t rptr = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, RPTR);
     uint32_t desc_base = e->regs[R_EP_DMA_BUFF];
+    uint32_t mps = aspeed_udc_ep_get_max_packet(e);
     uint32_t desc_addr;
     uint32_t remaining;
     uint32_t desc_ctrl;
@@ -479,11 +486,6 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_in_desc(AspeedUDCState *s,
     uint32_t dlen;
     bool done = false;
     bool ack = false;
-
-    if (mps == 0) {
-        /* a MAX_PKT field of 0 means the maximum packet size */
-        mps = ASPEED_UDC_EP_MAXPKT;
-    }
 
     trace_aspeed_udc_ep_data_in(ep, rptr, wptr, pktiov->size);
 
@@ -624,19 +626,21 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_in_single(AspeedUDCState *s,
  * OUT transfer: receive data from the host by copying its OUT packet into the
  * buffer the guest gadget driver set up.
  *
- * A host packet can be bigger than one buffer, so we copy at most PKT_SIZE
- * bytes per call, continuing from where the last call stopped
- * (p->actual_length). The caller keeps the packet parked until it is fully
- * copied.
+ * In single mode PKT_SIZE is where the controller reports the length it
+ * received, so it is not a buffer size. One maximum packet is the most that
+ * can arrive, so copy at most that much per call, continuing from where the
+ * last call stopped (p->actual_length). The caller keeps the packet parked
+ * until it is fully copied.
  */
 static AspeedUDCXferResult aspeed_udc_ep_xfer_out_single(AspeedUDCState *s,
                                                          int ep, USBPacket *p)
 {
+    QEMUIOVector *pktiov = p->combined ? &p->combined->iov : &p->iov;
     AspeedUDCEP *e = &s->ep[ep];
-    uint32_t chunk = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, PKT_SIZE);
-    uint32_t remaining = p->iov.size - (uint32_t)p->actual_length;
+    uint32_t remaining = pktiov->size > (uint32_t)p->actual_length ?
+                         pktiov->size - (uint32_t)p->actual_length : 0;
+    uint32_t len = MIN(remaining, aspeed_udc_ep_get_max_packet(e));
     uint32_t data_buf_addr = e->regs[R_EP_DMA_BUFF];
-    uint32_t len = MIN(remaining, chunk);
     g_autofree uint8_t *buf = g_malloc(len);
 
     if (data_buf_addr && len) {
@@ -659,7 +663,7 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_out_single(AspeedUDCState *s,
                                         PROC_STS, EP_DMA_CTRL_STS_RX_IDLE);
     aspeed_udc_raise_ep_ack(s, ep);
 
-    if ((uint32_t)p->actual_length >= p->iov.size) {
+    if ((uint32_t)p->actual_length >= pktiov->size) {
         return ASPEED_UDC_XFER_DONE;
     }
 
