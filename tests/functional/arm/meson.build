@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 test_arm_timeouts = {
+  'aspeed_ast1030' : 720,
   'aspeed_palmetto' : 120,
   'aspeed_romulus' : 120,
   'aspeed_witherspoon' : 120,
