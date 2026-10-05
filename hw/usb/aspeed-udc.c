@@ -319,14 +319,24 @@ static void aspeed_udc_write(void *opaque, hwaddr offset, uint64_t data,
         s->regs[R_UDC_FUNC_CTRL] = val;
         break;
     case R_UDC_IER:
-    case R_UDC_EP_ACK_IER:
-    case R_UDC_EP_NAK_IER:
+        val &= 0x000301df;
         s->regs[reg] = val;
         aspeed_udc_update_irq(s);
         break;
     case R_UDC_ISR:
+        val &= 0x000001df;
+        s->regs[reg] &= ~val;
+        aspeed_udc_update_irq(s);
+        break;
+    case R_UDC_EP_ACK_IER:
+    case R_UDC_EP_NAK_IER:
+        val &= 0x0000000f;
+        s->regs[reg] = val;
+        aspeed_udc_update_irq(s);
+        break;
     case R_UDC_EP_ACK_ISR:
     case R_UDC_EP_NAK_ISR:
+        val &= 0x0000000f;
         s->regs[reg] &= ~val;
         aspeed_udc_update_irq(s);
         break;
