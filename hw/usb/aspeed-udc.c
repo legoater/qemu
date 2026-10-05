@@ -335,6 +335,13 @@ static void aspeed_udc_write(void *opaque, hwaddr offset, uint64_t data,
         aspeed_udc_update_irq(s);
         break;
     case R_UDC_EP_ACK_ISR:
+        val &= 0x0000000f;
+        s->regs[reg] &= ~val;
+        if (!s->regs[R_UDC_EP_ACK_ISR]) {
+            s->regs[R_UDC_ISR] &= ~R_UDC_ISR_EP_POOL_ACK_MASK;
+        }
+        aspeed_udc_update_irq(s);
+        break;
     case R_UDC_EP_NAK_ISR:
         val &= 0x0000000f;
         s->regs[reg] &= ~val;
