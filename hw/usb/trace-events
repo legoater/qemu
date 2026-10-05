@@ -381,6 +381,8 @@ canokey_unrealize(void)
 # aspeed-udc.c
 aspeed_udc_read(uint64_t offset, uint32_t value) "offset 0x%" PRIx64 " value 0x%x"
 aspeed_udc_write(uint64_t offset, uint32_t value) "offset 0x%" PRIx64 " value 0x%x"
+aspeed_udc_setup_read(uint64_t offset, unsigned size, uint64_t value) "offset 0x%" PRIx64 " size %u value 0x%" PRIx64
+aspeed_udc_setup_write(uint64_t offset, unsigned size, uint64_t value) "offset 0x%" PRIx64 " size %u value 0x%" PRIx64
 aspeed_udc_ep_read(int ep, uint64_t offset, uint32_t value) "ep %d, offset 0x%" PRIx64 " value 0x%x"
 aspeed_udc_ep_write(int ep, uint64_t offset, uint32_t value) "ep %d, offset 0x%" PRIx64 " value 0x%x"
 aspeed_udc_pullup(int on, int attached) "on %d, attached %d"
