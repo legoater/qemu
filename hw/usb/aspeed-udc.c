@@ -459,8 +459,8 @@ static bool aspeed_udc_ep_copy_to_pkt(AspeedUDCState *s, int ep, uint32_t addr,
  * This function raises the endpoint ACK by itself when the ring becomes empty
  * or when a descriptor asks for an interrupt.
  */
-static AspeedUDCXferResult aspeed_udc_ep_xfer_in(AspeedUDCState *s, int ep,
-                                                 USBPacket *p)
+static AspeedUDCXferResult aspeed_udc_ep_xfer_in_desc(AspeedUDCState *s,
+                                                      int ep, USBPacket *p)
 {
     QEMUIOVector *pktiov = p->combined ? &p->combined->iov : &p->iov;
     AspeedUDCEP *e = &s->ep[ep];
@@ -568,15 +568,15 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_in(AspeedUDCState *s, int ep,
 
 /*
  * OUT transfer: receive data from the host by copying its OUT packet into the
- * buffer the guest gadget driver set up (single-stage mode).
+ * buffer the guest gadget driver set up.
  *
  * A host packet can be bigger than one buffer, so we copy at most PKT_SIZE
  * bytes per call, continuing from where the last call stopped
  * (p->actual_length). The caller keeps the packet parked until it is fully
  * copied.
  */
-static AspeedUDCXferResult aspeed_udc_ep_xfer_out(AspeedUDCState *s, int ep,
-                                                  USBPacket *p)
+static AspeedUDCXferResult aspeed_udc_ep_xfer_out_single(AspeedUDCState *s,
+                                                         int ep, USBPacket *p)
 {
     AspeedUDCEP *e = &s->ep[ep];
     uint32_t chunk = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, PKT_SIZE);
@@ -619,7 +619,7 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_out(AspeedUDCState *s, int ep,
  * If the request needs more data than was queued, keep it parked and wait for
  * the next kick.
  */
-static void aspeed_udc_ep_in_kick(AspeedUDCState *s, int ep, uint32_t val)
+static void aspeed_udc_ep_in_kick_desc(AspeedUDCState *s, int ep, uint32_t val)
 {
     AspeedUDCEP *e = &s->ep[ep];
     uint32_t cur_rptr = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, RPTR);
@@ -649,7 +649,7 @@ static void aspeed_udc_ep_in_kick(AspeedUDCState *s, int ep, uint32_t val)
         return;
     }
 
-    switch (aspeed_udc_ep_xfer_in(s, ep, p)) {
+    switch (aspeed_udc_ep_xfer_in_desc(s, ep, p)) {
     case ASPEED_UDC_XFER_DONE:
         e->pkt = NULL;
         p->status = USB_RET_SUCCESS;
@@ -671,7 +671,7 @@ static void aspeed_udc_ep_in_kick(AspeedUDCState *s, int ep, uint32_t val)
  * buffer before), copy its data into the buffer now and finish it. If the
  * packet has more data than fits, keep it parked and wait for the next buffer.
  */
-static void aspeed_udc_ep_out_kick(AspeedUDCState *s, int ep)
+static void aspeed_udc_ep_out_kick_single(AspeedUDCState *s, int ep)
 {
     AspeedUDCEP *e = &s->ep[ep];
     USBPacket *p = e->pkt;
@@ -681,7 +681,7 @@ static void aspeed_udc_ep_out_kick(AspeedUDCState *s, int ep)
         return;
     }
 
-    switch (aspeed_udc_ep_xfer_out(s, ep, p)) {
+    switch (aspeed_udc_ep_xfer_out_single(s, ep, p)) {
     case ASPEED_UDC_XFER_DONE:
         e->pkt = NULL;
         p->status = USB_RET_SUCCESS;
@@ -727,11 +727,11 @@ static void aspeed_udc_ep_write(void *opaque, hwaddr offset, uint64_t data,
         val &= 0x77ffffff;
         if (FIELD_EX32(e->regs[R_EP_DMA_CTRL], EP_DMA_CTRL, DESC_OP_EN)) {
             /* IN, descriptor-list mode */
-            aspeed_udc_ep_in_kick(s, e->index, val);
+            aspeed_udc_ep_in_kick_desc(s, e->index, val);
         } else {
             /* OUT, single-stage mode */
             e->regs[reg] = val;
-            aspeed_udc_ep_out_kick(s, e->index);
+            aspeed_udc_ep_out_kick_single(s, e->index);
         }
         break;
     default:
@@ -895,7 +895,7 @@ static void aspeed_udc_ep_data_in(AspeedUDCState *s, int ep, USBPacket *p)
         /*
          * No IN data is queued yet. Save the packet and return ASYNC
          * instead of NAK. A NAK would make the host retry slowly.
-         * aspeed_udc_ep_in_kick() serves and completes this packet later,
+         * aspeed_udc_ep_in_kick_desc() serves and completes this packet later,
          * once the guest gadget driver queues descriptors.
          */
         e->pkt = p;
@@ -903,7 +903,7 @@ static void aspeed_udc_ep_data_in(AspeedUDCState *s, int ep, USBPacket *p)
         return;
     }
 
-    switch (aspeed_udc_ep_xfer_in(s, ep, p)) {
+    switch (aspeed_udc_ep_xfer_in_desc(s, ep, p)) {
     case ASPEED_UDC_XFER_DONE:
         p->status = USB_RET_SUCCESS;
         break;
@@ -931,7 +931,7 @@ static void aspeed_udc_ep_data_out(AspeedUDCState *s, int ep, USBPacket *p)
          * No OUT buffer is ready yet. Save the packet and return ASYNC
          * instead of NAK. Writing now could use an old buffer address and
          * lose the data (for example a mass-storage CBW). A NAK would make
-         * the host retry slowly. aspeed_udc_ep_out_kick() delivers this
+         * the host retry slowly. aspeed_udc_ep_out_kick_single() delivers this
          * packet later, once the guest gadget driver sets up a buffer.
          */
         e->pkt = p;
@@ -939,7 +939,7 @@ static void aspeed_udc_ep_data_out(AspeedUDCState *s, int ep, USBPacket *p)
         return;
     }
 
-    switch (aspeed_udc_ep_xfer_out(s, ep, p)) {
+    switch (aspeed_udc_ep_xfer_out_single(s, ep, p)) {
     case ASPEED_UDC_XFER_DONE:
         p->status = USB_RET_SUCCESS;
         break;
