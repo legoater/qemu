@@ -6,6 +6,8 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+import os
+
 from aspeed import AspeedTest
 from qemu_test import Asset, exec_command_and_wait_for_pattern
 
@@ -67,6 +69,56 @@ class AST1030Machine(AspeedTest):
                 'kernel reboot cold',
                 'kernel uptime',
         ]: exec_command_and_wait_for_pattern(self, shell_cmd, "uart:~$")
+
+    ASSET_SDK_V1103_AST2600 = Asset(
+        'https://github.com/AspeedTech-BMC/openbmc/releases/download/v11.03/ast2600-default-image.tar.gz',
+        '47e3656a14bf7a4de28d3dfbf48bc2325443bc42d270f3bc82646f92f6dea165')
+
+    def test_arm_ast1030_usbredir_to_ast2600(self):
+        self.require_device('usb-redir-server')
+        self.require_device('usb-redir')
+        self.set_machine('ast2600-evb')
+        self.set_machine('ast1030-evb')
+
+        ast1030_kernel_file = self.archive_extract(
+            self.ASSET_ZEPHYR_3_08, member="ast1030-evb-demo/zephyr.elf")
+
+        ast2600_image_file = self.archive_extract(
+            self.ASSET_SDK_V1103_AST2600,
+            member="ast2600-default-image/image-bmc")
+        sock = os.path.join(self.socket_dir().name, 'usbredir.sock')
+
+        udc = self.get_vm(name='udc')
+        udc.set_console()
+        udc.add_args('-kernel', ast1030_kernel_file, '-nographic',
+                     '-chardev',
+                     f'socket,id=usbredir0,path={sock},server=on,wait=off',
+                     '-device',
+                     'usb-redir-server,id=udcredir,chardev=usbredir0',
+                     '-device', 'aspeed.udc-gadget,bus=udcredir.0,'
+                                'udc=/machine/soc/udc')
+        udc.launch()
+        self.wait_for_console_pattern('Booting Zephyr OS', vm=udc)
+        exec_command_and_wait_for_pattern(self, 'usb enable', 'uart:~$',
+                                          vm=udc)
+
+        host = self.get_vm(name='host')
+        host.set_machine('ast2600-evb')
+        host.set_console()
+        host.add_args('-drive',
+                      f'file={ast2600_image_file},if=mtd,format=raw',
+                      '-snapshot',
+                      '-chardev', f'socket,id=usbredir0,path={sock}',
+                      '-device', 'usb-redir,chardev=usbredir0,bus=usb-bus.1')
+        host.launch()
+        self.wait_for_console_pattern('Starting kernel ...', vm=host)
+        self.wait_for_console_pattern('login:', vm=host)
+        exec_command_and_wait_for_pattern(self, 'root', 'Password:', vm=host)
+        exec_command_and_wait_for_pattern(self, '0penBmc',
+                                          'root@ast2600-default:~#', vm=host)
+        exec_command_and_wait_for_pattern(self, 'lsusb',
+                                          'ZEPHYR Zephyr DFU sample',
+                                          vm=host)
 
     def test_arm_ast1030_otp_blockdev_device(self):
         self.vm.set_machine("ast1030-evb")
