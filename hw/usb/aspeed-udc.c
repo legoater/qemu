@@ -567,6 +567,60 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_in_desc(AspeedUDCState *s,
 }
 
 /*
+ * IN transfer: the guest gadget driver put one buffer in EP_DMA_BUFF, its
+ * length in PKT_SIZE, and kicked it with the write pointer. Copy that
+ * buffer into the host's IN packet.
+ *
+ * The buffer can hold more than the host asked for. Copy what fits and
+ * remember how far we got in single_buf_off, so the rest goes out when
+ * the host asks again.
+ *
+ * A buffer smaller than the packet makes a short packet, and in USB a
+ * short packet ends the transfer.
+ */
+static AspeedUDCXferResult aspeed_udc_ep_xfer_in_single(AspeedUDCState *s,
+                                                        int ep, USBPacket *p)
+{
+    QEMUIOVector *pktiov = p->combined ? &p->combined->iov : &p->iov;
+    AspeedUDCEP *e = &s->ep[ep];
+    uint32_t buf_len = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, PKT_SIZE);
+    uint32_t left = buf_len > e->single_buf_off ?
+                    buf_len - e->single_buf_off : 0;
+    uint32_t pkt_space = pktiov->size > (uint32_t)p->actual_length ?
+                         pktiov->size - (uint32_t)p->actual_length : 0;
+    uint32_t addr = e->regs[R_EP_DMA_BUFF];
+    uint32_t len = MIN(left, pkt_space);
+
+    if (len && !aspeed_udc_ep_copy_to_pkt(s, ep, addr + e->single_buf_off,
+                                          len, p)) {
+        return ASPEED_UDC_XFER_ERROR;
+    }
+
+    e->single_buf_off += len;
+
+    /*
+     * The packet is full, but the buffer is not finished. Complete the
+     * packet. Do not ACK, and leave WPTR set: the guest still owns the
+     * buffer, and the next IN request sends the rest.
+     */
+    if (e->single_buf_off < buf_len) {
+        return ASPEED_UDC_XFER_DONE;
+    }
+
+    /* All of the buffer went out. Retire it and tell the driver. */
+    e->single_buf_off = 0;
+    e->regs[R_EP_DMA_STS] = FIELD_DP32(e->regs[R_EP_DMA_STS], EP_DMA_STS,
+                                       PKT_SIZE, buf_len);
+    e->regs[R_EP_DMA_STS] = FIELD_DP32(e->regs[R_EP_DMA_STS], EP_DMA_STS,
+                                       WPTR, 0);
+    e->regs[R_EP_DMA_CTRL] = FIELD_DP32(e->regs[R_EP_DMA_CTRL], EP_DMA_CTRL,
+                                        PROC_STS, EP_DMA_CTRL_STS_TX_IDLE);
+    aspeed_udc_raise_ep_ack(s, ep);
+
+    return ASPEED_UDC_XFER_DONE;
+}
+
+/*
  * OUT transfer: receive data from the host by copying its OUT packet into the
  * buffer the guest gadget driver set up.
  *
@@ -668,6 +722,40 @@ static void aspeed_udc_ep_in_kick_desc(AspeedUDCState *s, int ep,
 }
 
 /*
+ * IN kick: the guest gadget driver wrote EP_DMA_STS to queue one buffer to
+ * send to the host. If a host IN request is already waiting (parked because
+ * there was no data before), send the buffer now and finish the request.
+ */
+static void aspeed_udc_ep_in_kick_single(AspeedUDCState *s, int ep)
+{
+    AspeedUDCEP *e = &s->ep[ep];
+    USBPacket *p = e->pkt;
+
+    /* Do nothing if no host request is waiting, or no buffer was queued. */
+    if (!p || !FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, WPTR)) {
+        return;
+    }
+
+    /* A kick serves a newly queued buffer, so start from its beginning. */
+    e->single_buf_off = 0;
+
+    switch (aspeed_udc_ep_xfer_in_single(s, ep, p)) {
+    case ASPEED_UDC_XFER_DONE:
+        e->pkt = NULL;
+        p->status = USB_RET_SUCCESS;
+        usb_packet_complete(USB_DEVICE(s->usbgadget), p);
+        break;
+    case ASPEED_UDC_XFER_ERROR:
+        e->pkt = NULL;
+        p->status = USB_RET_IOERROR;
+        usb_packet_complete(USB_DEVICE(s->usbgadget), p);
+        break;
+    case ASPEED_UDC_XFER_MORE:
+        break;
+    }
+}
+
+/*
  * OUT kick: the guest gadget driver wrote EP_DMA_STS to give us a buffer for
  * OUT data. If an OUT packet is already waiting (parked because there was no
  * buffer before), copy its data into the buffer now and finish it. If the
@@ -739,6 +827,8 @@ static void aspeed_udc_ep_write(void *opaque, hwaddr offset, uint64_t data,
         } else {
             if (FIELD_EX32(e->regs[R_EP_DMA_CTRL], EP_DMA_CTRL, DESC_OP_EN)) {
                 aspeed_udc_ep_in_kick_desc(s, e->index, old_val);
+            } else {
+                aspeed_udc_ep_in_kick_single(s, e->index);
             }
         }
         break;
@@ -774,6 +864,7 @@ static void aspeed_udc_reset_hold(Object *obj, ResetType type)
         memset(s->ep[i].regs, 0, sizeof(s->ep[i].regs));
         s->ep[i].pkt = NULL;
         s->ep[i].desc_off = 0;
+        s->ep[i].single_buf_off = 0;
     }
 
     /* Device-reset default: root, DMA and EP-pool soft-reset bits set */
@@ -896,22 +987,31 @@ static int aspeed_udc_find_ep(AspeedUDCState *s, int ep_nr, bool is_out)
 static void aspeed_udc_ep_data_in(AspeedUDCState *s, int ep, USBPacket *p)
 {
     AspeedUDCEP *e = &s->ep[ep];
+    bool is_desc = FIELD_EX32(e->regs[R_EP_DMA_CTRL], EP_DMA_CTRL, DESC_OP_EN);
     uint32_t rptr = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, RPTR);
     uint32_t wptr = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, WPTR);
+    AspeedUDCXferResult res;
 
-    if (rptr == wptr) {
+    /*
+     * In descriptor mode the ring is empty when the pointers meet;
+     * in single-stage mode one buffer is queued by setting the write pointer.
+     */
+    if (is_desc ? (rptr == wptr) : (wptr == 0)) {
         /*
          * No IN data is queued yet. Save the packet and return ASYNC
          * instead of NAK. A NAK would make the host retry slowly.
-         * aspeed_udc_ep_in_kick_desc() serves and completes this packet later,
-         * once the guest gadget driver queues descriptors.
+         * The kick from the guest gadget driver serves and completes this
+         * packet later, once it queues something to send.
          */
         e->pkt = p;
         p->status = USB_RET_ASYNC;
         return;
     }
 
-    switch (aspeed_udc_ep_xfer_in_desc(s, ep, p)) {
+    res = is_desc ? aspeed_udc_ep_xfer_in_desc(s, ep, p)
+                  : aspeed_udc_ep_xfer_in_single(s, ep, p);
+
+    switch (res) {
     case ASPEED_UDC_XFER_DONE:
         p->status = USB_RET_SUCCESS;
         break;
