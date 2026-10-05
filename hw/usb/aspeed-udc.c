@@ -729,12 +729,17 @@ static void aspeed_udc_ep_write(void *opaque, hwaddr offset, uint64_t data,
     case R_EP_DMA_STS:
         val &= 0x77ffffff;
         e->regs[reg] = val;
-        if (FIELD_EX32(e->regs[R_EP_DMA_CTRL], EP_DMA_CTRL, DESC_OP_EN)) {
-            /* IN, descriptor-list mode */
-            aspeed_udc_ep_in_kick_desc(s, e->index, old_val);
-        } else {
-            /* OUT, single-stage mode */
+        if (FIELD_EX32(e->regs[R_EP_CONFIG], EP_CONFIG, DIR_OUT)) {
+            if (FIELD_EX32(e->regs[R_EP_DMA_CTRL], EP_DMA_CTRL, DESC_OP_EN)) {
+                qemu_log_mask(LOG_UNIMP, "%s: ep %d OUT descriptor mode is not"
+                              " implemented\n", __func__, e->index);
+                break;
+            }
             aspeed_udc_ep_out_kick_single(s, e->index);
+        } else {
+            if (FIELD_EX32(e->regs[R_EP_DMA_CTRL], EP_DMA_CTRL, DESC_OP_EN)) {
+                aspeed_udc_ep_in_kick_desc(s, e->index, old_val);
+            }
         }
         break;
     default:
