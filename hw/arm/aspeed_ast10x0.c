@@ -101,7 +101,6 @@ static const UnimplementedDeviceConfig aspeed_soc_ast10x0_unimp_devs[] = {
     { "iomem", "aspeed.io", 0x7E600000, 0x00200000, -1000 },
     { "pwm", "aspeed.pwm", 0x7E610000, 0x100, -1000 },
     { "espi", "aspeed.espi", 0x7E6EE000, 0x800, -1000 },
-    { "udc", "aspeed.udc", 0x7E6A2000, 0x1000, -1000 },
     { "sgpiom", "aspeed.sgpiom", 0x7E780500, 0x100, -1000 },
     { "jtag[0]", "aspeed.jtag0", 0x7E6E4000, 0x20, -1000 },
     { "jtag[1]", "aspeed.jtag1", 0x7E6E4100, 0x20, -1000 },
@@ -170,6 +169,8 @@ static void aspeed_soc_ast10x0_init(Object *obj, const char *socname)
 
     snprintf(typename, sizeof(typename), "aspeed.hace-%s", socname);
     object_initialize_child(obj, "hace", &s->hace, typename);
+
+    object_initialize_child(obj, "udc", &a->udc, TYPE_ASPEED_UDC);
 }
 
 static void aspeed_soc_ast1030_init(Object *obj)
@@ -389,6 +390,16 @@ static bool aspeed_soc_ast10x0_realize(Aspeed10x0SoCState *a, Error **errp)
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->gpio), 0,
                        aspeed_soc_ast1030_get_irq(s, ASPEED_DEV_GPIO));
 
+    /* UDC - USB 2.0 Device Controller */
+    object_property_set_link(OBJECT(&a->udc), "dram",
+                             OBJECT(&s->sram[0]), &error_abort);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&a->udc), errp)) {
+        return false;
+    }
+    aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&a->udc), 0,
+                    sc->memmap[ASPEED_DEV_UDC]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&a->udc), 0,
+                       aspeed_soc_ast1030_get_irq(s, ASPEED_DEV_UDC));
     return true;
 }
 
