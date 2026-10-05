@@ -53,6 +53,8 @@ typedef struct AspeedUDCEP {
     USBPacket *pkt;
     /* bytes of the current IN descriptor already served */
     uint32_t desc_off;
+    /* bytes of the single-stage IN buffer already sent */
+    uint32_t single_buf_off;
 } AspeedUDCEP;
 
 struct AspeedUDCGadget {
