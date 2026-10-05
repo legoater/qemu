@@ -619,12 +619,13 @@ static AspeedUDCXferResult aspeed_udc_ep_xfer_out_single(AspeedUDCState *s,
  * If the request needs more data than was queued, keep it parked and wait for
  * the next kick.
  */
-static void aspeed_udc_ep_in_kick_desc(AspeedUDCState *s, int ep, uint32_t val)
+static void aspeed_udc_ep_in_kick_desc(AspeedUDCState *s, int ep,
+                                       uint32_t old_val)
 {
     AspeedUDCEP *e = &s->ep[ep];
-    uint32_t cur_rptr = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, RPTR);
-    uint32_t new_rptr = FIELD_EX32(val, EP_DMA_STS, RPTR);
-    uint32_t new_wptr = FIELD_EX32(val, EP_DMA_STS, WPTR);
+    uint32_t new_rptr = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, RPTR);
+    uint32_t new_wptr = FIELD_EX32(e->regs[R_EP_DMA_STS], EP_DMA_STS, WPTR);
+    uint32_t cur_rptr = FIELD_EX32(old_val, EP_DMA_STS, RPTR);
     USBPacket *p = e->pkt;
 
     /*
@@ -641,8 +642,9 @@ static void aspeed_udc_ep_in_kick_desc(AspeedUDCState *s, int ep, uint32_t val)
         cur_rptr = new_rptr;
         e->desc_off = 0;
     }
-    /* store the guest's write, but keep our own read pointer */
-    e->regs[R_EP_DMA_STS] = FIELD_DP32(val, EP_DMA_STS, RPTR, cur_rptr);
+    /* keep our own read pointer */
+    e->regs[R_EP_DMA_STS] = FIELD_DP32(e->regs[R_EP_DMA_STS], EP_DMA_STS,
+                                       RPTR, cur_rptr);
 
     /* nothing to do unless an IN packet is waiting and the ring has data */
     if (!p || cur_rptr == new_wptr) {
@@ -715,6 +717,7 @@ static void aspeed_udc_ep_write(void *opaque, hwaddr offset, uint64_t data,
     AspeedUDCEP *e = opaque;
     AspeedUDCState *s = container_of(e - e->index, AspeedUDCState, ep[0]);
     uint32_t reg = offset >> 2;
+    uint32_t old_val = e->regs[reg];
     uint32_t val = data;
 
     trace_aspeed_udc_ep_write(e->index, offset, val);
@@ -725,12 +728,12 @@ static void aspeed_udc_ep_write(void *opaque, hwaddr offset, uint64_t data,
         break;
     case R_EP_DMA_STS:
         val &= 0x77ffffff;
+        e->regs[reg] = val;
         if (FIELD_EX32(e->regs[R_EP_DMA_CTRL], EP_DMA_CTRL, DESC_OP_EN)) {
             /* IN, descriptor-list mode */
-            aspeed_udc_ep_in_kick_desc(s, e->index, val);
+            aspeed_udc_ep_in_kick_desc(s, e->index, old_val);
         } else {
             /* OUT, single-stage mode */
-            e->regs[reg] = val;
             aspeed_udc_ep_out_kick_single(s, e->index);
         }
         break;
