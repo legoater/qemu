@@ -18,6 +18,7 @@
 #include "ui/console.h"
 #include "hw/virtio/virtio-gpu.h"
 #include "hw/virtio/virtio-gpu-pixman.h"
+#include "hw/vfio/vfio-device.h"
 #include "trace.h"
 #include "system/ramblock.h"
 #include "system/hostmem.h"
@@ -27,28 +28,32 @@
 #include "standard-headers/linux/udmabuf.h"
 #include "standard-headers/drm/drm_fourcc.h"
 
-static void virtio_gpu_create_udmabuf(struct virtio_gpu_simple_resource *res)
+static int virtio_gpu_create_udmabuf(struct virtio_gpu_simple_resource *res,
+                                     Error **errp)
 {
     g_autofree struct udmabuf_create_list *list = NULL;
     RAMBlock *rb;
     ram_addr_t offset;
-    int udmabuf, i;
+    int udmabuf, i, fd;
 
     udmabuf = udmabuf_fd();
     if (udmabuf < 0) {
-        return;
+        error_setg(errp, "udmabuf device not available or enabled");
+        return VFIO_DMABUF_CREATE_ERR_UNSPEC;
     }
 
     list = g_try_malloc0(sizeof(struct udmabuf_create_list) +
                          sizeof(struct udmabuf_create_item) * res->iov_cnt);
     if (!list) {
-        return;
+        error_setg(errp, "failed to allocate udmabuf create list");
+        return VFIO_DMABUF_CREATE_ERR_UNSPEC;
     }
 
     for (i = 0; i < res->iov_cnt; i++) {
         rb = qemu_ram_block_from_host(res->iov[i].iov_base, false, &offset);
         if (!rb || rb->fd < 0) {
-            return;
+            error_setg(errp, "IOV memory address incompatible with udmabuf ");
+            return VFIO_DMABUF_CREATE_ERR_INVALID_IOV;
         }
 
         list->list[i].memfd  = rb->fd;
@@ -59,22 +64,28 @@ static void virtio_gpu_create_udmabuf(struct virtio_gpu_simple_resource *res)
     list->count = res->iov_cnt;
     list->flags = UDMABUF_FLAGS_CLOEXEC;
 
-    res->dmabuf_fd = ioctl(udmabuf, UDMABUF_CREATE_LIST, list);
-    if (res->dmabuf_fd < 0) {
-        warn_report("%s: UDMABUF_CREATE_LIST: %s", __func__,
-                    strerror(errno));
+    fd = ioctl(udmabuf, UDMABUF_CREATE_LIST, list);
+    if (fd < 0) {
+        error_setg_errno(errp, errno, "UDMABUF_CREATE_LIST: ioctl failed");
+        if (errno == EINVAL || errno == EBADFD) {
+            return VFIO_DMABUF_CREATE_ERR_INVALID_IOV;
+        }
+        return VFIO_DMABUF_CREATE_ERR_UNSPEC;
     }
+    return fd;
 }
 
-static void virtio_gpu_remap_dmabuf(struct virtio_gpu_simple_resource *res)
+static void *virtio_gpu_remap_dmabuf(struct virtio_gpu_simple_resource *res,
+                                     Error **errp)
 {
-    res->remapped = mmap(NULL, res->blob_size, PROT_READ,
-                         MAP_SHARED, res->dmabuf_fd, 0);
-    if (res->remapped == MAP_FAILED) {
-        warn_report("%s: dmabuf mmap failed: %s", __func__,
-                    strerror(errno));
-        res->remapped = NULL;
+    void *map;
+
+    map = mmap(NULL, res->blob_size, PROT_READ, MAP_SHARED, res->dmabuf_fd, 0);
+    if (map == MAP_FAILED) {
+        error_setg_errno(errp, errno, "dmabuf mmap failed");
+        return NULL;
     }
+    return map;
 }
 
 void virtio_gpu_fini_dmabuf(struct virtio_gpu_simple_resource *res)
@@ -130,6 +141,7 @@ bool virtio_gpu_have_udmabuf(void)
 
 bool virtio_gpu_init_dmabuf(struct virtio_gpu_simple_resource *res)
 {
+    Error *local_err = NULL;
     void *pdata = NULL;
 
     res->dmabuf_fd = -1;
@@ -137,17 +149,28 @@ bool virtio_gpu_init_dmabuf(struct virtio_gpu_simple_resource *res)
         res->iov[0].iov_len < 4096) {
         pdata = res->iov[0].iov_base;
     } else if (res->blob_size) {
-        virtio_gpu_create_udmabuf(res);
-        if (res->dmabuf_fd < 0) {
+        res->dmabuf_fd = virtio_gpu_create_udmabuf(res, &local_err);
+        if (res->dmabuf_fd == VFIO_DMABUF_CREATE_ERR_INVALID_IOV) {
+            error_free_or_abort(&local_err);
+
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "Cannot create dmabuf: incompatible memory\n");
             return false;
+        } else if (res->dmabuf_fd >= 0) {
+            pdata = virtio_gpu_remap_dmabuf(res, &local_err);
+            if (!pdata) {
+                virtio_gpu_fini_dmabuf(res);
+            }
+        } else {
+            res->dmabuf_fd = -1;
         }
-        virtio_gpu_remap_dmabuf(res);
-        if (!res->remapped) {
-            virtio_gpu_fini_dmabuf(res);
+
+        if (res->dmabuf_fd < 0) {
+            error_report_err(local_err);
             return false;
         }
         res->share_handle = res->dmabuf_fd;
-        pdata = res->remapped;
+        res->remapped = pdata;
     }
 
     res->blob = pdata;
