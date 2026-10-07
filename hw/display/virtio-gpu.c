@@ -407,7 +407,7 @@ static void virtio_gpu_resource_create_blob(VirtIOGPU *g,
             return;
         }
 
-        if (!virtio_gpu_init_udmabuf(res)) {
+        if (!virtio_gpu_init_dmabuf(res)) {
             cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
             virtio_gpu_cleanup_mapping(g, res);
             g_free(res);
@@ -1091,7 +1091,7 @@ void virtio_gpu_cleanup_mapping(VirtIOGPU *g,
     res->addrs = NULL;
 
     if (res->blob) {
-        virtio_gpu_fini_udmabuf(res);
+        virtio_gpu_fini_dmabuf(res);
     }
 }
 
@@ -1136,7 +1136,7 @@ virtio_gpu_resource_attach_backing(VirtIOGPU *g,
         return;
     }
 
-    if (!res->image && !virtio_gpu_init_udmabuf(res)) {
+    if (!res->image && !virtio_gpu_init_dmabuf(res)) {
         cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
         virtio_gpu_cleanup_mapping(g, res);
     }
@@ -1652,7 +1652,7 @@ static int virtio_gpu_blob_load(QEMUFile *f, void *opaque, size_t size,
                 return -EINVAL;
             }
 
-            if (!virtio_gpu_init_udmabuf(res)) {
+            if (!virtio_gpu_init_dmabuf(res)) {
                 virtio_gpu_cleanup_mapping(g, res);
                 g_free(res);
                 return -EINVAL;
