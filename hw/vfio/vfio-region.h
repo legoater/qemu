@@ -44,4 +44,14 @@ void vfio_region_mmaps_set_enabled(VFIORegion *region, bool enabled);
 void vfio_region_exit(VFIORegion *region);
 void vfio_region_finalize(VFIORegion *region);
 
+/**
+ * Return the VFIO region associated with a given MemoryRegion. This can
+ * be useful in retrieving region info such as index and offset.
+ *
+ * @mr: MemoryRegion to use
+ *
+ * Returns the region or NULL on error.
+ */
+VFIORegion *vfio_get_region_from_mr(MemoryRegion *mr);
+
 #endif /* HW_VFIO_REGION_H */
