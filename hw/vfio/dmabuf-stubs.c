@@ -15,3 +15,10 @@ int vfio_device_create_dmabuf_fd(struct iovec *iov, unsigned int iov_cnt,
     error_setg(errp, "VFIO dmabuf support is not enabled");
     return VFIO_DMABUF_CREATE_ERR_UNSPEC;
 }
+
+void *vfio_device_mmap_dmabuf(struct iovec *iov, unsigned int iov_cnt,
+                              Error **errp)
+{
+    error_setg(errp, "VFIO mmap dmabuf support is not enabled");
+    return NULL;
+}
