@@ -771,9 +771,16 @@ static int vfio_save_complete_precopy(QEMUFile *f, void *opaque)
 
     trace_vfio_save_complete_precopy_start(vbasedev->name);
 
-    /* We reach here with device state STOP or STOP_COPY only */
+    /*
+     * We normally reach here with the device in STOP or STOP_COPY. However, if
+     * an earlier stop transition was declined by the device, it may still be in
+     * a running state. Recover to the current device state rather than STOP, so
+     * a device that declines the stop-copy transition is rolled back to its
+     * current state instead of being reset out from under the guest.
+     */
     ret = vfio_migration_set_state(vbasedev, VFIO_DEVICE_STATE_STOP_COPY,
-                                   VFIO_DEVICE_STATE_STOP, &local_err);
+                                   vbasedev->migration->device_state,
+                                   &local_err);
     if (ret) {
         error_report_err(local_err);
         return ret;
@@ -993,6 +1000,7 @@ static void vfio_vmstate_change_prepare(void *opaque, bool running,
     VFIODevice *vbasedev = opaque;
     VFIOMigration *migration = vbasedev->migration;
     enum vfio_device_mig_state new_state;
+    enum vfio_device_mig_state recover_state;
     Error *local_err = NULL;
     int ret;
 
@@ -1009,7 +1017,15 @@ static void vfio_vmstate_change_prepare(void *opaque, bool running,
         vfio_final_precopy_reinit_check(vbasedev);
     }
 
-    ret = vfio_migration_set_state_or_reset(vbasedev, new_state, &local_err);
+    /*
+     * If the device declines a stop-direction transition, roll it back to its
+     * current state instead of resetting it out from under the guest. On resume
+     * (running), a device that cannot transition is genuinely broken, so reset
+     * it by using ERROR as the recover state.
+     */
+    recover_state = running ? VFIO_DEVICE_STATE_ERROR : migration->device_state;
+    ret = vfio_migration_set_state(vbasedev, new_state, recover_state,
+                                   &local_err);
     if (ret) {
         /*
          * Migration should be aborted in this case, but vm_state_notify()
@@ -1026,21 +1042,34 @@ static void vfio_vmstate_change_prepare(void *opaque, bool running,
 static void vfio_vmstate_change(void *opaque, bool running, RunState state)
 {
     VFIODevice *vbasedev = opaque;
+    VFIOMigration *migration = vbasedev->migration;
     enum vfio_device_mig_state new_state;
+    enum vfio_device_mig_state recover_state;
     Error *local_err = NULL;
     int ret;
 
     if (running) {
         new_state = VFIO_DEVICE_STATE_RUNNING;
+        /*
+         * If the device fails to resume, it is genuinely broken, so reset it
+         * by using ERROR as the recover state.
+         */
+        recover_state = VFIO_DEVICE_STATE_ERROR;
     } else {
         new_state =
             (vfio_device_state_is_precopy(vbasedev) &&
              (state == RUN_STATE_FINISH_MIGRATE || state == RUN_STATE_PAUSED)) ?
                 VFIO_DEVICE_STATE_STOP_COPY :
                 VFIO_DEVICE_STATE_STOP;
+        /*
+         * A device may decline to stop (e.g. it is busy). Roll it back to its
+         * current state rather than resetting it out from under the guest.
+         */
+        recover_state = migration->device_state;
     }
 
-    ret = vfio_migration_set_state_or_reset(vbasedev, new_state, &local_err);
+    ret = vfio_migration_set_state(vbasedev, new_state, recover_state,
+                                   &local_err);
     if (ret) {
         /*
          * Migration should be aborted in this case, but vm_state_notify()
