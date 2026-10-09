@@ -22,7 +22,11 @@
 #include "system/hostmem.h"
 #include "system/numa.h"
 #include "hw/cxl/cxl.h"
+#include "hw/cxl/cxl_host.h"
 #include "hw/pci/msix.h"
+#include "hw/pci/pci_bus.h"
+#include "hw/pci/pci_bridge.h"
+#include "trace.h"
 
 static void update_dvsecs(CXLAccelDev *acceld)
 {
@@ -273,6 +277,74 @@ static void cxl_accel_exit(PCIDevice *pci_dev)
     clean_memory(pci_dev);
 }
 
+/*
+ * Mimic firmware behavior: program endpoint HDM decoder0 with the
+ * HPA range from the CFMWS window and mark it committed. This is
+ * what real firmware does before the OS boots, allowing the kernel
+ * CXL core to discover an auto-region for the device.
+ */
+static void commit_hdm_decoder0(uint32_t *cache_mem,
+                                uint64_t base, uint64_t size)
+{
+    uint32_t ctrl;
+
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_BASE_LO, base & 0xF0000000);
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_BASE_HI, base >> 32);
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_SIZE_LO, size & 0xF0000000);
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_SIZE_HI, size >> 32);
+
+    ctrl = ldl_le_p(cache_mem + R_CXL_HDM_DECODER0_CTRL);
+    ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, ERR, 0);
+    ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, COMMITTED, 1);
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_CTRL, ctrl);
+}
+
+static void commit_hb_hdm_decoder0(PXBCXLDev *pxb, uint64_t base,
+                                   uint64_t size)
+{
+    PCIHostState *hb = PCI_HOST_BRIDGE(pxb->cxl_host_bridge);
+    CXLComponentState *hb_cstate = cxl_get_hb_cstate(hb);
+
+    if (hb_cstate) {
+        commit_hdm_decoder0(hb_cstate->crb.cache_mem_registers, base, size);
+    }
+}
+
+static void cxl_accel_fw_commit_hdm(CXLAccelDev *acceld)
+{
+    CXLFixedWindow *fw;
+
+    if (!acceld->hostvmem) {
+        return;
+    }
+
+    fw = cxl_fmw_find_non_interleaved(PCI_DEVICE(acceld));
+    if (!fw) {
+        return;
+    }
+
+    trace_cxl_accel_fw_commit_hdm(fw->base, acceld->hostvmem->size);
+
+    /* Commit host bridge HDM decoder0 */
+    commit_hb_hdm_decoder0(fw->target_hbs[0], fw->base,
+                           acceld->hostvmem->size);
+
+    /* Commit endpoint HDM decoder0 */
+    commit_hdm_decoder0(acceld->cxl_cstate.crb.cache_mem_registers,
+                        fw->base, acceld->hostvmem->size);
+
+    cfmws_update_non_interleaved(true);
+}
+
+/*
+ * Program HDM decoders in the exit phase so that the host bridge
+ * hold phase (which memsets its registers to zero) has already run.
+ */
+static void cxl_accel_reset_exit(Object *obj, ResetType type)
+{
+    cxl_accel_fw_commit_hdm(CXL_ACCEL(obj));
+}
+
 static void cxl_accel_reset_hold(Object *obj, ResetType type)
 {
     CXLAccelDev *acceld = CXL_ACCEL(obj);
@@ -314,6 +386,7 @@ static void cxl_accel_class_init(ObjectClass *oc, const void *data)
     set_bit(DEVICE_CATEGORY_STORAGE, dc->categories);
     dc->desc = "CXL Accelerator Device (Type 2)";
     rc->phases.hold = cxl_accel_reset_hold;
+    rc->phases.exit = cxl_accel_reset_exit;
     device_class_set_props(dc, cxl_accel_props);
 }
 
