@@ -3800,6 +3800,58 @@ static int vfio_cxl_match_fmws(PXBCXLDev *pxb, hwaddr *base, uint64_t *size,
     return matches;
 }
 
+
+/*
+ * Program the host bridge HDM decoder0 with the CFMWS range so the
+ * guest kernel auto-region code can find a matching decoder at every
+ * level of the port hierarchy. Must be called after pxb-cxl reset
+ * clears the HB registers.
+ */
+static void vfio_cxl_commit_hb_decoder(VFIOPCIDevice *vdev)
+{
+    VFIOCXL *cxl = &vdev->cxl;
+    CXLComponentState *hb_cstate;
+    PXBCXLDev *pxb;
+    PCIHostState *hb;
+    uint32_t *reg;
+    uint32_t ctrl;
+
+    if (!cxl->enabled || !cxl->fmws_base) {
+        return;
+    }
+
+    pxb = vfio_cxl_find_pxb(vdev, NULL);
+    if (!pxb) {
+        return;
+    }
+
+    hb = PCI_HOST_BRIDGE(pxb->cxl_host_bridge);
+    hb_cstate = cxl_get_hb_cstate(hb);
+    if (!hb_cstate) {
+        return;
+    }
+
+    reg = hb_cstate->crb.cache_mem_registers;
+
+    /* Restore HDM capability that passthrough mode (ID=0) hid */
+    ARRAY_FIELD_DP32(reg, CXL_HDM_CAPABILITY_HEADER, ID, 5);
+    ARRAY_FIELD_DP32(reg, CXL_HDM_DECODER_CAPABILITY, DECODER_COUNT,
+                     cxl_decoder_count_enc(1));
+
+    stl_le_p(reg + R_CXL_HDM_DECODER0_BASE_LO,
+             cxl->fmws_base & 0xF0000000);
+    stl_le_p(reg + R_CXL_HDM_DECODER0_BASE_HI,
+             cxl->fmws_base >> 32);
+    stl_le_p(reg + R_CXL_HDM_DECODER0_SIZE_LO,
+             cxl->dpa_size & 0xF0000000);
+    stl_le_p(reg + R_CXL_HDM_DECODER0_SIZE_HI,
+             cxl->dpa_size >> 32);
+    ctrl = ldl_le_p(reg + R_CXL_HDM_DECODER0_CTRL);
+    ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, ERR, 0);
+    ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, COMMITTED, 1);
+    stl_le_p(reg + R_CXL_HDM_DECODER0_CTRL, ctrl);
+}
+
 /*
  * Fix the bounds of the device's memory window once the topology has settled.
  * Exactly one single-target CFMWS, with an assigned base and room for the HDM
@@ -4580,6 +4632,11 @@ static void vfio_pci_reset_hold(Object *obj, ResetType type)
     vfio_pci_reset(DEVICE(obj));
 }
 
+static void vfio_pci_reset_exit(Object *obj, ResetType type)
+{
+    vfio_cxl_commit_hb_decoder(VFIO_PCI_DEVICE(obj));
+}
+
 static void vfio_pci_init(Object *obj)
 {
     PCIDevice *pci_dev = PCI_DEVICE(obj);
@@ -4724,6 +4781,7 @@ static void vfio_pci_class_init(ObjectClass *klass, const void *data)
 
     ResettableClass *rc = RESETTABLE_CLASS(klass);
     rc->phases.hold = vfio_pci_reset_hold;
+    rc->phases.exit = vfio_pci_reset_exit;
     device_class_set_props(dc, vfio_pci_properties);
     object_class_property_add_str(klass, "fd", NULL, vfio_pci_set_fd);
     dc->vmsd = &vfio_cpr_pci_vmstate;
