@@ -6,3 +6,6 @@ mhp_pc_dimm_assigned_slot(int slot) "%d"
 memory_device_pre_plug(const char *id, uint64_t addr) "id=%s addr=0x%"PRIx64
 memory_device_plug(const char *id, uint64_t addr) "id=%s addr=0x%"PRIx64
 memory_device_unplug(const char *id, uint64_t addr) "id=%s addr=0x%"PRIx64
+
+# cxl_accel.c
+cxl_accel_fw_commit_hdm(uint64_t base, uint64_t size) "base=0x%"PRIx64" size=0x%"PRIx64
