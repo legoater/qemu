@@ -31,6 +31,7 @@
 static void update_dvsecs(CXLAccelDev *acceld)
 {
     CXLComponentState *cxl_cstate = &acceld->cxl_cstate;
+    CXLFixedWindow *fw;
     uint8_t *dvsec;
     uint32_t range1_size_hi = 0, range1_size_lo = 0,
              range1_base_hi = 0, range1_base_lo = 0;
@@ -39,6 +40,12 @@ static void update_dvsecs(CXLAccelDev *acceld)
         range1_size_hi = acceld->hostvmem->size >> 32;
         range1_size_lo = (2 << 5) | (2 << 2) | 0x3 |
                          (acceld->hostvmem->size & 0xF0000000);
+    }
+
+    fw = cxl_fmw_find_non_interleaved(PCI_DEVICE(acceld));
+    if (fw) {
+        range1_base_hi = fw->base >> 32;
+        range1_base_lo = fw->base & 0xF0000000;
     }
 
     dvsec = (uint8_t *)&(CXLDVSECDevice){
