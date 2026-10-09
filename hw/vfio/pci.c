@@ -4575,6 +4575,11 @@ post_reset:
     vfio_pci_post_reset(vdev);
 }
 
+static void vfio_pci_reset_hold(Object *obj, ResetType type)
+{
+    vfio_pci_reset(DEVICE(obj));
+}
+
 static void vfio_pci_init(Object *obj)
 {
     PCIDevice *pci_dev = PCI_DEVICE(obj);
@@ -4717,7 +4722,8 @@ static void vfio_pci_class_init(ObjectClass *klass, const void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *pdc = PCI_DEVICE_CLASS(klass);
 
-    device_class_set_legacy_reset(dc, vfio_pci_reset);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
+    rc->phases.hold = vfio_pci_reset_hold;
     device_class_set_props(dc, vfio_pci_properties);
     object_class_property_add_str(klass, "fd", NULL, vfio_pci_set_fd);
     dc->vmsd = &vfio_cpr_pci_vmstate;
