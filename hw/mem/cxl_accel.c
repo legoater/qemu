@@ -41,7 +41,8 @@ static void update_dvsecs(CXLAccelDev *acceld)
     }
 
     dvsec = (uint8_t *)&(CXLDVSECDevice){
-        .cap = 0x89f, /* Cache, IO, Mem, Rst, RstMemClr capable; HDM count 1 */
+        /* Cache, IO, Mem, Rst, RstMemClr capable */
+        .cap = 0x88f | (acceld->hdm_decoders << 4),
         .ctrl = 0x7, /* Cache, IO, Mem enable */
         .status2 = 0x2,
         .range1_size_hi = range1_size_hi,
@@ -370,6 +371,8 @@ static void cxl_accel_reset_hold(Object *obj, ResetType type)
     update_dvsecs(acceld);
     cxl_component_register_init_common(reg_state, write_msk, CXL3_TYPE2_DEVICE,
                                        false);
+    ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, DECODER_COUNT,
+                     cxl_decoder_count_enc(acceld->hdm_decoders));
     if (acceld->cci.initialized) {
         cxl_destroy_cci(&acceld->cci);
     }
@@ -379,6 +382,7 @@ static void cxl_accel_reset_hold(Object *obj, ResetType type)
 static const Property cxl_accel_props[] = {
     DEFINE_PROP_LINK("volatile-memdev", CXLAccelDev, hostvmem,
                      TYPE_MEMORY_BACKEND, HostMemoryBackend *),
+    DEFINE_PROP_UINT8("hdm-decoders", CXLAccelDev, hdm_decoders, 1),
 };
 
 static void cxl_accel_class_init(ObjectClass *oc, const void *data)
