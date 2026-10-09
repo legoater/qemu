@@ -837,6 +837,7 @@ struct CXLAccelDev {
 
     /* Properties */
     HostMemoryBackend *hostvmem;
+    uint8_t hdm_decoders;
 
     /* State */
     AddressSpace hostvmem_as;
