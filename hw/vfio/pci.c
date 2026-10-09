@@ -3886,6 +3886,21 @@ static bool vfio_cxl_do_bind_fmws(VFIOPCIDevice *vdev, Error **errp)
                         "migration", name, size, cxl->dpa_size, need);
         }
         cxl->fmws_base = base;
+
+        /* Update DVSEC range1 base in guest config space to match the CFMWS GPA */
+        if (cxl->dvsec_offset) {
+            PCIDevice *pdev = &vdev->parent_obj;
+            uint16_t off;
+
+            off = cxl->dvsec_offset + offsetof(CXLDVSECDevice, range1_base_hi);
+            pci_set_long(pdev->config + off, cxl->fmws_base >> 32);
+            pci_set_long(vdev->emulated_config_bits + off, ~0);
+
+            off = cxl->dvsec_offset + offsetof(CXLDVSECDevice, range1_base_lo);
+            pci_set_long(pdev->config + off, cxl->fmws_base & 0xF0000000);
+            pci_set_long(vdev->emulated_config_bits + off, ~0);
+        }
+
         cxl->fmws_size = size;
         return true;
     }
