@@ -3751,11 +3751,11 @@ static bool vfio_cxl_check_topology(VFIOPCIDevice *vdev, Error **errp)
     if (!pxb) {
         return false;
     }
-    if (pxb->hdm_for_passthrough) {
-        error_setg(errp,
-                   "vfio-cxl: %s: the pxb-cxl must be in HDM passthrough mode "
-                   "(do not set hdm_for_passthrough)", vdev->vbasedev.name);
-        return false;
+    if (!pxb->hdm_for_passthrough) {
+          error_setg(errp,
+                     "vfio-cxl: %s: the pxb-cxl must have hdm_for_passthrough set",
+                     vdev->vbasedev.name);
+          return false;
     }
     return true;
 }
