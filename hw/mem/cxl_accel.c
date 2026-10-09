@@ -277,9 +277,9 @@ static void cxl_accel_exit(PCIDevice *pci_dev)
     clean_memory(pci_dev);
 }
 
-static void cxl_accel_reset(DeviceState *dev)
+static void cxl_accel_reset_hold(Object *obj, ResetType type)
 {
-    CXLAccelDev *acceld = CXL_ACCEL(dev);
+    CXLAccelDev *acceld = CXL_ACCEL(obj);
     CXLComponentState *cxl_cstate = &acceld->cxl_cstate;
     uint32_t *reg_state = cxl_cstate->crb.cache_mem_registers;
     uint32_t *write_msk = cxl_cstate->crb.cache_mem_regs_write_mask;
@@ -313,7 +313,8 @@ static void cxl_accel_class_init(ObjectClass *oc, const void *data)
 
     set_bit(DEVICE_CATEGORY_STORAGE, dc->categories);
     dc->desc = "CXL Accelerator Device (Type 2)";
-    device_class_set_legacy_reset(dc, cxl_accel_reset);
+    ResettableClass *rc = RESETTABLE_CLASS(oc);
+    rc->phases.hold = cxl_accel_reset_hold;
     device_class_set_props(dc, cxl_accel_props);
 }
 
