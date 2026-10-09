@@ -38,8 +38,8 @@ static void update_dvsecs(CXLAccelDev *acceld)
     }
 
     dvsec = (uint8_t *)&(CXLDVSECDevice){
-        .cap = 0x1e,
-        .ctrl = 0x2,
+        .cap = 0x89f, /* Cache, IO, Mem, Rst, RstMemClr capable; HDM count 1 */
+        .ctrl = 0x7, /* Cache, IO, Mem enable */
         .status2 = 0x2,
         .range1_size_hi = range1_size_hi,
         .range1_size_lo = range1_size_lo,
