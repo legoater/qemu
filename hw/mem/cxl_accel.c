@@ -302,6 +302,19 @@ static void commit_hdm_decoder0(uint32_t *cache_mem,
     stl_le_p(cache_mem + R_CXL_HDM_DECODER0_CTRL, ctrl);
 }
 
+static void update_dvsec_range1_base(CXLAccelDev *acceld, hwaddr base)
+{
+    PCIDevice *pdev = PCI_DEVICE(acceld);
+    uint16_t dvsec = acceld->cxl_cstate.dvsecs[PCIE_CXL_DEVICE_DVSEC].lob;
+
+    pci_set_long(pdev->config + dvsec +
+                 offsetof(CXLDVSECDevice, range1_base_hi),
+                 base >> 32);
+    pci_set_long(pdev->config + dvsec +
+                 offsetof(CXLDVSECDevice, range1_base_lo),
+                 base & 0xF0000000);
+}
+
 static void cxl_accel_fw_commit_hdm(CXLAccelDev *acceld)
 {
     PCIDevice *pdev = PCI_DEVICE(acceld);
@@ -332,6 +345,8 @@ static void cxl_accel_fw_commit_hdm(CXLAccelDev *acceld)
 
     /* Commit endpoint HDM decoder0 */
     commit_hdm_decoder0(ep_cache_mem, fw->base, size);
+
+    update_dvsec_range1_base(acceld, fw->base);
 
     cfmws_update_non_interleaved(true);
 }
