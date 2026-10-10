@@ -843,6 +843,16 @@ struct CXLAccelDev {
     CXLComponentState cxl_cstate;
     CXLDeviceState cxl_dstate;
     CXLCCI cci;
+
+    /* Command BAR */
+    MemoryRegion cmd_bar;
+    uint32_t cmd_opcode;
+    uint64_t cmd_src_offset;
+    uint64_t cmd_src_length;
+    uint64_t cmd_dst_offset;
+    uint64_t cmd_dst_length;
+    uint32_t cmd_status;
+    uint64_t cmd_result_len;
 };
 
 struct CXLAccelClass {
