@@ -25,6 +25,7 @@
 #include "hw/cxl/cxl_host.h"
 #include "hw/pci/msix.h"
 #include "hw/pci/pci_bus.h"
+#include <zlib.h>
 #include "hw/pci/pci_bridge.h"
 #include "trace.h"
 
@@ -172,6 +173,183 @@ MemTxResult cxl_accel_write(PCIDevice *d, hwaddr host_addr, uint64_t data,
     return address_space_write(as, dpa_offset, attrs, &data, size);
 }
 
+/* Command BAR capability registers (read-only) */
+#define CXL_ACCEL_CAP_MAGIC        0x00
+#define CXL_ACCEL_CAP_VERSION      0x04
+#define CXL_ACCEL_CAP_CAPS         0x08
+#define CXL_ACCEL_CAP_MAX_XFER     0x0C
+
+/* Command BAR register offsets */
+#define CXL_ACCEL_CMD_BASE         0x10
+#define CXL_ACCEL_CMD_OPCODE       (CXL_ACCEL_CMD_BASE + 0x00)
+#define CXL_ACCEL_CMD_SRC_OFFSET   (CXL_ACCEL_CMD_BASE + 0x08)
+#define CXL_ACCEL_CMD_SRC_LENGTH   (CXL_ACCEL_CMD_BASE + 0x10)
+#define CXL_ACCEL_CMD_DST_OFFSET   (CXL_ACCEL_CMD_BASE + 0x18)
+#define CXL_ACCEL_CMD_DST_LENGTH   (CXL_ACCEL_CMD_BASE + 0x20)
+#define CXL_ACCEL_CMD_DOORBELL     (CXL_ACCEL_CMD_BASE + 0x28)
+#define CXL_ACCEL_CMD_STATUS       (CXL_ACCEL_CMD_BASE + 0x30)
+#define CXL_ACCEL_CMD_RESULT_LEN   (CXL_ACCEL_CMD_BASE + 0x38)
+#define CXL_ACCEL_CMD_BAR_SIZE     4096
+
+/* Capability register values */
+#define CXL_ACCEL_MAGIC            0x32584C43  /* "CLX2" */
+#define CXL_ACCEL_VERSION          1
+#define CXL_ACCEL_MAX_XFER         (256 * 1024 * 1024)
+
+/* Opcodes (bit positions in CAPS register) */
+#define CXL_ACCEL_OP_COMPRESS      0x01
+#define CXL_ACCEL_OP_DECOMPRESS    0x02
+#define CXL_ACCEL_SUPPORTED_OPS    ((1 << CXL_ACCEL_OP_COMPRESS) | \
+                                    (1 << CXL_ACCEL_OP_DECOMPRESS))
+
+/* Status values */
+#define CXL_ACCEL_STATUS_IDLE      0x00
+#define CXL_ACCEL_STATUS_DONE      0x02
+#define CXL_ACCEL_STATUS_ERROR     0x03
+
+#define CXL_ACCEL_CMD_BAR_IDX      5
+#define CXL_ACCEL_MSIX_CMD         2
+
+static void cxl_accel_process_cmd(CXLAccelDev *acceld)
+{
+    MemoryRegion *vmr;
+    uint64_t vmr_size;
+    uint8_t *buf, *src, *dst;
+    uLongf dst_len;
+    int rc;
+
+    if (!acceld->hostvmem) {
+        acceld->cmd_status = CXL_ACCEL_STATUS_ERROR;
+        return;
+    }
+
+    vmr = host_memory_backend_get_memory(acceld->hostvmem);
+    vmr_size = memory_region_size(vmr);
+    buf = memory_region_get_ram_ptr(vmr);
+
+    if (acceld->cmd_src_offset + acceld->cmd_src_length > vmr_size ||
+        acceld->cmd_dst_offset + acceld->cmd_dst_length > vmr_size) {
+        acceld->cmd_status = CXL_ACCEL_STATUS_ERROR;
+        return;
+    }
+
+    src = buf + acceld->cmd_src_offset;
+    dst = buf + acceld->cmd_dst_offset;
+    dst_len = acceld->cmd_dst_length;
+
+    switch (acceld->cmd_opcode) {
+    case CXL_ACCEL_OP_COMPRESS:
+        rc = compress2(dst, &dst_len, src, acceld->cmd_src_length,
+                       Z_DEFAULT_COMPRESSION);
+        break;
+    case CXL_ACCEL_OP_DECOMPRESS:
+        rc = uncompress(dst, &dst_len, src, acceld->cmd_src_length);
+        break;
+    default:
+        acceld->cmd_status = CXL_ACCEL_STATUS_ERROR;
+        return;
+    }
+
+    if (rc != Z_OK) {
+        acceld->cmd_status = CXL_ACCEL_STATUS_ERROR;
+        return;
+    }
+
+    acceld->cmd_result_len = dst_len;
+    acceld->cmd_status = CXL_ACCEL_STATUS_DONE;
+}
+
+static uint64_t cxl_accel_cmd_read(void *opaque, hwaddr addr, unsigned size)
+{
+    CXLAccelDev *acceld = opaque;
+
+    switch (addr) {
+    /* Capability registers */
+    case CXL_ACCEL_CAP_MAGIC:
+        return CXL_ACCEL_MAGIC;
+    case CXL_ACCEL_CAP_VERSION:
+        return CXL_ACCEL_VERSION;
+    case CXL_ACCEL_CAP_CAPS:
+        return CXL_ACCEL_SUPPORTED_OPS;
+    case CXL_ACCEL_CAP_MAX_XFER:
+        return CXL_ACCEL_MAX_XFER;
+    /* Command registers */
+    case CXL_ACCEL_CMD_OPCODE:
+        return acceld->cmd_opcode;
+    case CXL_ACCEL_CMD_SRC_OFFSET:
+        return acceld->cmd_src_offset;
+    case CXL_ACCEL_CMD_SRC_LENGTH:
+        return acceld->cmd_src_length;
+    case CXL_ACCEL_CMD_DST_OFFSET:
+        return acceld->cmd_dst_offset;
+    case CXL_ACCEL_CMD_DST_LENGTH:
+        return acceld->cmd_dst_length;
+    case CXL_ACCEL_CMD_STATUS:
+        return acceld->cmd_status;
+    case CXL_ACCEL_CMD_RESULT_LEN:
+        return acceld->cmd_result_len;
+    default:
+        return 0;
+    }
+}
+
+static void cxl_accel_cmd_write(void *opaque, hwaddr addr,
+                                uint64_t val, unsigned size)
+{
+    CXLAccelDev *acceld = opaque;
+
+    switch (addr) {
+    case CXL_ACCEL_CMD_OPCODE:
+        acceld->cmd_opcode = val;
+        break;
+    case CXL_ACCEL_CMD_SRC_OFFSET:
+        acceld->cmd_src_offset = val;
+        break;
+    case CXL_ACCEL_CMD_SRC_LENGTH:
+        acceld->cmd_src_length = val;
+        break;
+    case CXL_ACCEL_CMD_DST_OFFSET:
+        acceld->cmd_dst_offset = val;
+        break;
+    case CXL_ACCEL_CMD_DST_LENGTH:
+        acceld->cmd_dst_length = val;
+        break;
+    case CXL_ACCEL_CMD_DOORBELL:
+        if (val) {
+            cxl_accel_process_cmd(acceld);
+            msix_notify(PCI_DEVICE(acceld), CXL_ACCEL_MSIX_CMD);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static const MemoryRegionOps cxl_accel_cmd_ops = {
+    .read = cxl_accel_cmd_read,
+    .write = cxl_accel_cmd_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 4,
+        .max_access_size = 8,
+    },
+    .impl = {
+        .min_access_size = 4,
+        .max_access_size = 8,
+    },
+};
+
+static void setup_cmd_bar(PCIDevice *pci_dev)
+{
+    CXLAccelDev *acceld = CXL_ACCEL(pci_dev);
+
+    memory_region_init_io(&acceld->cmd_bar, OBJECT(pci_dev),
+                          &cxl_accel_cmd_ops, acceld,
+                          "cxl-accel-cmd", CXL_ACCEL_CMD_BAR_SIZE);
+    pci_register_bar(pci_dev, CXL_ACCEL_CMD_BAR_IDX,
+                     PCI_BASE_ADDRESS_SPACE_MEMORY, &acceld->cmd_bar);
+}
+
 static void clean_memory(PCIDevice *pci_dev)
 {
     CXLAccelDev *acceld = CXL_ACCEL(pci_dev);
@@ -267,6 +445,7 @@ static void cxl_accel_realize(PCIDevice *pci_dev, Error **errp)
     pcie_endpoint_cap_init(pci_dev, 0x80);
 
     setup_cxl_regs(pci_dev);
+    setup_cmd_bar(pci_dev);
 
     if (!setup_msix(pci_dev, errp)) {
         clean_memory(pci_dev);
@@ -358,6 +537,14 @@ static void cxl_accel_reset_hold(Object *obj, ResetType type)
     CXLComponentState *cxl_cstate = &acceld->cxl_cstate;
     uint32_t *reg_state = cxl_cstate->crb.cache_mem_registers;
     uint32_t *write_msk = cxl_cstate->crb.cache_mem_regs_write_mask;
+
+    acceld->cmd_opcode = 0;
+    acceld->cmd_src_offset = 0;
+    acceld->cmd_src_length = 0;
+    acceld->cmd_dst_offset = 0;
+    acceld->cmd_dst_length = 0;
+    acceld->cmd_status = CXL_ACCEL_STATUS_IDLE;
+    acceld->cmd_result_len = 0;
 
     update_dvsecs(acceld);
     cxl_component_register_init_common(reg_state, write_msk, CXL3_TYPE2_DEVICE,
