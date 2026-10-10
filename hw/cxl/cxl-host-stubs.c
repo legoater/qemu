@@ -23,3 +23,8 @@ GSList *cxl_fmws_get_all_sorted(void)
 {
     g_assert_not_reached();
 }
+
+CXLFixedWindow *cxl_fmw_find_by_pci_device(PCIDevice *pdev)
+{
+    g_assert_not_reached();
+}

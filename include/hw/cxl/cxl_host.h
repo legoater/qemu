@@ -19,6 +19,7 @@ void cxl_hook_up_pxb_registers(PCIBus *bus, CXLState *state, Error **errp);
 hwaddr cxl_fmws_set_memmap(hwaddr base, hwaddr max_addr);
 void cxl_fmws_update_mmio(void);
 GSList *cxl_fmws_get_all_sorted(void);
+CXLFixedWindow *cxl_fmw_find_by_pci_device(PCIDevice *pdev);
 
 extern const MemoryRegionOps cfmws_ops;
 

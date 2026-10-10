@@ -689,6 +689,37 @@ GSList *cxl_fmws_get_all_sorted(void)
     return g_slist_sort_with_data(cxl_fmws_get_all(), cfmws_cmp, NULL);
 }
 
+CXLFixedWindow *cxl_fmw_find_by_pci_device(PCIDevice *pdev)
+{
+    PCIBus *rootbus = pci_device_root_bus(pdev);
+    PCIHostState *hb = PCI_HOST_BRIDGE(rootbus->qbus.parent);
+    GSList *cfmws_list, *iter;
+    CXLFixedWindow *found = NULL;
+
+    cfmws_list = cxl_fmws_get_all_sorted();
+    for (iter = cfmws_list; iter; iter = iter->next) {
+        CXLFixedWindow *fw = CXL_FMW(iter->data);
+        PCIHostState *fw_hb;
+
+        if (fw->num_targets != 1 || !fw->base) {
+            continue;
+        }
+
+        if (!fw->target_hbs[0]) {
+            continue;
+        }
+
+        fw_hb = PCI_HOST_BRIDGE(fw->target_hbs[0]->cxl_host_bridge);
+        if (fw_hb == hb) {
+            found = fw;
+            break;
+        }
+    }
+    g_slist_free(cfmws_list);
+
+    return found;
+}
+
 static int cxl_fmws_mmio_map(Object *obj, void *opaque)
 {
     struct CXLFixedWindow *fw;
