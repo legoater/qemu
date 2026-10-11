@@ -7,6 +7,7 @@
 #include "qapi/error.h"
 #include "hw/cxl/cxl.h"
 #include "hw/cxl/cxl_host.h"
+#include "hw/pci/pcie_port.h"
 
 void cxl_fmws_link_targets(Error **errp) {};
 void cxl_machine_init(Object *obj, CXLState *state) {};
@@ -27,4 +28,19 @@ GSList *cxl_fmws_get_all_sorted(void)
 int cxl_decoder_count_dec(int enc_cnt)
 {
     g_assert_not_reached();
+}
+
+int cxl_decoder_count_enc(int count)
+{
+    g_assert_not_reached();
+}
+
+CXLComponentState *cxl_get_hb_cstate(PCIHostState *hb)
+{
+    return NULL;
+}
+
+int __attribute__((weak)) pcie_count_ds_ports(PCIBus *bus)
+{
+    return 0;
 }
