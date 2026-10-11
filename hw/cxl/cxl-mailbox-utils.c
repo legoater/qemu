@@ -4945,6 +4945,35 @@ static CXLRetCode cmd_identify_memory_device_accel(const struct cxl_cmd *cmd,
     return CXL_MBOX_SUCCESS;
 }
 
+static CXLRetCode
+cmd_ccls_get_partition_info_accel(const struct cxl_cmd *cmd,
+                                 uint8_t *payload_in, size_t len_in,
+                                 uint8_t *payload_out, size_t *len_out,
+                                 CXLCCI *cci)
+{
+    CXLAccelDev *acceld = CXL_ACCEL(cci->d);
+    struct {
+        uint64_t active_vmem;
+        uint64_t active_pmem;
+        uint64_t next_vmem;
+        uint64_t next_pmem;
+    } QEMU_PACKED *part_info = (void *)payload_out;
+    QEMU_BUILD_BUG_ON(sizeof(*part_info) != 0x20);
+    uint64_t vmem_size = 0;
+
+    if (acceld->hostvmem) {
+        vmem_size = acceld->hostvmem->size;
+    }
+
+    stq_le_p(&part_info->active_vmem, vmem_size / CXL_CAPACITY_MULTIPLIER);
+    stq_le_p(&part_info->active_pmem, 0);
+    stq_le_p(&part_info->next_vmem, 0);
+    stq_le_p(&part_info->next_pmem, 0);
+
+    *len_out = sizeof(*part_info);
+    return CXL_MBOX_SUCCESS;
+}
+
 static const struct cxl_cmd cxl_cmd_set_accel[256][256] = {
     [EVENTS][GET_RECORDS] = { "EVENTS_GET_RECORDS",
         cmd_events_get_records, 1, 0 },
@@ -4963,6 +4992,8 @@ static const struct cxl_cmd cxl_cmd_set_accel[256][256] = {
     [LOGS][GET_LOG] = { "LOGS_GET_LOG", cmd_logs_get_log, 0x18, 0 },
     [IDENTIFY][MEMORY_DEVICE] = { "IDENTIFY_MEMORY_DEVICE",
         cmd_identify_memory_device_accel, 0, 0 },
+    [CCLS][GET_PARTITION_INFO] = { "CCLS_GET_PARTITION_INFO",
+        cmd_ccls_get_partition_info_accel, 0, 0 },
 };
 
 void cxl_initialize_mailbox_accel(CXLCCI *cci, DeviceState *d,
