@@ -686,18 +686,18 @@ static bool vfio_device_lookup(struct iovec *iov, VFIODevice **vbasedevp,
 
     first_rb = qemu_ram_block_from_host(iov[0].iov_base, false, &offset);
     if (!first_rb) {
-        error_setg(errp, "Could not find first ramblock\n");
+        error_setg(errp, "Could not find first ramblock");
         return false;
     }
 
     *first_rbp = first_rb;
-    QLIST_FOREACH(vbasedev, &vfio_device_list, next) {
+    QLIST_FOREACH(vbasedev, &vfio_device_list, global_next) {
         if (vbasedev->dev == first_rb->mr->dev) {
             *vbasedevp = vbasedev;
             return true;
         }
     }
-    error_setg(errp, "No VFIO device found to create dmabuf from\n");
+    error_setg(errp, "No VFIO device found to create dmabuf from");
     return false;
 }
 
@@ -716,7 +716,7 @@ static bool vfio_region_lookup(void *addr, VFIORegion **regionp,
 
     rb = qemu_ram_block_from_host(addr, false, offsetp);
     if (!rb || rb != first_rb) {
-        error_setg(errp, "Dmabuf segments must belong to the same region\n");
+        error_setg(errp, "Dmabuf segments must belong to the same region");
         return false;
     }
 
@@ -725,7 +725,7 @@ static bool vfio_region_lookup(void *addr, VFIORegion **regionp,
         *regionp = region;
         return true;
     }
-    error_setg(errp, "Could not find valid region for dmabuf segment\n");
+    error_setg(errp, "Could not find valid region for dmabuf segment");
     return false;
 }
 
@@ -742,7 +742,7 @@ int vfio_device_create_dmabuf_fd(struct iovec *iov, unsigned int iov_cnt,
     int i, ret;
 
     if (!vfio_device_lookup(iov, &vbasedev, &first_rb, errp)) {
-        return VFIO_DMABUF_CREATE_ERR_INVALID_IOV;
+        return -ENODEV;
     }
 
     argsz = sizeof(*feature) + sizeof (*dma_buf) +
@@ -757,7 +757,7 @@ int vfio_device_create_dmabuf_fd(struct iovec *iov, unsigned int iov_cnt,
     for (i = 0; i < iov_cnt; i++) {
         if (!vfio_region_lookup(iov[i].iov_base, &region,
                                 first_rb, &offset, errp)) {
-            return VFIO_DMABUF_CREATE_ERR_INVALID_IOV;
+            return -ENODEV;
         }
 
         dma_buf->region_index = region->nr;
@@ -772,7 +772,7 @@ int vfio_device_create_dmabuf_fd(struct iovec *iov, unsigned int iov_cnt,
     if (ret < 0) {
         error_setg_errno(errp, -ret,
                          "Could not create dmabuf fd via VFIO device");
-        return VFIO_DMABUF_CREATE_ERR_UNSPEC;
+        return ret;
     }
     return ret;
 }
@@ -811,7 +811,7 @@ void *vfio_device_mmap_dmabuf(struct iovec *iov, unsigned int iov_cnt,
         }
 
         if (vfio_device_get_region_info(vbasedev, region->nr, &info)) {
-            error_setg(errp, "Cannot find region info for dmabuf segment\n");
+            error_setg(errp, "Cannot find region info for dmabuf segment");
             goto err;
         }
 
@@ -819,7 +819,7 @@ void *vfio_device_mmap_dmabuf(struct iovec *iov, unsigned int iov_cnt,
                       MAP_SHARED | MAP_FIXED, vbasedev->fd,
                       info->offset + offset);
         if (submap == MAP_FAILED) {
-            error_setg_errno(errp, errno, "Could not mmap dmabuf segment\n");
+            error_setg_errno(errp, errno, "Could not mmap dmabuf segment");
             goto err;
         }
         len += iov[i].iov_len;

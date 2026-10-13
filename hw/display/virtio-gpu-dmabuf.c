@@ -39,21 +39,21 @@ static int virtio_gpu_create_udmabuf(struct virtio_gpu_simple_resource *res,
     udmabuf = udmabuf_fd();
     if (udmabuf < 0) {
         error_setg(errp, "udmabuf device not available or enabled");
-        return VFIO_DMABUF_CREATE_ERR_UNSPEC;
+        return -ENODEV;
     }
 
     list = g_try_malloc0(sizeof(struct udmabuf_create_list) +
                          sizeof(struct udmabuf_create_item) * res->iov_cnt);
     if (!list) {
         error_setg(errp, "failed to allocate udmabuf create list");
-        return VFIO_DMABUF_CREATE_ERR_UNSPEC;
+        return -ENOMEM;
     }
 
     for (i = 0; i < res->iov_cnt; i++) {
         rb = qemu_ram_block_from_host(res->iov[i].iov_base, false, &offset);
         if (!rb || rb->fd < 0) {
-            error_setg(errp, "IOV memory address incompatible with udmabuf ");
-            return VFIO_DMABUF_CREATE_ERR_INVALID_IOV;
+            error_setg(errp, "IOV memory address incompatible with udmabuf");
+            return -EINVAL;
         }
 
         list->list[i].memfd  = rb->fd;
@@ -66,11 +66,13 @@ static int virtio_gpu_create_udmabuf(struct virtio_gpu_simple_resource *res,
 
     fd = ioctl(udmabuf, UDMABUF_CREATE_LIST, list);
     if (fd < 0) {
-        error_setg_errno(errp, errno, "UDMABUF_CREATE_LIST: ioctl failed");
-        if (errno == EINVAL || errno == EBADFD) {
-            return VFIO_DMABUF_CREATE_ERR_INVALID_IOV;
+        int saved_errno = errno;
+
+        error_setg_errno(errp, saved_errno, "UDMABUF_CREATE_LIST: ioctl failed");
+        if (saved_errno == EINVAL || saved_errno == EBADFD) {
+            return -EINVAL;
         }
-        return VFIO_DMABUF_CREATE_ERR_UNSPEC;
+        return -saved_errno;
     }
     return fd;
 }
@@ -150,13 +152,13 @@ bool virtio_gpu_init_dmabuf(struct virtio_gpu_simple_resource *res)
         pdata = res->iov[0].iov_base;
     } else if (res->blob_size) {
         res->dmabuf_fd = virtio_gpu_create_udmabuf(res, &local_err);
-        if (res->dmabuf_fd == VFIO_DMABUF_CREATE_ERR_INVALID_IOV) {
+        if (res->dmabuf_fd == -EINVAL) {
             error_free_or_abort(&local_err);
 
             res->dmabuf_fd = vfio_device_create_dmabuf_fd(res->iov,
                                                           res->iov_cnt,
                                                           &local_err);
-            if (res->dmabuf_fd == VFIO_DMABUF_CREATE_ERR_INVALID_IOV) {
+            if (res->dmabuf_fd == -ENODEV) {
                 error_free_or_abort(&local_err);
                 qemu_log_mask(LOG_GUEST_ERROR,
                               "Cannot create dmabuf: incompatible memory\n");
