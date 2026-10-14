@@ -14,12 +14,14 @@
 
 #include "hw/vfio-user/device.h"
 #include "hw/vfio-user/trace.h"
+#include "hw/vfio/vfio-region.h"
+#include "hw/vfio/vfio-helpers.h"
+#include "hw/vfio/trace.h"
 
 /*
  * These are to defend against a malign server trying
  * to force us to run out of memory.
  */
-#define VFIO_USER_MAX_REGIONS   100
 #define VFIO_USER_MAX_IRQS      50
 
 bool vfio_user_get_device_info(VFIOUserProxy *proxy,
@@ -209,14 +211,17 @@ static int vfio_user_device_io_get_region_info(VFIODevice *vbasedev,
                                                struct vfio_region_info *info,
                                                int *fd)
 {
-    VFIOUserFDs fds = { 0, 1, fd};
-    int ret;
+    int fds[VFIO_USER_MAX_MAX_FDS];
+    VFIOUserFDs user_fds = { 0, VFIO_USER_MAX_MAX_FDS, fds };
+    int i, ret;
+
+    *fd = -1;
 
     if (info->index > vbasedev->num_initial_regions) {
         return -EINVAL;
     }
 
-    ret = vfio_user_get_region_info(vbasedev->proxy, info, &fds);
+    ret = vfio_user_get_region_info(vbasedev->proxy, info, &user_fds);
     if (ret) {
         return ret;
     }
@@ -225,10 +230,30 @@ static int vfio_user_device_io_get_region_info(VFIODevice *vbasedev,
     if ((info->flags & VFIO_REGION_INFO_FLAG_CAPS) &&
         (info->cap_offset < sizeof(*info)
          || info->cap_offset + sizeof(struct vfio_info_cap_header) > info->argsz)) {
-        return -EINVAL;
+        ret = -EINVAL;
+    } else if (vfio_get_region_info_cap(info,
+                                        VFIO_REGION_INFO_CAP_SPARSE_MMAP_FDS)) {
+        if (user_fds.recv_fds > 0) {
+            VFIOUserFDs *saved = vfio_user_getfds(user_fds.recv_fds);
+
+            saved->recv_fds = user_fds.recv_fds;
+            memcpy(saved->fds, fds, user_fds.recv_fds * sizeof(int));
+            vfio_user_free_fds(vbasedev->proxy->region_fds[info->index]);
+            vbasedev->proxy->region_fds[info->index] = saved;
+            return 0;
+        }
+        ret = -EINVAL;
+    } else if (user_fds.recv_fds > 0) {
+        *fd = fds[0];
+        fds[0] = -1;
     }
 
-    return 0;
+    for (i = 0; i < user_fds.recv_fds; i++) {
+        if (fds[i] >= 0) {
+            close(fds[i]);
+        }
+    }
+    return ret;
 }
 
 static int vfio_user_device_io_get_irq_info(VFIODevice *vbasedev,
@@ -518,12 +543,94 @@ static int vfio_user_device_io_region_write(VFIODevice *vbasedev, uint8_t index,
 /*
  * Socket-based io_ops
  */
+static int vfio_user_device_io_setup_sparse_mmaps(VFIORegion *region,
+                                                  struct vfio_region_info *info,
+                                                  Error **errp)
+{
+    struct vfio_info_cap_header *hdr;
+    struct vfio_region_info_cap_sparse_mmap_fds *sparse_fds;
+    VFIOUserFDs *user_fds;
+    size_t cap_offset;
+    int i;
+
+    hdr = vfio_get_region_info_cap(info, VFIO_REGION_INFO_CAP_SPARSE_MMAP_FDS);
+    if (!hdr) {
+        return vfio_default_setup_sparse_mmaps(region, info, errp);
+    }
+
+    if (vfio_get_region_info_cap(info, VFIO_REGION_INFO_CAP_SPARSE_MMAP)) {
+        error_setg(errp, "%s: region %d cannot specify both "
+                   "SPARSE_MMAP and SPARSE_MMAP_FDS", __func__, region->nr);
+        return -EINVAL;
+    }
+
+    sparse_fds = container_of(hdr, struct vfio_region_info_cap_sparse_mmap_fds,
+                              header);
+
+    cap_offset = (uintptr_t)hdr - (uintptr_t)info;
+    if (cap_offset > info->argsz ||
+        info->argsz - cap_offset < sizeof(*sparse_fds) ||
+        sparse_fds->nr_areas >
+            (info->argsz - cap_offset - sizeof(*sparse_fds)) /
+            sizeof(sparse_fds->areas[0])) {
+        error_setg(errp, "%s: invalid nr_areas %u in region %d",
+                   __func__, sparse_fds->nr_areas, region->nr);
+        return -EINVAL;
+    }
+
+    trace_vfio_region_sparse_mmap_header(region->vbasedev->name,
+                                         region->nr, sparse_fds->nr_areas);
+
+    user_fds = region->vbasedev->proxy->region_fds[region->nr];
+    if (!user_fds || user_fds->recv_fds > sparse_fds->nr_areas) {
+        error_setg(errp, "%s: invalid fd count %d for %u sparse mmap areas "
+                   "in region %d", __func__,
+                   user_fds ? user_fds->recv_fds : 0,
+                   sparse_fds->nr_areas, region->nr);
+        return -EINVAL;
+    }
+
+    region->mmaps = g_try_new0(VFIOMmap, sparse_fds->nr_areas);
+    if (!region->mmaps) {
+        error_setg(errp, "%s: failed to allocate %u mmaps for region %d",
+                   __func__, sparse_fds->nr_areas, region->nr);
+        return -ENOMEM;
+    }
+
+    for (i = 0; i < sparse_fds->nr_areas; i++) {
+        struct vfio_region_sparse_mmap_fd_area *area = &sparse_fds->areas[i];
+
+        if (area->size == 0 || area->offset > region->size ||
+            area->size > region->size - area->offset ||
+            area->fd_index >= user_fds->recv_fds) {
+            error_setg(errp, "%s: invalid sparse mmap area %d in region %d "
+                       "(offset=0x%"PRIx64" size=0x%"PRIx64
+                       " fd_offset=0x%"PRIx64" fd_index=%u)",
+                       __func__, i, region->nr, area->offset, area->size,
+                       area->fd_offset, area->fd_index);
+            g_free(region->mmaps);
+            region->mmaps = NULL;
+            return -EINVAL;
+        }
+
+        trace_vfio_region_sparse_mmap_entry(i, area->offset,
+                                            area->offset + area->size - 1);
+        region->mmaps[i].offset = area->offset;
+        region->mmaps[i].fd_offset = area->fd_offset;
+        region->mmaps[i].size = area->size;
+        region->mmaps[i].fd = user_fds->fds[area->fd_index];
+    }
+
+    region->nr_mmaps = sparse_fds->nr_areas;
+    return 0;
+}
+
 VFIODeviceIOOps vfio_user_device_io_ops_sock = {
     .device_feature = vfio_user_device_io_device_feature,
     .get_region_info = vfio_user_device_io_get_region_info,
+    .setup_sparse_mmaps = vfio_user_device_io_setup_sparse_mmaps,
     .get_irq_info = vfio_user_device_io_get_irq_info,
     .set_irqs = vfio_user_device_io_set_irqs,
     .region_read = vfio_user_device_io_region_read,
     .region_write = vfio_user_device_io_region_write,
-
 };

@@ -15,6 +15,8 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#define VFIO_USER_MAX_REGIONS 100
+
 typedef struct {
     uint16_t id;
     uint16_t command;
@@ -69,12 +71,13 @@ typedef struct {
 #define VFIO_USER_CAP           "capabilities"
 
 /* "capabilities" members */
-#define VFIO_USER_CAP_MAX_FDS   "max_msg_fds"
-#define VFIO_USER_CAP_MAX_XFER  "max_data_xfer_size"
-#define VFIO_USER_CAP_PGSIZES   "pgsizes"
-#define VFIO_USER_CAP_MAP_MAX   "max_dma_maps"
-#define VFIO_USER_CAP_MIGR      "migration"
-#define VFIO_USER_CAP_MULTI     "write_multiple"
+#define VFIO_USER_CAP_MAX_FDS           "max_msg_fds"
+#define VFIO_USER_CAP_MAX_XFER          "max_data_xfer_size"
+#define VFIO_USER_CAP_PGSIZES           "pgsizes"
+#define VFIO_USER_CAP_MAP_MAX           "max_dma_maps"
+#define VFIO_USER_CAP_MIGR              "migration"
+#define VFIO_USER_CAP_MULTI             "write_multiple"
+#define VFIO_USER_CAP_SPARSE_MMAP_FDS   "sparse_mmap_fds"
 
 /* "migration" members */
 #define VFIO_USER_CAP_PGSIZE            "pgsize"
@@ -165,6 +168,26 @@ typedef struct {
     uint64_t size;
     uint64_t offset;
 } VFIOUserRegionInfo;
+
+/*
+ * VFIO_REGION_INFO_CAP_SPARSE_MMAP_FDS
+ */
+#define VFIO_REGION_INFO_CAP_SPARSE_MMAP_FDS 0x8001
+
+struct vfio_region_sparse_mmap_fd_area {
+    uint64_t offset;
+    uint64_t fd_offset;
+    uint64_t size;
+    uint32_t fd_index;
+    uint32_t pad;
+};
+
+struct vfio_region_info_cap_sparse_mmap_fds {
+    struct vfio_info_cap_header header;
+    uint32_t nr_areas;
+    uint32_t reserved;
+    struct vfio_region_sparse_mmap_fd_area areas[];
+};
 
 /*
  * VFIO_USER_DEVICE_GET_IRQ_INFO

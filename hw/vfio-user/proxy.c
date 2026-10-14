@@ -363,6 +363,13 @@ static int vfio_user_recv_one(VFIOUserProxy *proxy, Error **errp)
         }
 
         memcpy(msg->fds->fds, fdp, numfds * sizeof(int));
+    } else if (msg->fds != NULL) {
+        /*
+         * recv_fds holds the capacity of msg->fds->fds on entry; reset it
+         * to 0 when the reply carries no FDs so the caller knows none were
+         * received.
+         */
+        msg->fds->recv_fds = 0;
     }
 
     /*
@@ -740,6 +747,11 @@ bool vfio_user_send_wait(VFIOUserProxy *proxy, VFIOUserHdr *hdr,
 
     qemu_mutex_unlock(&proxy->lock);
 
+    if (!ok && fds != NULL) {
+        /* No reply was received; report 0 received FDs to the caller. */
+        fds->recv_fds = 0;
+    }
+
     return ok;
 }
 
@@ -867,17 +879,30 @@ void vfio_user_send_error(VFIOUserProxy *proxy, VFIOUserHdr *hdr, int error)
 }
 
 /*
+ * Close and free received FDs.
+ */
+void vfio_user_free_fds(VFIOUserFDs *fds)
+{
+    int i;
+
+    if (!fds) {
+        return;
+    }
+
+    for (i = 0; i < fds->recv_fds; i++) {
+        if (fds->fds[i] >= 0) {
+            close(fds->fds[i]);
+        }
+    }
+    g_free(fds);
+}
+
+/*
  * Close FDs erroneously received in an incoming request.
  */
 void vfio_user_putfds(VFIOUserMsg *msg)
 {
-    VFIOUserFDs *fds = msg->fds;
-    int i;
-
-    for (i = 0; i < fds->recv_fds; i++) {
-        close(fds->fds[i]);
-    }
-    g_free(fds);
+    vfio_user_free_fds(msg->fds);
     msg->fds = NULL;
 }
 
@@ -967,6 +992,7 @@ void vfio_user_set_handler(VFIODevice *vbasedev,
 void vfio_user_disconnect(VFIOUserProxy *proxy)
 {
     VFIOUserMsg *r1, *r2;
+    int i;
 
     qemu_mutex_lock(&proxy->lock);
 
@@ -1025,6 +1051,10 @@ void vfio_user_disconnect(VFIOUserProxy *proxy)
     if (QLIST_EMPTY(&vfio_user_sockets)) {
         iothread_destroy(vfio_user_iothread);
         vfio_user_iothread = NULL;
+    }
+
+    for (i = 0; i < VFIO_USER_MAX_REGIONS; i++) {
+        vfio_user_free_fds(proxy->region_fds[i]);
     }
 
     g_free(proxy->sockname);
@@ -1214,6 +1244,18 @@ static bool check_multi(VFIOUserProxy *proxy, QObject *qobj, Error **errp)
     return true;
 }
 
+static bool check_sparse_mmap_fds(VFIOUserProxy *proxy, QObject *qobj,
+                                  Error **errp)
+{
+    QBool *qb = qobject_to(QBool, qobj);
+
+    if (qb == NULL) {
+        error_setg(errp, "malformed %s", VFIO_USER_CAP_SPARSE_MMAP_FDS);
+        return false;
+    }
+    return true;
+}
+
 static struct cap_entry caps_cap[] = {
     { VFIO_USER_CAP_MAX_FDS, check_max_fds },
     { VFIO_USER_CAP_MAX_XFER, check_max_xfer },
@@ -1221,6 +1263,7 @@ static struct cap_entry caps_cap[] = {
     { VFIO_USER_CAP_MAP_MAX, check_max_dma },
     { VFIO_USER_CAP_MIGR, check_migr },
     { VFIO_USER_CAP_MULTI, check_multi },
+    { VFIO_USER_CAP_SPARSE_MMAP_FDS, check_sparse_mmap_fds },
     { NULL }
 };
 
@@ -1280,6 +1323,7 @@ static GString *caps_json(void)
     qdict_put_int(capdict, VFIO_USER_CAP_PGSIZES, VFIO_USER_DEF_PGSIZE);
     qdict_put_int(capdict, VFIO_USER_CAP_MAP_MAX, VFIO_USER_DEF_MAP_MAX);
     qdict_put_bool(capdict, VFIO_USER_CAP_MULTI, true);
+    qdict_put_bool(capdict, VFIO_USER_CAP_SPARSE_MMAP_FDS, true);
 
     qdict_put_obj(dict, VFIO_USER_CAP, QOBJECT(capdict));
 
