@@ -162,6 +162,11 @@ static void aspeed_soc_ast1040_init(Object *obj)
     object_initialize_child(obj, "peci", &s->peci, TYPE_ASPEED_PECI);
 }
 
+static void aspeed_soc_ast1080_init(Object *obj)
+{
+    aspeed_soc_ast10x0_g2_init(obj);
+}
+
 static bool aspeed_soc_ast10x0_g2_realize(Aspeed10x0SoCState *a, Error **errp)
 {
     AspeedSoCState *s = ASPEED_SOC(a);
@@ -342,6 +347,15 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
                        aspeed_soc_ast1040_get_irq(s, ASPEED_DEV_PECI));
 }
 
+static void aspeed_soc_ast1080_realize(DeviceState *dev_soc, Error **errp)
+{
+    Aspeed10x0SoCState *a = ASPEED10X0_SOC(dev_soc);
+
+    if (!aspeed_soc_ast10x0_g2_realize(a, errp)) {
+        return;
+    }
+}
+
 static void aspeed_soc_ast1040_class_init(ObjectClass *klass, const void *data)
 {
     static const char * const valid_cpu_types[] = {
@@ -370,12 +384,45 @@ static void aspeed_soc_ast1040_class_init(ObjectClass *klass, const void *data)
     sc->num_cpus        = 1;
 }
 
+static void aspeed_soc_ast1080_class_init(ObjectClass *klass, const void *data)
+{
+    static const char * const valid_cpu_types[] = {
+        ARM_CPU_TYPE_NAME("cortex-m4"), /* TODO cortex-m4f */
+        NULL
+    };
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    AspeedSoCClass *sc = ASPEED_SOC_CLASS(dc);
+
+    /* Reason: The Aspeed SoC can only be instantiated from a board */
+    dc->user_creatable = false;
+    dc->realize = aspeed_soc_ast1080_realize;
+
+    sc->valid_cpu_types = valid_cpu_types;
+    sc->silicon_rev     = AST1080_A0_SILICON_REV;
+    sc->sram_size[0]    = 128 * KiB;
+    sc->sram_size[1]    = 16 * MiB; /* Hyper RAM */
+    sc->uarts_num       = 13;
+    sc->sgpio_num       = 1;
+    sc->wdts_num        = 8;
+    sc->spis_num        = 2;
+    sc->uarts_base      = ASPEED_DEV_UART0;
+    sc->irqmap          = aspeed_soc_ast1040_irqmap;
+    sc->memmap          = aspeed_soc_ast1040_memmap;
+    sc->num_cpus        = 1;
+}
+
 static const TypeInfo aspeed_soc_ast1040_types[] = {
     {
         .name           = "ast1040-a0",
         .parent         = TYPE_ASPEED10X0_SOC,
         .instance_init  = aspeed_soc_ast1040_init,
         .class_init     = aspeed_soc_ast1040_class_init,
+    },
+    {
+        .name           = "ast1080-a0",
+        .parent         = TYPE_ASPEED10X0_SOC,
+        .instance_init  = aspeed_soc_ast1080_init,
+        .class_init     = aspeed_soc_ast1080_class_init,
     }
 };
 
