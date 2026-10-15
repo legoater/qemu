@@ -81,19 +81,23 @@ static const int aspeed_soc_ast1040_irqmap[] = {
     [ASPEED_DEV_PECI]      = 164,
 };
 
-static const UnimplementedDeviceConfig aspeed_soc_ast1040_unimp_devs[] = {
-    { "pwm", "aspeed.pwm", 0x740C0000, 0x10000, -1000 },
-    { "espi", "aspeed.espi", 0x74C05000, 0x1000, -1000 },
-    { "udc", "aspeed.udc", 0x74120000, 0x4000, -1000 },
-    { "jtag[0]", "aspeed.jtag0", 0x74C01000, 0x100, -1000 },
-    { "jtag[1]", "aspeed.jtag1", 0x74C09000, 0x100, -1000 },
+static const UnimplementedDeviceConfig aspeed_soc_ast10x0_g2_unimp_devs[] = {
     { "fmc-filter",  "aspeed.fmc-filter", 0x74000400, 0x1000, -1000 },
     { "spi0-filter", "aspeed.spi0-filter", 0x74010400, 0x1000, -1000 },
     { "spi1-filter", "aspeed.spi1-filter", 0x74020400, 0x1000, -1000 },
-    { "otp", "aspeed.otp", 0x74C07000, 0x800, -1000 },
-    { "atc", "aspeed.atc", 0x74C35000, 0x100, -1000 },
-    { "i3c", "aspeed.i3c", 0x74C20000, 0x8000, -1000 },
+    { "pwm", "aspeed.pwm", 0x740C0000, 0x10000, -1000 },
+    { "udc", "aspeed.udc", 0x74120000, 0x4000, -1000 },
     { "caliptra", "aspeed.caliptra", 0x74200000, 0x100000, -1000 },
+    { "jtag[0]", "aspeed.jtag0", 0x74C01000, 0x100, -1000 },
+    { "otp", "aspeed.otp", 0x74C07000, 0x800, -1000 },
+    { "jtag[1]", "aspeed.jtag1", 0x74C09000, 0x100, -1000 },
+    { "i3c", "aspeed.i3c", 0x74C20000, 0x8000, -1000 },
+    { "atc", "aspeed.atc", 0x74C35000, 0x100, -1000 },
+    { }
+};
+
+static const UnimplementedDeviceConfig aspeed_soc_ast1040_unimp_devs[] = {
+    { "espi", "aspeed.espi", 0x74C05000, 0x1000, -1000 },
     { }
 };
 
@@ -105,7 +109,7 @@ static qemu_irq aspeed_soc_ast1040_get_irq(AspeedSoCState *s, int dev)
     return qdev_get_gpio_in(DEVICE(&a->armv7m), sc->irqmap[dev]);
 }
 
-static void aspeed_soc_ast1040_init(Object *obj)
+static void aspeed_soc_ast10x0_g2_init(Object *obj)
 {
     Aspeed10x0SoCState *a = ASPEED10X0_SOC(obj);
     AspeedSoCState *s = ASPEED_SOC(obj);
@@ -117,7 +121,7 @@ static void aspeed_soc_ast1040_init(Object *obj)
 
     s->sysclk = qdev_init_clock_in(DEVICE(s), "sysclk", NULL, NULL, 0);
 
-    /* AST1040 uses the AST2700 SCUIO model */
+    /* AST10x0 G2 uses the AST2700 SCUIO model */
     object_initialize_child(obj, "scu", &s->scu, TYPE_ASPEED_2700_SCUIO);
     qdev_prop_set_uint32(DEVICE(&s->scu), "silicon-rev", sc->silicon_rev);
 
@@ -129,7 +133,6 @@ static void aspeed_soc_ast1040_init(Object *obj)
     }
 
     object_initialize_child(obj, "adc", &s->adc, TYPE_ASPEED_2700_ADC);
-    object_initialize_child(obj, "peci", &s->peci, TYPE_ASPEED_PECI);
     object_initialize_child(obj, "gpio", &s->gpio, "aspeed.gpio-ast2700");
     for (i = 0; i < sc->sgpio_num; i++) {
         object_initialize_child(obj, "sgpio[*]", &s->sgpiom[i],
@@ -148,6 +151,15 @@ static void aspeed_soc_ast1040_init(Object *obj)
         snprintf(typename, sizeof(typename), "aspeed.spi%d-ast1040", i);
         object_initialize_child(obj, "spi[*]", &s->spi[i], typename);
     }
+}
+
+static void aspeed_soc_ast1040_init(Object *obj)
+{
+    AspeedSoCState *s = ASPEED_SOC(obj);
+
+    aspeed_soc_ast10x0_g2_init(obj);
+
+    object_initialize_child(obj, "peci", &s->peci, TYPE_ASPEED_PECI);
 }
 
 static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
@@ -313,6 +325,8 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
     }
 
     /* Unimplemented devices */
+    create_unimplemented_devices(OBJECT(s), s->memory,
+                                 aspeed_soc_ast10x0_g2_unimp_devs);
     create_unimplemented_devices(OBJECT(s), s->memory, sc->unimp_devs);
 }
 
