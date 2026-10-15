@@ -162,10 +162,9 @@ static void aspeed_soc_ast1040_init(Object *obj)
     object_initialize_child(obj, "peci", &s->peci, TYPE_ASPEED_PECI);
 }
 
-static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
+static bool aspeed_soc_ast10x0_g2_realize(Aspeed10x0SoCState *a, Error **errp)
 {
-    Aspeed10x0SoCState *a = ASPEED10X0_SOC(dev_soc);
-    AspeedSoCState *s = ASPEED_SOC(dev_soc);
+    AspeedSoCState *s = ASPEED_SOC(a);
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
     g_autofree char *hyperram_name = NULL;
     g_autofree char *sram_name = NULL;
@@ -176,10 +175,10 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
 
     if (!clock_has_source(s->sysclk)) {
         error_setg(errp, "sysclk clock must be wired up by the board code");
-        return;
+        return false;
     }
 
-    /* AST1040 CPU Core */
+    /* AST10x0 G2 CPU Core */
     armv7m = DEVICE(&a->armv7m);
     qdev_prop_set_uint32(armv7m, "num-irq", 256);
     qdev_prop_set_string(armv7m, "cpu-type",
@@ -196,7 +195,7 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
                            sc->sram_size[0], &err);
     if (err) {
         error_propagate(errp, err);
-        return;
+        return false;
     }
     memory_region_add_subregion(s->memory, sc->memmap[ASPEED_DEV_SRAM0],
                                 &s->sram[0]);
@@ -208,14 +207,14 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
                            sc->sram_size[1], &err);
     if (err) {
         error_propagate(errp, err);
-        return;
+        return false;
     }
     memory_region_add_subregion(s->memory, sc->memmap[ASPEED_DEV_SRAM1],
                                 &s->sram[1]);
 
     /* SCU */
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->scu), errp)) {
-        return;
+        return false;
     }
     aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->scu), 0,
                     sc->memmap[ASPEED_DEV_SCU]);
@@ -224,7 +223,7 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
     for (i = 0, uart = sc->uarts_base; i < sc->uarts_num; i++, uart++) {
         if (!aspeed_soc_uart_realize(s->memory, &s->uart[i],
                                      sc->memmap[uart], errp)) {
-            return;
+            return false;
         }
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->uart[i]), 0,
                            aspeed_soc_ast1040_get_irq(s, uart));
@@ -232,25 +231,16 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
 
     /* ADC */
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->adc), errp)) {
-        return;
+        return false;
     }
     aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->adc), 0,
                     sc->memmap[ASPEED_DEV_ADC]);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->adc), 0,
                        aspeed_soc_ast1040_get_irq(s, ASPEED_DEV_ADC));
 
-    /* PECI */
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->peci), errp)) {
-        return;
-    }
-    aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->peci), 0,
-                    sc->memmap[ASPEED_DEV_PECI]);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->peci), 0,
-                       aspeed_soc_ast1040_get_irq(s, ASPEED_DEV_PECI));
-
     /* GPIO */
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->gpio), errp)) {
-        return;
+        return false;
     }
     aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->gpio), 0,
                     sc->memmap[ASPEED_DEV_GPIO]);
@@ -260,7 +250,7 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
     /* SGPIO */
     for (i = 0; i < sc->sgpio_num; i++) {
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->sgpiom[i]), errp)) {
-            return;
+            return false;
         }
         aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->sgpiom[i]), 0,
                         sc->memmap[ASPEED_DEV_SGPIOM0 + i]);
@@ -272,7 +262,7 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
     object_property_set_link(OBJECT(&s->i2c), "dram", OBJECT(&s->sram[1]),
                              &error_abort);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->i2c), errp)) {
-        return;
+        return false;
     }
     aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->i2c), 0,
                     sc->memmap[ASPEED_DEV_I2C]);
@@ -291,7 +281,7 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
         object_property_set_link(OBJECT(&s->wdt[i]), "scu", OBJECT(&s->scu),
                                  &error_abort);
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->wdt[i]), errp)) {
-            return;
+            return false;
         }
         aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->wdt[i]), 0, wdt_offset);
     }
@@ -300,7 +290,7 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
     object_property_set_link(OBJECT(&s->fmc), "dram", OBJECT(&s->sram[1]),
             &error_abort);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->fmc), errp)) {
-        return;
+        return false;
     }
     aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->fmc), 0,
                     sc->memmap[ASPEED_DEV_FMC]);
@@ -314,7 +304,7 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
         object_property_set_link(OBJECT(&s->spi[i]), "dram",
                                  OBJECT(&s->sram[1]), &error_abort);
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->spi[i]), errp)) {
-            return;
+            return false;
         }
         aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->spi[i]), 0,
                         sc->memmap[ASPEED_DEV_SPI0 + i]);
@@ -328,6 +318,28 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
     create_unimplemented_devices(OBJECT(s), s->memory,
                                  aspeed_soc_ast10x0_g2_unimp_devs);
     create_unimplemented_devices(OBJECT(s), s->memory, sc->unimp_devs);
+
+    return true;
+}
+
+static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
+{
+    Aspeed10x0SoCState *a = ASPEED10X0_SOC(dev_soc);
+    AspeedSoCState *s = ASPEED_SOC(a);
+    AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
+
+    if (!aspeed_soc_ast10x0_g2_realize(a, errp)) {
+        return;
+    }
+
+    /* PECI */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->peci), errp)) {
+        return;
+    }
+    aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->peci), 0,
+                    sc->memmap[ASPEED_DEV_PECI]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->peci), 0,
+                       aspeed_soc_ast1040_get_irq(s, ASPEED_DEV_PECI));
 }
 
 static void aspeed_soc_ast1040_class_init(ObjectClass *klass, const void *data)
