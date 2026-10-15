@@ -102,6 +102,7 @@ static const UnimplementedDeviceConfig aspeed_soc_ast1040_unimp_devs[] = {
 };
 
 static const UnimplementedDeviceConfig aspeed_soc_ast1080_unimp_devs[] = {
+    { "i2c-filter", "aspeed.i2c-filter", 0x74C14000, 0x1000, -1000 },
     { "spim0", "aspeed.spim0", 0x74C15000, 0x1000, -1000 },
     { "spim1", "aspeed.spim1", 0x74C16000, 0x1000, -1000 },
     { "spim2", "aspeed.spim2", 0x74C17000, 0x1000, -1000 },
