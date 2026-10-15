@@ -1952,7 +1952,7 @@ static void aspeed_2700_fmc_class_init(ObjectClass *klass, const void *data)
     asc->features          = ASPEED_SMC_FEATURE_DMA |
                              ASPEED_SMC_FEATURE_DMA_DRAM_ADDR_HIGH |
                              ASPEED_SMC_FEATURE_DATA_FIFO;
-    asc->dma_flash_mask    = 0x2FFFFFFC;
+    asc->dma_flash_mask    = 0x3FFFFFFC;
     asc->dma_dram_mask     = 0xFFFFFFFC;
     asc->dma_start_length  = 1;
     asc->nregs             = (0x200 + (asc->cs_num_max * 0x10)) >> 2;
@@ -1989,7 +1989,7 @@ static void aspeed_2700_spi0_class_init(ObjectClass *klass, const void *data)
     asc->features          = ASPEED_SMC_FEATURE_DMA |
                              ASPEED_SMC_FEATURE_DMA_DRAM_ADDR_HIGH |
                              ASPEED_SMC_FEATURE_DATA_FIFO;
-    asc->dma_flash_mask    = 0x2FFFFFFC;
+    asc->dma_flash_mask    = 0x3FFFFFFC;
     asc->dma_dram_mask     = 0xFFFFFFFC;
     asc->dma_start_length  = 1;
     asc->nregs             = (0x200 + (asc->cs_num_max * 0x10)) >> 2;
@@ -2025,7 +2025,7 @@ static void aspeed_2700_spi1_class_init(ObjectClass *klass, const void *data)
     asc->features          = ASPEED_SMC_FEATURE_DMA |
                              ASPEED_SMC_FEATURE_DMA_DRAM_ADDR_HIGH |
                              ASPEED_SMC_FEATURE_DATA_FIFO;
-    asc->dma_flash_mask    = 0x2FFFFFFC;
+    asc->dma_flash_mask    = 0x3FFFFFFC;
     asc->dma_dram_mask     = 0xFFFFFFFC;
     asc->dma_start_length  = 1;
     asc->nregs             = (0x200 + (asc->cs_num_max * 0x10)) >> 2;
@@ -2061,7 +2061,7 @@ static void aspeed_2700_spi2_class_init(ObjectClass *klass, const void *data)
     asc->features          = ASPEED_SMC_FEATURE_DMA |
                              ASPEED_SMC_FEATURE_DMA_DRAM_ADDR_HIGH |
                              ASPEED_SMC_FEATURE_DATA_FIFO;
-    asc->dma_flash_mask    = 0x0FFFFFFC;
+    asc->dma_flash_mask    = 0x3FFFFFFC;
     asc->dma_dram_mask     = 0xFFFFFFFC;
     asc->dma_start_length  = 1;
     asc->nregs             = (0x200 + (asc->cs_num_max * 0x10)) >> 2;
