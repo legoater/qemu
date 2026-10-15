@@ -101,6 +101,13 @@ static const UnimplementedDeviceConfig aspeed_soc_ast1040_unimp_devs[] = {
     { }
 };
 
+static const UnimplementedDeviceConfig aspeed_soc_ast1080_unimp_devs[] = {
+    { "spim0", "aspeed.spim0", 0x74C15000, 0x1000, -1000 },
+    { "spim1", "aspeed.spim1", 0x74C16000, 0x1000, -1000 },
+    { "spim2", "aspeed.spim2", 0x74C17000, 0x1000, -1000 },
+    { }
+};
+
 static qemu_irq aspeed_soc_ast1040_get_irq(AspeedSoCState *s, int dev)
 {
     Aspeed10x0SoCState *a = ASPEED10X0_SOC(s);
@@ -408,6 +415,7 @@ static void aspeed_soc_ast1080_class_init(ObjectClass *klass, const void *data)
     sc->uarts_base      = ASPEED_DEV_UART0;
     sc->irqmap          = aspeed_soc_ast1040_irqmap;
     sc->memmap          = aspeed_soc_ast1040_memmap;
+    sc->unimp_devs      = aspeed_soc_ast1080_unimp_devs;
     sc->num_cpus        = 1;
 }
 
