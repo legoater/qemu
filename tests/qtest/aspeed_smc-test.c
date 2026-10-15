@@ -240,12 +240,69 @@ static void test_ast1030_evb(AspeedSMCTestData *data)
                         data, aspeed_smc_test_write_page_qor);
 }
 
+static void test_ast1040_evb(AspeedSMCTestData *data)
+{
+    int ret;
+    int fd;
+
+    fd = g_file_open_tmp("qtest.m25p80.w25q33pw.XXXXXX",
+                         &data->tmp_path, NULL);
+    g_assert(fd >= 0);
+    ret = ftruncate(fd, 4 * 1024 * 1024);
+    g_assert(ret == 0);
+    close(fd);
+
+    data->s = qtest_initf("-machine ast1040-evb "
+                          "-device w25q33pw,bus=ssi.0,cs=0x0,drive=fmc0 "
+                          "-blockdev node-name=fmc0,driver=file,filename=%s",
+                          data->tmp_path);
+
+    /* fmc cs0 with w25q33pw flash */
+    data->flash_base = 0x80000000;
+    data->spi_base = 0x74000000;
+    data->jedec_id = 0xef6016;
+    data->cs = 0;
+    data->node = "/machine/soc/fmc/ssi.0/child[0]";
+    /* beyond 512KB */
+    data->page_addr = 0x800 * FLASH_PAGE_SIZE;
+
+    qtest_add_data_func("/ast1040/smc/read_jedec",
+                        data, aspeed_smc_test_read_jedec);
+    qtest_add_data_func("/ast1040/smc/erase_sector",
+                        data, aspeed_smc_test_erase_sector);
+    qtest_add_data_func("/ast1040/smc/erase_all",
+                        data, aspeed_smc_test_erase_all);
+    qtest_add_data_func("/ast1040/smc/write_page",
+                        data, aspeed_smc_test_write_page);
+    qtest_add_data_func("/ast1040/smc/read_page_mem",
+                        data, aspeed_smc_test_read_page_mem);
+    qtest_add_data_func("/ast1040/smc/write_page_mem",
+                        data, aspeed_smc_test_write_page_mem);
+    qtest_add_data_func("/ast1040/smc/read_status_reg",
+                        data, aspeed_smc_test_read_status_reg);
+    qtest_add_data_func("/ast1040/smc/write_page_qpi",
+                        data, aspeed_smc_test_write_page_qpi);
+    qtest_add_data_func("/ast1040/smc/read_page_mem_fast_read",
+                        data, aspeed_smc_test_read_page_mem_fast_read);
+    qtest_add_data_func("/ast1040/smc/write_page_fast_read",
+                        data, aspeed_smc_test_write_page_fast_read);
+    qtest_add_data_func("/ast1040/smc/read_page_mem_dor",
+                        data, aspeed_smc_test_read_page_mem_dor);
+    qtest_add_data_func("/ast1040/smc/write_page_dor",
+                        data, aspeed_smc_test_write_page_dor);
+    qtest_add_data_func("/ast1040/smc/read_page_mem_qor",
+                        data, aspeed_smc_test_read_page_mem_qor);
+    qtest_add_data_func("/ast1040/smc/write_page_qor",
+                        data, aspeed_smc_test_write_page_qor);
+}
+
 int main(int argc, char **argv)
 {
     AspeedSMCTestData palmetto_data;
     AspeedSMCTestData ast2500_evb_data;
     AspeedSMCTestData ast2600_evb_data;
     AspeedSMCTestData ast1030_evb_data;
+    AspeedSMCTestData ast1040_evb_data;
     int ret;
 
     g_test_init(&argc, &argv, NULL);
@@ -254,20 +311,24 @@ int main(int argc, char **argv)
     test_ast2500_evb(&ast2500_evb_data);
     test_ast2600_evb(&ast2600_evb_data);
     test_ast1030_evb(&ast1030_evb_data);
+    test_ast1040_evb(&ast1040_evb_data);
     ret = g_test_run();
 
     qtest_quit(palmetto_data.s);
     qtest_quit(ast2500_evb_data.s);
     qtest_quit(ast2600_evb_data.s);
     qtest_quit(ast1030_evb_data.s);
+    qtest_quit(ast1040_evb_data.s);
     unlink(palmetto_data.tmp_path);
     unlink(ast2500_evb_data.tmp_path);
     unlink(ast2600_evb_data.tmp_path);
     unlink(ast1030_evb_data.tmp_path);
+    unlink(ast1040_evb_data.tmp_path);
     g_free(palmetto_data.tmp_path);
     g_free(ast2500_evb_data.tmp_path);
     g_free(ast2600_evb_data.tmp_path);
     g_free(ast1030_evb_data.tmp_path);
+    g_free(ast1040_evb_data.tmp_path);
 
     return ret;
 }
