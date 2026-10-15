@@ -87,6 +87,9 @@ static const UnimplementedDeviceConfig aspeed_soc_ast1040_unimp_devs[] = {
     { "udc", "aspeed.udc", 0x74120000, 0x4000, -1000 },
     { "jtag[0]", "aspeed.jtag0", 0x74C01000, 0x100, -1000 },
     { "jtag[1]", "aspeed.jtag1", 0x74C09000, 0x100, -1000 },
+    { "fmc-filter",  "aspeed.fmc-filter", 0x74000400, 0x1000, -1000 },
+    { "spi0-filter", "aspeed.spi0-filter", 0x74010400, 0x1000, -1000 },
+    { "spi1-filter", "aspeed.spi1-filter", 0x74020400, 0x1000, -1000 },
     { }
 };
 
