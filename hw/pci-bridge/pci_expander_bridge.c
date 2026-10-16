@@ -20,6 +20,7 @@
 #include "hw/pci/pci_bridge.h"
 #include "hw/pci-bridge/pci_expander_bridge.h"
 #include "hw/cxl/cxl.h"
+#include "hw/cxl/cxl_host.h"
 #include "qemu/range.h"
 #include "qemu/error-report.h"
 #include "qemu/module.h"
@@ -325,6 +326,76 @@ static void pxb_cxl_dev_reset(DeviceState *dev)
     }
 }
 
+static void pxb_cxl_dev_reset_hold(Object *obj, ResetType type)
+{
+    pxb_cxl_dev_reset(DEVICE(obj));
+}
+
+/*
+ * Program HB HDM decoder0 with the CFMWS range so the guest kernel
+ * auto-region code finds a committed decoder at the host bridge
+ * level. This mimics what system firmware does on real hardware
+ * before the OS boots.
+ *
+ * Only applies when hdm_for_passthrough is set, meaning the HB
+ * keeps its HDM capability visible.
+ */
+static void commit_hdm_decoder0(uint32_t *cache_mem,
+                                uint64_t base, uint64_t size)
+{
+    uint32_t ctrl;
+
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_BASE_LO, base & 0xF0000000);
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_BASE_HI, base >> 32);
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_SIZE_LO, size & 0xF0000000);
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_SIZE_HI, size >> 32);
+    ctrl = ldl_le_p(cache_mem + R_CXL_HDM_DECODER0_CTRL);
+    ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, ERR, 0);
+    ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, COMMITTED, 1);
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_CTRL, ctrl);
+}
+
+static CXLFixedWindow *pxb_cxl_find_fmw(PXBCXLDev *pxb)
+{
+    GSList *list = cxl_fmws_get_all_sorted();
+    GSList *iter;
+    CXLFixedWindow *found = NULL;
+
+    for (iter = list; iter; iter = iter->next) {
+        CXLFixedWindow *fw = CXL_FMW(iter->data);
+
+        if (fw->num_targets != 1 || !fw->base) {
+            continue;
+        }
+        if (fw->target_hbs[0] == pxb) {
+            found = fw;
+            break;
+        }
+    }
+    g_slist_free(list);
+    return found;
+}
+
+static void pxb_cxl_dev_reset_exit(Object *obj, ResetType type)
+{
+    PXBCXLDev *pxb = PXB_CXL_DEV(obj);
+    CXLHost *cxl = pxb->cxl_host_bridge;
+    CXLComponentState *cxl_cstate = &cxl->cxl_cstate;
+    CXLFixedWindow *fw;
+
+    if (!pxb->hdm_for_passthrough) {
+        return;
+    }
+
+    fw = pxb_cxl_find_fmw(pxb);
+    if (!fw) {
+        return;
+    }
+
+    commit_hdm_decoder0(cxl_cstate->crb.cache_mem_registers,
+                        fw->base, fw->size);
+}
+
 static gint pxb_compare(gconstpointer a, gconstpointer b)
 {
     const PXBDev *pxb_a = a, *pxb_b = b;
@@ -518,6 +589,7 @@ static void pxb_cxl_dev_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc   = DEVICE_CLASS(klass);
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     k->realize             = pxb_cxl_dev_realize;
     k->exit                = pxb_dev_exitfn;
@@ -532,7 +604,8 @@ static void pxb_cxl_dev_class_init(ObjectClass *klass, const void *data)
 
     /* Host bridges aren't hotpluggable. FIXME: spec reference */
     dc->hotpluggable = false;
-    device_class_set_legacy_reset(dc, pxb_cxl_dev_reset);
+    rc->phases.hold = pxb_cxl_dev_reset_hold;
+    rc->phases.exit = pxb_cxl_dev_reset_exit;
 }
 
 static const TypeInfo pxb_cxl_dev_info = {
