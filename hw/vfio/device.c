@@ -662,6 +662,7 @@ static VFIODeviceIOOps vfio_device_io_ops_ioctl = {
 
     .device_feature = vfio_device_io_device_feature,
     .get_region_info = vfio_device_io_get_region_info,
+    .setup_sparse_mmaps = vfio_region_setup_sparse_mmaps,
     .get_irq_info = vfio_device_io_get_irq_info,
     .set_irqs = vfio_device_io_set_irqs,
     .region_read = vfio_device_io_region_read,
