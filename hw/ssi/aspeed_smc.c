@@ -1823,7 +1823,7 @@ static uint32_t aspeed_2700_smc_segment_to_reg(const AspeedSMCState *s,
     }
 
     reg |= (seg->addr & AST2700_SEG_ADDR_MASK) >> 16; /* start offset */
-    reg |= (seg->addr + seg->size - 1) & AST2700_SEG_ADDR_MASK; /* end offset */
+    reg |= (seg->addr + seg->size) & AST2700_SEG_ADDR_MASK; /* end offset */
     return reg;
 }
 
@@ -1836,7 +1836,7 @@ static void aspeed_2700_smc_reg_to_segment(const AspeedSMCState *s,
 
     if (reg) {
         seg->addr = asc->flash_window_base + start_offset;
-        seg->size = end_offset + (64 * KiB) - start_offset;
+        seg->size = end_offset - start_offset;
     } else {
         seg->addr = asc->flash_window_base;
         seg->size = 0;
