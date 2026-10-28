@@ -12,17 +12,19 @@ from qemu_test import Asset, exec_command_and_wait_for_pattern
 
 class AST1040Machine(AspeedTest):
 
-    ASSET_ZEPHYR_3_07 = Asset(
+    ASSET_ASPEED_AST1040_EVB_01_00 = Asset(
         ('https://github.com/AspeedTech-BMC'
-         '/zephyr/releases/download/v00.03.07/ast1040-evb-demo.zip'),
-         'b5189797c22c2d732ddc27670c1efdeba821a2747c9c7434f190791125baa121')
+         '/aspeed-mcu-fw-hub/releases/download/v01.00'
+         '/ast1040a0-evb-v01.00.tar.gz'),
+         '62dff10cef99a72a9ec679b7ed2c80ba1b76dcdab6bb66251e99a83a31612a02')
 
     def test_arm_ast1040_zephyros(self):
         self.set_machine('ast1040-evb')
 
-        kernel_name = "zephyr.bin"
+        kernel_name = ('ast1040a0-evb-v01.00/ast1040/ast1040a0/evb/'
+                       'zephyr-shell-module.bin')
         kernel_file = self.archive_extract(
-            self.ASSET_ZEPHYR_3_07, member=kernel_name)
+            self.ASSET_ASPEED_AST1040_EVB_01_00, member=kernel_name)
 
         self.vm.set_console()
         self.vm.add_args('-kernel', kernel_file, '-nographic')
