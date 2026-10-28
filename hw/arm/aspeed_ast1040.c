@@ -90,6 +90,7 @@ static const UnimplementedDeviceConfig aspeed_soc_ast1040_unimp_devs[] = {
     { "fmc-filter",  "aspeed.fmc-filter", 0x74000400, 0x1000, -1000 },
     { "spi0-filter", "aspeed.spi0-filter", 0x74010400, 0x1000, -1000 },
     { "spi1-filter", "aspeed.spi1-filter", 0x74020400, 0x1000, -1000 },
+    { "otp", "aspeed.otp", 0x74C07000, 0x800, -1000 },
     { }
 };
 
