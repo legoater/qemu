@@ -354,6 +354,8 @@ static const FlashPartInfo known_devices[] = {
     { INFO("w25x32",      0xef3016,      0,  64 << 10,  64, ER_4K) },
     { INFO("w25q32",      0xef4016,      0,  64 << 10,  64, ER_4K) },
     { INFO("w25q32dw",    0xef6016,      0,  64 << 10,  64, ER_4K) },
+    { INFO("w25q33pw",    0xef6016,      0,  64 << 10,  64, ER_4K | ER_32K),
+      .sfdp_read = m25p80_sfdp_w25q33pw },
     { INFO("w25x64",      0xef3017,      0,  64 << 10, 128, ER_4K) },
     { INFO("w25q64",      0xef4017,      0,  64 << 10, 128, ER_4K) },
     { INFO("w25q80",      0xef5014,      0,  64 << 10,  16, ER_4K) },
