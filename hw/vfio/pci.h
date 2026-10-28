@@ -221,28 +221,33 @@ bool vfio_pci_intx_enable(VFIOPCIDevice *vdev, Error **errp);
 void vfio_pci_intx_set_handler(VFIOPCIDevice *vdev, bool enable);
 void vfio_pci_msix_set_notifiers(VFIOPCIDevice *vdev);
 void vfio_pci_msi_set_handler(VFIOPCIDevice *vdev, int nr, bool enable);
+bool vfio_pci_interrupt_setup(VFIOPCIDevice *vdev, Error **errp);
+void vfio_pci_intx_eoi(VFIODevice *vbasedev);
+void vfio_pci_teardown_msi(VFIOPCIDevice *vdev);
 
+/* Config space */
 uint32_t vfio_pci_read_config(PCIDevice *pdev, uint32_t addr, int len);
 void vfio_pci_write_config(PCIDevice *pdev,
                            uint32_t addr, uint32_t val, int len);
+bool vfio_pci_config_setup(VFIOPCIDevice *vdev, Error **errp);
+void vfio_pci_config_register_vga(VFIOPCIDevice *vdev);
 
+/* ROM */
+bool vfio_opt_rom_in_denylist(VFIOPCIDevice *vdev);
+
+/* VGA */
 uint64_t vfio_vga_read(void *opaque, hwaddr addr, unsigned size);
 void vfio_vga_write(void *opaque, hwaddr addr, uint64_t data, unsigned size);
+bool vfio_populate_vga(VFIOPCIDevice *vdev, Error **errp);
 
-/**
- * vfio_pci_from_vfio_device: Transform from VFIODevice to
- * VFIOPCIDevice
- *
- * This function checks if the given @vbasedev is a VFIO PCI device.
- * If it is, it returns the containing VFIOPCIDevice.
- *
- * @vbasedev: The VFIODevice to transform
- *
- * Return: The VFIOPCIDevice on success, NULL on failure.
- */
-VFIOPCIDevice *vfio_pci_from_vfio_device(VFIODevice *vbasedev);
+/* BARs */
+void vfio_pci_bars_exit(VFIOPCIDevice *vdev);
 void vfio_sub_page_bar_update_mappings(VFIOPCIDevice *vdev);
-bool vfio_opt_rom_in_denylist(VFIOPCIDevice *vdev);
+
+/* Capabilities */
+bool vfio_pci_add_capabilities(VFIOPCIDevice *vdev, Error **errp);
+
+/* Quirks */
 bool vfio_config_quirk_setup(VFIOPCIDevice *vdev, Error **errp);
 void vfio_vga_quirk_setup(VFIOPCIDevice *vdev);
 void vfio_vga_quirk_exit(VFIOPCIDevice *vdev);
@@ -256,12 +261,14 @@ void vfio_rom_quirk_setup(VFIOPCIDevice *vdev);
 void vfio_quirk_reset(VFIOPCIDevice *vdev);
 VFIOQuirk *vfio_quirk_alloc(int nr_mem);
 
+/* IGD */
 void vfio_probe_igd_bar0_quirk(VFIOPCIDevice *vdev, int nr);
 bool vfio_probe_igd_config_quirk(VFIOPCIDevice *vdev, Error **errp);
 void vfio_igd_legacy_rom_quirk(VFIOPCIDevice *vdev);
 
 extern const PropertyInfo qdev_prop_nv_gpudirect_clique;
 
+/* Reset */
 struct vfio_pci_hot_reset_info;
 
 void vfio_pci_pre_reset(VFIOPCIDevice *vdev);
@@ -270,25 +277,30 @@ bool vfio_pci_host_match(PCIHostDeviceAddress *addr, const char *name);
 int vfio_pci_get_pci_hot_reset_info(VFIOPCIDevice *vdev,
                                     struct vfio_pci_hot_reset_info **info_p);
 
-bool vfio_populate_vga(VFIOPCIDevice *vdev, Error **errp);
-
+/* Display */
 void vfio_display_reset(VFIOPCIDevice *vdev);
 bool vfio_display_probe(VFIOPCIDevice *vdev, Error **errp);
 void vfio_display_exit(VFIOPCIDevice *vdev);
 void vfio_display_finalize(VFIOPCIDevice *vdev);
-
 extern const VMStateDescription vfio_display_vmstate;
 
-void vfio_pci_bars_exit(VFIOPCIDevice *vdev);
-bool vfio_pci_add_capabilities(VFIOPCIDevice *vdev, Error **errp);
-void vfio_pci_config_register_vga(VFIOPCIDevice *vdev);
-bool vfio_pci_config_setup(VFIOPCIDevice *vdev, Error **errp);
-bool vfio_pci_interrupt_setup(VFIOPCIDevice *vdev, Error **errp);
-void vfio_pci_intx_eoi(VFIODevice *vbasedev);
-void vfio_pci_put_device(VFIOPCIDevice *vdev);
-bool vfio_pci_populate_device(VFIOPCIDevice *vdev, Error **errp);
+/* Notifiers */
 void vfio_pci_register_err_notifier(VFIOPCIDevice *vdev);
 void vfio_pci_register_req_notifier(VFIOPCIDevice *vdev);
-void vfio_pci_teardown_msi(VFIOPCIDevice *vdev);
+
+/**
+ * vfio_pci_from_vfio_device: Transform from VFIODevice to
+ * VFIOPCIDevice
+ *
+ * This function checks if the given @vbasedev is a VFIO PCI device.
+ * If it is, it returns the containing VFIOPCIDevice.
+ *
+ * @vbasedev: The VFIODevice to transform
+ *
+ * Return: The VFIOPCIDevice on success, NULL on failure.
+ */
+VFIOPCIDevice *vfio_pci_from_vfio_device(VFIODevice *vbasedev);
+void vfio_pci_put_device(VFIOPCIDevice *vdev);
+bool vfio_pci_populate_device(VFIOPCIDevice *vdev, Error **errp);
 
 #endif /* HW_VFIO_VFIO_PCI_H */
