@@ -103,7 +103,9 @@ static void aspeed_soc_ast1040_init(Object *obj)
     Aspeed10x0SoCState *a = ASPEED10X0_SOC(obj);
     AspeedSoCState *s = ASPEED_SOC(obj);
     AspeedSoCClass *sc = ASPEED_SOC_GET_CLASS(s);
+    char typename[64];
     int i;
+
     object_initialize_child(obj, "armv7m", &a->armv7m, TYPE_ARMV7M);
 
     s->sysclk = qdev_init_clock_in(DEVICE(s), "sysclk", NULL, NULL, 0);
@@ -131,6 +133,13 @@ static void aspeed_soc_ast1040_init(Object *obj)
     for (i = 0; i < sc->wdts_num; i++) {
         object_initialize_child(obj, "wdt[*]", &s->wdt[i],
                                 "aspeed.wdt-ast2700");
+    }
+
+    object_initialize_child(obj, "fmc", &s->fmc, "aspeed.fmc-ast1040");
+
+    for (i = 0; i < sc->spis_num; i++) {
+        snprintf(typename, sizeof(typename), "aspeed.spi%d-ast1040", i);
+        object_initialize_child(obj, "spi[*]", &s->spi[i], typename);
     }
 }
 
@@ -268,6 +277,34 @@ static void aspeed_soc_ast1040_realize(DeviceState *dev_soc, Error **errp)
         aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->wdt[i]), 0, wdt_offset);
     }
 
+    /* FMC, The number of CS is set at the board level */
+    object_property_set_link(OBJECT(&s->fmc), "dram", OBJECT(&s->sram[1]),
+            &error_abort);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->fmc), errp)) {
+        return;
+    }
+    aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->fmc), 0,
+                    sc->memmap[ASPEED_DEV_FMC]);
+    aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->fmc), 1,
+                    ASPEED_SMC_GET_CLASS(&s->fmc)->flash_window_base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->fmc), 0,
+                       aspeed_soc_ast1040_get_irq(s, ASPEED_DEV_FMC));
+
+    /* SPI */
+    for (i = 0; i < sc->spis_num; i++) {
+        object_property_set_link(OBJECT(&s->spi[i]), "dram",
+                                 OBJECT(&s->sram[1]), &error_abort);
+        if (!sysbus_realize(SYS_BUS_DEVICE(&s->spi[i]), errp)) {
+            return;
+        }
+        aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->spi[i]), 0,
+                        sc->memmap[ASPEED_DEV_SPI0 + i]);
+        aspeed_mmio_map(s->memory, SYS_BUS_DEVICE(&s->spi[i]), 1,
+                        ASPEED_SMC_GET_CLASS(&s->spi[i])->flash_window_base);
+        sysbus_connect_irq(SYS_BUS_DEVICE(&s->spi[i]), 0,
+                           aspeed_soc_ast1040_get_irq(s, ASPEED_DEV_SPI0 + i));
+    }
+
     /* Unimplemented devices */
     create_unimplemented_devices(OBJECT(s), s->memory, sc->unimp_devs);
 }
@@ -292,6 +329,7 @@ static void aspeed_soc_ast1040_class_init(ObjectClass *klass, const void *data)
     sc->uarts_num       = 13;
     sc->sgpio_num       = 2;
     sc->wdts_num        = 8;
+    sc->spis_num        = 2;
     sc->uarts_base      = ASPEED_DEV_UART0;
     sc->irqmap          = aspeed_soc_ast1040_irqmap;
     sc->memmap          = aspeed_soc_ast1040_memmap;
