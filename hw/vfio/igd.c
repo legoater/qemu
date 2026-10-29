@@ -58,8 +58,9 @@
  * not be taken as an indication that all the devices are supported, or even
  * supportable, some of them don't even support VT-d.
  * See linux:include/drm/i915_pciids.h for IDs.
+ * Returns (version * 100 + release).
  */
-static int igd_gen(VFIOPCIDevice *vdev)
+static int igd_graphics_ver(VFIOPCIDevice *vdev)
 {
     /*
      * Device IDs for Broxton/Apollo Lake are 0x0a84, 0x1a84, 0x1a85, 0x5a84
@@ -67,38 +68,39 @@ static int igd_gen(VFIOPCIDevice *vdev)
      * Prefix 0x0a is taken by Haswell, this rule should be matched first.
      */
     if ((vdev->device_id & 0xffe) == 0xa84) {
-        return 9;
+        return 900;
     }
 
     switch (vdev->device_id & 0xff00) {
     case 0x0100:    /* SandyBridge, IvyBridge */
-        return 6;
+        return 600;
     case 0x0400:    /* Haswell */
     case 0x0a00:    /* Haswell */
     case 0x0c00:    /* Haswell */
     case 0x0d00:    /* Haswell */
     case 0x0f00:    /* Valleyview/Bay Trail */
-        return 7;
+        return 700;
     case 0x1600:    /* Broadwell */
     case 0x2200:    /* Cherryview */
-        return 8;
+        return 800;
     case 0x1900:    /* Skylake */
     case 0x3100:    /* Gemini Lake */
     case 0x5900:    /* Kaby Lake */
     case 0x3e00:    /* Coffee Lake */
     case 0x9B00:    /* Comet Lake */
-        return 9;
+        return 900;
     case 0x8A00:    /* Ice Lake */
     case 0x4500:    /* Elkhart Lake */
     case 0x4E00:    /* Jasper Lake */
-        return 11;
+        return 1100;
     case 0x9A00:    /* Tiger Lake */
     case 0x4C00:    /* Rocket Lake */
     case 0x4600:    /* Alder Lake */
     case 0xA700:    /* Raptor Lake */
+        return 1200;
     case 0x7D00:    /* Meteor Lake / Arrow Lake */
     case 0xB600:    /* Arrow Lake */
-        return 12;
+        return 1270;
     }
 
     /*
@@ -107,6 +109,12 @@ static int igd_gen(VFIOPCIDevice *vdev)
      * Return -1 for not applying any generation-specific quirks.
      */
     return -1;
+}
+
+static int igd_gen(VFIOPCIDevice *vdev)
+{
+    int ver = igd_graphics_ver(vdev);
+    return ver < 0 ? -1 : ver / 100;
 }
 
 #define IGD_ASLS 0xfc /* ASL Storage Register */
@@ -458,10 +466,6 @@ static bool vfio_pci_igd_override_gms(int gen, uint32_t gms, uint32_t *gmch)
 #define IGD_BDSM_MMIO_OFFSET        0x1080C0
 #define IGD_MTL_PCODE_STOLEN_ACCESS 0x138914
 
-#define IGD_IS_MTL_OR_ARL(vdev) \
-    ((((vdev)->device_id & 0xff00) == 0x7d00) || \
-     (((vdev)->device_id & 0xff00) == 0xb600))
-
 static uint64_t vfio_igd_pcode_stolen_access_read(void *opaque, hwaddr addr,
                                                   unsigned size)
 {
@@ -591,7 +595,7 @@ void vfio_probe_igd_bar0_quirk(VFIOPCIDevice *vdev, int nr)
      * Return 0 for PCODE stolen memory access detection (0x138914) so GOP
      * stays on the standard access path in the VM.
      */
-    if (IGD_IS_MTL_OR_ARL(vdev)) {
+    if (igd_graphics_ver(vdev) == 1270) {
         pcode_stolen_access_quirk = vfio_quirk_alloc(1);
         memory_region_init_io(pcode_stolen_access_quirk->mem, OBJECT(vdev),
                               &vfio_igd_pcode_stolen_access_quirk, vdev,
