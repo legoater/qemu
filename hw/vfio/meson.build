@@ -13,6 +13,7 @@ vfio_ss.add(when: 'CONFIG_PSERIES', if_true: files('spapr.c'))
 vfio_ss.add(when: ['CONFIG_KVM', 'CONFIG_PSERIES'], if_true: files('kvm-spapr.c'))
 vfio_ss.add(when: 'CONFIG_VFIO_PCI', if_true: files(
   'pci-caps.c',
+  'pci-irq.c',
   'pci-quirks.c',
   'pci-rom.c',
   'pci-vga.c',
