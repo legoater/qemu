@@ -226,6 +226,10 @@ void vfio_pci_intx_eoi(VFIODevice *vbasedev);
 void vfio_pci_teardown_msi(VFIOPCIDevice *vdev);
 
 /* Config space */
+int vfio_pci_config_space_read(VFIOPCIDevice *vdev, off_t offset,
+                               uint32_t size, void *data);
+int vfio_pci_config_space_write(VFIOPCIDevice *vdev, off_t offset,
+                                uint32_t size, void *data);
 uint32_t vfio_pci_read_config(PCIDevice *pdev, uint32_t addr, int len);
 void vfio_pci_write_config(PCIDevice *pdev,
                            uint32_t addr, uint32_t val, int len);
@@ -233,6 +237,7 @@ bool vfio_pci_config_setup(VFIOPCIDevice *vdev, Error **errp);
 void vfio_pci_config_register_vga(VFIOPCIDevice *vdev);
 
 /* ROM */
+void vfio_pci_size_rom(VFIOPCIDevice *vdev);
 bool vfio_opt_rom_in_denylist(VFIOPCIDevice *vdev);
 
 /* VGA */
