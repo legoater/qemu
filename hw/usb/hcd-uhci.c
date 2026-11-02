@@ -1213,6 +1213,7 @@ void usb_uhci_common_realize(PCIDevice *dev, Error **errp)
         }
     } else {
         usb_bus_new(&s->bus, sizeof(s->bus), &uhci_bus_ops, DEVICE(dev));
+        s->bus.auto_hub = s->auto_hub;
         for (i = 0; i < UHCI_PORTS; i++) {
             usb_register_port(&s->bus, &s->ports[i].port, s, i, &uhci_port_ops,
                               USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL);
@@ -1260,10 +1261,12 @@ static const Property uhci_properties_companion[] = {
     DEFINE_PROP_UINT32("firstport", UHCIState, firstport, 0),
     DEFINE_PROP_UINT32("bandwidth", UHCIState, frame_bandwidth, 1280),
     DEFINE_PROP_UINT32("maxframes", UHCIState, maxframes, 128),
+    DEFINE_PROP_BOOL("auto-hub", UHCIState, auto_hub, false),
 };
 static const Property uhci_properties_standalone[] = {
     DEFINE_PROP_UINT32("bandwidth", UHCIState, frame_bandwidth, 1280),
     DEFINE_PROP_UINT32("maxframes", UHCIState, maxframes, 128),
+    DEFINE_PROP_BOOL("auto-hub", UHCIState, auto_hub, false),
 };
 
 static void uhci_class_init(ObjectClass *klass, const void *data)

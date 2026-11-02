@@ -72,6 +72,7 @@ typedef struct UHCIState {
     char *masterbus;
     uint32_t firstport;
     uint32_t maxframes;
+    bool auto_hub;
 } UHCIState;
 
 #define TYPE_UHCI "pci-uhci-usb"
