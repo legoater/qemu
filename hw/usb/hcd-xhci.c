@@ -3420,6 +3420,7 @@ static void usb_xhci_init(XHCIState *xhci)
     xhci->numports = xhci->numports_2 + xhci->numports_3;
 
     usb_bus_new(&xhci->bus, sizeof(xhci->bus), &xhci_bus_ops, xhci->hostOpaque);
+    xhci->bus.auto_hub = xhci->auto_hub;
 
     for (i = 0; i < usbports; i++) {
         speedmask = 0;
@@ -3700,6 +3701,7 @@ static const Property xhci_properties[] = {
     DEFINE_PROP_UINT32("p3",    XHCIState, numports_3, 4),
     DEFINE_PROP_LINK("host",    XHCIState, hostOpaque, TYPE_DEVICE,
                      DeviceState *),
+    DEFINE_PROP_BOOL("auto-hub", XHCIState, auto_hub, false),
 };
 
 static void xhci_class_init(ObjectClass *klass, const void *data)

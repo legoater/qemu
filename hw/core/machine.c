@@ -44,6 +44,7 @@
 GlobalProperty hw_compat_11_1[] = {
     { "sysbus-ehci-usb", "x-migrate-fetch-addr-64bit", "off" },
     { "pci-ehci-usb", "x-migrate-fetch-addr-64bit", "off" },
+    { "base-xhci", "auto-hub", "on" },
     { "pcie-root-port", "speed", "16" },
     { "virtio-blk-device", "fua", "off" },
 };
