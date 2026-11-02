@@ -92,6 +92,7 @@ void usb_bus_new(USBBus *bus, size_t bus_size,
     qbus_set_bus_hotplug_handler(BUS(bus));
     bus->ops = ops;
     bus->busnr = next_usb_bus++;
+    bus->auto_hub = true;
     QTAILQ_INIT(&bus->free);
     QTAILQ_INIT(&bus->used);
     QTAILQ_INSERT_TAIL(&busses, bus, next);
@@ -413,7 +414,8 @@ void usb_claim_port(USBDevice *dev, Error **errp)
             return;
         }
     } else {
-        if (bus->nfree == 1 && strcmp(object_get_typename(OBJECT(dev)), "usb-hub") != 0) {
+        if (bus->nfree == 1 && bus->auto_hub &&
+            strcmp(object_get_typename(OBJECT(dev)), "usb-hub") != 0) {
             /* Create a new hub and chain it on */
             hub = USB_DEVICE(qdev_try_new("usb-hub"));
             if (hub) {
