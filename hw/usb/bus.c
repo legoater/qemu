@@ -92,7 +92,6 @@ void usb_bus_new(USBBus *bus, size_t bus_size,
     qbus_set_bus_hotplug_handler(BUS(bus));
     bus->ops = ops;
     bus->busnr = next_usb_bus++;
-    bus->auto_hub = true;
     QTAILQ_INIT(&bus->free);
     QTAILQ_INIT(&bus->used);
     QTAILQ_INSERT_TAIL(&busses, bus, next);
