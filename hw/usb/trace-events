@@ -429,3 +429,8 @@ usbredir_server_intr_stream_start(uint8_t ep, int status) "start_interrupt_recei
 usbredir_server_intr_stream_stop(uint8_t ep) "stop_interrupt_receiving ep 0x%02x"
 usbredir_server_intr_stream_park(unsigned ep_nr, int len) "parked IN packet ep %u len %d"
 usbredir_server_intr_stream_complete(unsigned ep_nr, int status, int actual) "ep %u status %d actual %d"
+usbredir_server_iso_stream_start(uint8_t ep, uint8_t pkts, uint8_t urbs, int status) "start_iso_stream ep 0x%02x pkts_per_urb %u no_urbs %u -> status %d"
+usbredir_server_iso_stream_stop(uint8_t ep) "stop_iso_stream ep 0x%02x"
+usbredir_server_iso_stream_packet(uint8_t ep, int len) "iso_packet ep 0x%02x len %d"
+usbredir_server_iso_stream_dropped(uint8_t ep, int len) "iso_packet dropped ep 0x%02x len %d"
+usbredir_server_iso_stream_complete(uint8_t ep, int status, int actual) "iso ep 0x%02x status %d actual %d"

@@ -99,10 +99,14 @@ OBJECT_DECLARE_SIMPLE_TYPE(USBRedirServer, USB_REDIR_SERVER)
 /* Buffer size for an interrupt IN endpoint before its descriptor is seen. */
 #define USBREDIR_SERVER_INTR_STREAM_DEFAULT_LEN 64
 
+/* The shortest time between two failure reports. */
+#define USBREDIR_SERVER_ISO_STREAM_STATUS_MS 1000
+
 #define USBREDIR_SERVER_CTRL 0
 #define USBREDIR_SERVER_BULK 1
 #define USBREDIR_SERVER_INTERRUPT 2
 #define USBREDIR_SERVER_INTR_STREAM 3
+#define USBREDIR_SERVER_ISO_STREAM 4
 
 /* Which message answers the host when a control transfer ends. */
 typedef enum {
@@ -128,6 +132,7 @@ typedef struct USBRedirServerPkt {
     struct usb_redir_interrupt_packet_header intr_hdr;
     struct usb_redir_control_packet_header ctrl_hdr;
     struct usb_redir_bulk_packet_header bulk_hdr;
+    struct usb_redir_iso_packet_header iso_hdr;
 
     /*
      * The IOV points here. IN data lands in it, OUT data is copied in.
@@ -168,6 +173,13 @@ typedef struct USBRedirServerEp {
     QEMUTimer *intr_stream_timer;
     QEMUBH *intr_stream_bh;
     bool intr_streaming;
+
+    /*
+     * Isochronous OUT streaming. The next failure report goes out at
+     * this time.
+     */
+    int64_t iso_status_next_ns;
+    bool iso_streaming;
 
     uint16_t max_packet;
     uint8_t interval;
@@ -725,6 +737,47 @@ static void usbredir_server_intr_stream_complete(USBRedirServer *s,
 }
 
 /*
+ * Isochronous transfers have no answer and no retry, so a good packet
+ * needs nothing back.
+ *
+ * A broken endpoint fails every frame, so we do not report every
+ * failure.
+ */
+static void usbredir_server_iso_stream_complete(USBRedirServer *s,
+                                                USBRedirServerPkt *rp)
+{
+    struct usb_redir_iso_stream_status_header st;
+    USBRedirServerEp *ep = &s->ep[rp->ep_idx];
+    USBPacket *p = &rp->pkt;
+    int64_t now_ns;
+
+    trace_usbredir_server_iso_stream_complete(rp->iso_hdr.endpoint, p->status,
+                                              p->actual_length);
+
+    switch (p->status) {
+    case USB_RET_SUCCESS:
+        return;
+    case USB_RET_STALL:
+        /* The stream ends here, so the host has to hear this one. */
+        ep->iso_streaming = false;
+        break;
+    default:
+        now_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+        if (now_ns < ep->iso_status_next_ns) {
+            return;
+        }
+        ep->iso_status_next_ns = now_ns +
+            (int64_t)USBREDIR_SERVER_ISO_STREAM_STATUS_MS * SCALE_MS;
+        break;
+    }
+
+    st.endpoint = rp->iso_hdr.endpoint;
+    st.status = usbredir_server_status(p->status);
+    usbredirparser_send_iso_stream_status(s->parser, 0, &st);
+    usbredirparser_do_write(s->parser);
+}
+
+/*
  * USB port ops
  */
 
@@ -806,6 +859,9 @@ static void usbredir_server_packet_complete(USBPort *port, USBPacket *p)
     case USBREDIR_SERVER_INTR_STREAM:
         usbredir_server_intr_stream_complete(s, rp);
         break;
+    case USBREDIR_SERVER_ISO_STREAM:
+        usbredir_server_iso_stream_complete(s, rp);
+        break;
     default:
         g_assert_not_reached();
     }
@@ -845,11 +901,12 @@ static USBRedirServerAsk usbredir_server_ask_device(USBRedirServer *s,
 
     /*
      * Keep the request and send it again when the device wakes the
-     * endpoint. A streamed request asks again by itself, with its own
-     * timer.
+     * endpoint. A streamed request does not wait here. The interrupt
+     * stream has a timer of its own, and isochronous never retries.
      */
     if (rp->pkt.status == USB_RET_NAK &&
-        rp->type != USBREDIR_SERVER_INTR_STREAM) {
+        rp->type != USBREDIR_SERVER_INTR_STREAM &&
+        rp->type != USBREDIR_SERVER_ISO_STREAM) {
         trace_usbredir_server_nak_park(rp->redir_id, rp->ep_idx);
         QTAILQ_INSERT_HEAD(&ep->waiting, rp, waiting_link);
         timer_mod(ep->retry, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
@@ -1513,6 +1570,93 @@ static void usbredir_server_stop_interrupt_receiving(void *priv, uint64_t id,
     usbredir_server_intr_stream_cancel(s, ep_nr);
 }
 
+static void usbredir_server_start_iso_stream(void *priv, uint64_t id,
+    struct usb_redir_start_iso_stream_header *hdr)
+{
+    int idx = usbredir_server_ep_index(hdr->endpoint);
+    struct usb_redir_iso_stream_status_header st = {
+        .endpoint = hdr->endpoint,
+    };
+    USBRedirServer *s = priv;
+
+    st.status = usbredir_server_ep_status(s, hdr->endpoint,
+                                          USB_ENDPOINT_XFER_ISOC);
+
+    /*
+     * Only an OUT stream works here. Only a stall makes the host
+     * close the stream.
+     */
+    if (hdr->endpoint & USB_DIR_IN) {
+        st.status = usb_redir_stall;
+    }
+
+    if (st.status == usb_redir_success) {
+        s->ep[idx].iso_streaming = true;
+        s->ep[idx].iso_status_next_ns = 0;
+    }
+
+    trace_usbredir_server_iso_stream_start(hdr->endpoint, hdr->pkts_per_urb,
+                                           hdr->no_urbs, st.status);
+    usbredirparser_send_iso_stream_status(s->parser, id, &st);
+    usbredirparser_do_write(s->parser);
+}
+
+static void usbredir_server_stop_iso_stream(void *priv, uint64_t id,
+    struct usb_redir_stop_iso_stream_header *hdr)
+{
+    int idx = usbredir_server_ep_index(hdr->endpoint);
+    int ep_nr = hdr->endpoint & 0x0f;
+    USBRedirServer *s = priv;
+
+    trace_usbredir_server_iso_stream_stop(hdr->endpoint);
+
+    /* Endpoint 0 is control, and an IN endpoint never streams. */
+    if (ep_nr == 0 || (hdr->endpoint & USB_DIR_IN)) {
+        return;
+    }
+
+    s->ep[idx].iso_streaming = false;
+}
+
+/* An isochronous packet has no id, and the host wants no answer. */
+static void usbredir_server_iso_packet(void *priv, uint64_t id,
+    struct usb_redir_iso_packet_header *hdr, uint8_t *data, int data_len)
+{
+    int idx = usbredir_server_ep_index(hdr->endpoint);
+    USBDevice *device = usbredir_server_device(priv);
+    int ep_nr = hdr->endpoint & 0x0f;
+    USBRedirServer *s = priv;
+    USBRedirServerPkt *rp;
+    USBEndpoint *ep;
+    uint8_t status;
+
+    status = usbredir_server_ep_status(s, hdr->endpoint,
+                                       USB_ENDPOINT_XFER_ISOC);
+
+    if (status != usb_redir_success || !s->ep[idx].iso_streaming) {
+        trace_usbredir_server_iso_stream_dropped(hdr->endpoint, data_len);
+        usbredirparser_free_packet_data(s->parser, data);
+        return;
+    }
+
+    ep = usb_ep_get(device, USB_TOKEN_OUT, ep_nr);
+    rp = usbredir_server_pkt_alloc(data_len, idx);
+    rp->type = USBREDIR_SERVER_ISO_STREAM;
+    rp->iso_hdr = *hdr;
+    rp->redir_id = 0;
+
+    usb_packet_setup(&rp->pkt, USB_TOKEN_OUT, ep, 0, s->next_id++,
+                     false, false);
+    if (data_len > 0) {
+        memcpy(rp->data, data, data_len);
+    }
+    usb_packet_addbuf(&rp->pkt, rp->data, data_len);
+
+    trace_usbredir_server_iso_stream_packet(hdr->endpoint, data_len);
+    usbredirparser_free_packet_data(s->parser, data);
+    usbredir_server_submit(s, rp);
+}
+
 static void usbredir_server_alloc_bulk_streams(void *priv, uint64_t id,
     struct usb_redir_alloc_bulk_streams_header *hdr)
 {
@@ -1542,7 +1686,8 @@ static void usbredir_server_cancel_data_packet(void *priv, uint64_t id)
          * A streamed request comes from us, not from the host.
          * The host has no id for it, so a cancel never matches it.
          */
-        if (rp->type == USBREDIR_SERVER_INTR_STREAM) {
+        if (rp->type == USBREDIR_SERVER_INTR_STREAM ||
+            rp->type == USBREDIR_SERVER_ISO_STREAM) {
             continue;
         }
 
@@ -1627,6 +1772,11 @@ static void usbredir_server_stop_transfers(USBRedirServer *s)
         timer_del(s->ep[i].intr_stream_timer);
     }
 
+    for (i = 1; i < USBREDIR_SERVER_EP_IN_BASE; i++) {
+        s->ep[i].iso_streaming = false;
+        s->ep[i].iso_status_next_ns = 0;
+    }
+
     /*
      * No "cancelled" response here. This runs on a bus reset, a detach or
      * a closed chardev, and the host has dropped its own queues already.
@@ -1676,6 +1826,9 @@ static void usbredir_server_create_parser(USBRedirServer *s)
         usbredir_server_start_interrupt_receiving;
     s->parser->stop_interrupt_receiving_func =
         usbredir_server_stop_interrupt_receiving;
+    s->parser->start_iso_stream_func = usbredir_server_start_iso_stream;
+    s->parser->stop_iso_stream_func = usbredir_server_stop_iso_stream;
+    s->parser->iso_packet_func = usbredir_server_iso_packet;
     s->parser->alloc_bulk_streams_func = usbredir_server_alloc_bulk_streams;
     s->parser->cancel_data_packet_func = usbredir_server_cancel_data_packet;
     s->parser->start_bulk_receiving_func =
