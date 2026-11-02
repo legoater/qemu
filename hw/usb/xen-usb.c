@@ -1023,6 +1023,7 @@ static void usbback_alloc(struct XenLegacyDevice *xendev)
 
     usb_bus_new(&usbif->bus, sizeof(usbif->bus), &xen_usb_bus_ops,
                 DEVICE(xendev));
+    usbif->bus.auto_hub = false;
     for (i = 0; i < USBBACK_MAXPORTS; i++) {
         p = &(usbif->ports[i].port);
         usb_register_port(&usbif->bus, p, usbif, i, &xen_usb_port_ops,
