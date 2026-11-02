@@ -61,6 +61,7 @@ static const Property ohci_sysbus_properties[] = {
     DEFINE_PROP_UINT32("num-ports", OHCISysBusState, num_ports, 3),
     DEFINE_PROP_UINT32("firstport", OHCISysBusState, firstport, 0),
     DEFINE_PROP_UINT64("dma-offset", OHCISysBusState, dma_offset, 0),
+    DEFINE_PROP_BOOL("auto-hub", OHCISysBusState, ohci.auto_hub, false),
 };
 
 static void ohci_sysbus_class_init(ObjectClass *klass, const void *data)

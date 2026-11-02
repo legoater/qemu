@@ -48,6 +48,8 @@ GlobalProperty hw_compat_11_1[] = {
     { "pci-ehci-usb", "auto-hub", "on" },
     { "base-xhci", "auto-hub", "on" },
     { "pci-uhci-usb", "auto-hub", "on" },
+    { "sysbus-ohci", "auto-hub", "on" },
+    { "pci-ohci", "auto-hub", "on" },
     { "pcie-root-port", "speed", "16" },
     { "virtio-blk-device", "fua", "off" },
 };

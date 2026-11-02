@@ -98,6 +98,7 @@ struct OHCIState {
 
     bool big_endian;
     bool consistency_check;
+    bool auto_hub;
 };
 
 #define TYPE_SYSBUS_OHCI "sysbus-ohci"
