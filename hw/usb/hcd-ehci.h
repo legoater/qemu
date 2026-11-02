@@ -269,6 +269,7 @@ struct EHCIState {
     bool migrate_fetch_addr_64bit;
     bool caps_64bit_addr;
     uint32_t ctrldssegment_default;
+    bool auto_hub;
 
     /*
      *  EHCI spec version 1.0 Section 2.3
@@ -336,7 +337,8 @@ struct EHCIState {
     DEFINE_PROP_BOOL("caps-64bit-addr", _state, \
                      ehci.caps_64bit_addr, false), \
     DEFINE_PROP_UINT32("ctrldssegment-default", _state, \
-                       ehci.ctrldssegment_default, 0)
+                       ehci.ctrldssegment_default, 0), \
+    DEFINE_PROP_BOOL("auto-hub", _state, ehci.auto_hub, false)
 
 extern const VMStateDescription vmstate_ehci;
 

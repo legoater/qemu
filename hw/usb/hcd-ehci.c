@@ -2636,6 +2636,7 @@ void usb_ehci_realize(EHCIState *s, DeviceState *dev, Error **errp)
 
     usb_bus_new(&s->bus, sizeof(s->bus), s->companion_enable ?
                 &ehci_bus_ops_companion : &ehci_bus_ops_standalone, dev);
+    s->bus.auto_hub = s->auto_hub;
     for (i = 0; i < s->portnr; i++) {
         usb_register_port(&s->bus, &s->ports[i], s, i, &ehci_port_ops,
                           USB_SPEED_MASK_HIGH);
