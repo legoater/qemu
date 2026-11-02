@@ -3,8 +3,11 @@ USB emulation
 
 QEMU can emulate a PCI UHCI, OHCI, EHCI or XHCI USB controller. You can
 plug virtual USB devices or real host USB devices (only works with
-certain host operating systems). QEMU will automatically create and
-connect virtual USB hubs as necessary to connect multiple USB devices.
+certain host operating systems).
+
+A machine type older than 11.2 plugs a virtual USB hub into the last
+free port, so that more devices fit. A newer one does not, and a
+device that finds no free port fails.
 
 USB controllers
 ~~~~~~~~~~~~~~~
