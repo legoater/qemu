@@ -628,6 +628,8 @@ static void npcm7xx_realize(DeviceState *dev, Error **errp)
     /* USB Host */
     object_property_set_bool(OBJECT(&s->ehci), "companion-enable", true,
                              &error_abort);
+    object_property_set_bool(OBJECT(&s->ehci), "auto-hub", true,
+                             &error_abort);
     sysbus_realize(SYS_BUS_DEVICE(&s->ehci), &error_abort);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->ehci), 0, NPCM7XX_EHCI_BA);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->ehci), 0,
