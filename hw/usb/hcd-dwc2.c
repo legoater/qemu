@@ -1354,6 +1354,7 @@ static void dwc2_realize(DeviceState *dev, Error **errp)
     address_space_init(&s->dma_as, s->dma_mr, "dwc2");
 
     usb_bus_new(&s->bus, sizeof(s->bus), &dwc2_bus_ops, dev);
+    s->bus.auto_hub = s->auto_hub;
     usb_register_port(&s->bus, &s->uport, s, 0, &dwc2_port_ops,
                       USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL |
                       (s->usb_version == 2 ? USB_SPEED_MASK_HIGH : 0));
@@ -1450,6 +1451,7 @@ const VMStateDescription vmstate_dwc2_state = {
 
 static const Property dwc2_usb_properties[] = {
     DEFINE_PROP_UINT32("usb_version", DWC2State, usb_version, 2),
+    DEFINE_PROP_BOOL("auto-hub", DWC2State, auto_hub, false),
 };
 
 static void dwc2_class_init(ObjectClass *klass, const void *data)

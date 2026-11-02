@@ -167,6 +167,7 @@ struct DWC2State {
     uint16_t fi;
     uint16_t next_chan;
     bool working;
+    bool auto_hub;
     USBPort uport;
     DWC2Packet packet[DWC2_NB_CHAN];                   /* one packet per chan */
     uint8_t usb_buf[DWC2_NB_CHAN][DWC2_MAX_XFER_SIZE]; /* one buffer per chan */

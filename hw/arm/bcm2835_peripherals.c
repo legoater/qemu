@@ -152,6 +152,7 @@ static void raspi_peripherals_base_init(Object *obj)
 
     /* DWC2 */
     object_initialize_child(obj, "dwc2", &s->dwc2, TYPE_DWC2_USB);
+    qdev_prop_set_bit(DEVICE(&s->dwc2), "auto-hub", true);
 
     /* CPRMAN clock manager */
     object_initialize_child(obj, "cprman", &s->cprman, TYPE_BCM2835_CPRMAN);
