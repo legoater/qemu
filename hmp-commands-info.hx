@@ -187,6 +187,19 @@ SRST
 ERST
 
     {
+        .name       = "cxl",
+        .args_type  = "",
+        .params     = "",
+        .help       = "show CXL topology and device info",
+        .cmd        = hmp_info_cxl,
+    },
+
+SRST
+  ``info cxl``
+    Show CXL topology: CFMWS windows, host bridges, switches and devices.
+ERST
+
+    {
         .name       = "tlb",
         .args_type  = "",
         .params     = "",

@@ -79,6 +79,7 @@ void hmp_info_vnc(MonitorHMP *hmp, const QDict *qdict);
 void hmp_info_spice(MonitorHMP *hmp, const QDict *qdict);
 void hmp_info_balloon(MonitorHMP *hmp, const QDict *qdict);
 void hmp_info_pci(MonitorHMP *hmp, const QDict *qdict);
+void hmp_info_cxl(MonitorHMP *hmp, const QDict *qdict);
 void hmp_info_tpm(MonitorHMP *hmp, const QDict *qdict);
 void hmp_info_iothreads(MonitorHMP *hmp, const QDict *qdict);
 void hmp_quit(MonitorHMP *hmp, const QDict *qdict);
