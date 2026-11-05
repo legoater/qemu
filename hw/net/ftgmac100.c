@@ -1109,24 +1109,44 @@ static ssize_t ftgmac100_receive(NetClientState *nc, const uint8_t *buf,
             bd.des1 = lduw_be_p(buf + 14) | FTGMAC100_RXDES1_VLANTAG_AVAIL;
 
             if (s->maccr & FTGMAC100_MACCR_RM_VLAN) {
-                dma_memory_write(&address_space_memory, buf_addr, buf, 12,
-                                 MEMTXATTRS_UNSPECIFIED);
-                dma_memory_write(&address_space_memory, buf_addr + 12,
+                if (dma_memory_write(&address_space_memory, buf_addr, buf, 12,
+                                     MEMTXATTRS_UNSPECIFIED)) {
+                    qemu_log_mask(LOG_GUEST_ERROR,
+                                  "%s: failed to write descriptor @ 0x%"
+                                  HWADDR_PRIx "\n", __func__, buf_addr);
+                }
+                if (dma_memory_write(&address_space_memory, buf_addr + 12,
                                  buf + 16, buf_len - 16,
-                                 MEMTXATTRS_UNSPECIFIED);
+                                     MEMTXATTRS_UNSPECIFIED)) {
+                    qemu_log_mask(LOG_GUEST_ERROR,
+                                  "%s: failed to write descriptor @ 0x%"
+                                  HWADDR_PRIx "\n", __func__, buf_addr  + 12);
+                };
             } else {
-                dma_memory_write(&address_space_memory, buf_addr, buf,
-                                 buf_len, MEMTXATTRS_UNSPECIFIED);
+                if (dma_memory_write(&address_space_memory, buf_addr, buf,
+                                 buf_len, MEMTXATTRS_UNSPECIFIED)) {
+                    qemu_log_mask(LOG_GUEST_ERROR,
+                                  "%s: failed to write descriptor @ 0x%"
+                                  HWADDR_PRIx "\n", __func__, buf_addr);
+                }
             }
         } else {
             bd.des1 = 0;
-            dma_memory_write(&address_space_memory, buf_addr, buf, buf_len,
-                             MEMTXATTRS_UNSPECIFIED);
+            if (dma_memory_write(&address_space_memory, buf_addr, buf, buf_len,
+                                 MEMTXATTRS_UNSPECIFIED)) {
+                qemu_log_mask(LOG_GUEST_ERROR,
+                              "%s: failed to write descriptor @ 0x%"
+                              HWADDR_PRIx "\n", __func__, buf_addr);
+            }
         }
         buf += buf_len;
         if (size < 4) {
-            dma_memory_write(&address_space_memory, buf_addr + buf_len,
-                             crc_ptr, 4 - size, MEMTXATTRS_UNSPECIFIED);
+            if (dma_memory_write(&address_space_memory, buf_addr + buf_len,
+                                 crc_ptr, 4 - size, MEMTXATTRS_UNSPECIFIED)) {
+                qemu_log_mask(LOG_GUEST_ERROR,
+                              "%s: failed to write crc @ 0x%"
+                              HWADDR_PRIx "\n", __func__, buf_addr + buf_len);
+            }
             crc_ptr += 4 - size;
         }
 
