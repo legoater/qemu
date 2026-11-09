@@ -3658,7 +3658,9 @@ static void vfio_pci_realize(PCIDevice *pdev, Error **errp)
     }
 
     for (i = 0; i < PCI_ROM_SLOT; i++) {
-        vfio_bar_quirk_setup(vdev, i);
+        if (vdev->bars[i].size) {
+            vfio_bar_quirk_setup(vdev, i);
+        }
     }
 
     if (!vfio_pci_interrupt_setup(vdev, errp)) {
