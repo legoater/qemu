@@ -30,6 +30,7 @@
 #include "qemu/units.h"
 #include "monitor/monitor.h"
 #include "system/ramblock.h"
+#include "pci.h"
 #include "vfio-helpers.h"
 
 /*
@@ -539,7 +540,7 @@ void vfio_region_finalize(VFIORegion *region)
     region->nr = 0;
 }
 
-void vfio_region_mmaps_set_enabled(VFIORegion *region, bool enabled)
+static void vfio_region_mmaps_set_enabled(VFIORegion *region, bool enabled)
 {
     int i;
 
@@ -555,4 +556,13 @@ void vfio_region_mmaps_set_enabled(VFIORegion *region, bool enabled)
 
     trace_vfio_region_mmaps_set_enabled(memory_region_name(region->mem),
                                         enabled);
+}
+
+void vfio_region_set_enabled(VFIOPCIDevice *vdev, bool enabled)
+{
+    int i;
+
+    for (i = 0; i < PCI_ROM_SLOT; i++) {
+        vfio_region_mmaps_set_enabled(&vdev->bars[i].region, enabled);
+    }
 }
